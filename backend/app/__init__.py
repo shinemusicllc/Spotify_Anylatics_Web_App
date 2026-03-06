@@ -1,0 +1,1 @@
+"""SpotiCheck Backend — FastAPI Application."""

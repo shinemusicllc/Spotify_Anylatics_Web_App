@@ -1,0 +1,33 @@
+"""Crawl request/response schemas."""
+
+from pydantic import BaseModel
+
+
+class CrawlRequest(BaseModel):
+    """Single crawl request."""
+
+    url: str
+    group: str | None = None
+
+
+class CrawlBatchRequest(BaseModel):
+    """Batch crawl request."""
+
+    urls: list[str]
+    group: str | None = None
+
+
+class CrawlResponse(BaseModel):
+    """Crawl job created response."""
+
+    job_id: str
+    status: str = "pending"
+    message: str = "Crawl job created"
+
+
+class CrawlBatchResponse(BaseModel):
+    """Batch crawl response."""
+
+    job_ids: list[str]
+    count: int
+    message: str = "Batch crawl jobs created"

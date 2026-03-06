@@ -1,0 +1,969 @@
+﻿<!DOCTYPE html>
+<html class="dark" lang="en">
+
+<head>
+    <meta charset="utf-8">
+    <meta content="width=device-width, initial-scale=1.0" name="viewport">
+    <title>SpotiCheck Link Management Dashboard</title>
+    <script src="https://cdn.tailwindcss.com?plugins=forms,container-queries"></script>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&amp;family=Inter+Tight:wght@600;700;800&amp;family=Material+Symbols+Rounded:opsz,wght,FILL,GRAD@20..48,500,0..1,0&amp;display=swap" rel="stylesheet">
+    <script id="tailwind-config">
+        tailwind.config = {
+            darkMode: "class",
+            theme: {
+                extend: {
+                    colors: {
+                        "primary": "#1db954",
+                        "background-light": "#f6f8f7",
+                        "background-dark": "#121212",
+                        "sidebar-dark": "#0A0A0A",
+                        "panel-dark": "#181818",
+                        "row-hover": "#282828",
+                        "secondary-text": "#B3B3B3"
+                    },
+                    fontFamily: {
+                        "display": ["Inter", "Inter Tight", "system-ui", "sans-serif"]
+                    },
+                    borderRadius: {
+                        "DEFAULT": "0.25rem",
+                        "lg": "0.5rem",
+                        "xl": "0.75rem",
+                        "full": "9999px"
+                    },
+                },
+            },
+        }
+    </script>
+    <style>
+        body {
+            font-family: 'Inter', 'Inter Tight', system-ui, sans-serif;
+            -webkit-font-smoothing: antialiased;
+            text-rendering: optimizeLegibility;
+            background:
+                radial-gradient(980px 520px at 52% -15%, rgba(255, 246, 228, 0.065), transparent 62%),
+                #0b0f14;
+        }
+
+        h1, h2, h3 {
+            font-family: 'Inter Tight', 'Inter', system-ui, sans-serif;
+            letter-spacing: -0.02em;
+        }
+
+        .material-icons-round,
+        .material-symbols-outlined {
+            font-family: 'Material Symbols Rounded' !important;
+            font-weight: 500;
+            font-style: normal;
+            font-size: 20px;
+            line-height: 1;
+            display: inline-block;
+            white-space: nowrap;
+            direction: ltr;
+            letter-spacing: normal;
+            text-transform: none;
+            -webkit-font-feature-settings: 'liga';
+            font-feature-settings: 'liga';
+            -webkit-font-smoothing: antialiased;
+            font-variation-settings: 'FILL' 0, 'wght' 500, 'GRAD' 0, 'opsz' 24;
+        }
+        ::-webkit-scrollbar { width: 8px; }
+        ::-webkit-scrollbar-track { background: transparent; }
+        ::-webkit-scrollbar-thumb { background: #3e3e3e; border-radius: 4px; }
+        ::-webkit-scrollbar-thumb:hover { background: #555; }
+        
+        /* Sidebar collapse */
+        #sidebar { transition: width 300ms ease; overflow: hidden; }
+        #sidebar.collapsed { width: 64px; }
+        #sidebar.collapsed .sidebar-label { display: none; }
+        #sidebar.collapsed .sidebar-logo-text { display: none; }
+        #sidebar.collapsed .sidebar-user-info { display: none; }
+        #sidebar.collapsed .sidebar-header { justify-content: center; padding-left: 0; padding-right: 0; }
+        #sidebar.collapsed nav { padding-left: 0; padding-right: 0; }
+        #sidebar.collapsed nav a { justify-content: center; padding-left: 0; padding-right: 0; gap: 0; }
+        #sidebar.collapsed .sidebar-profile { justify-content: center; padding-left: 0; padding-right: 0; }
+        #sidebar.collapsed .sidebar-profile-wrap { justify-content: center; padding: 8px 0; }
+
+        /* Custom Grid Layout Strategy */
+        :root {
+            --left-col: 5fr;                  /* Asset details (Matches reference 5/12) */
+            --right-col: 7fr;                 /* Meta Container (Matches reference 7/12) */
+            --meta-gap: 18px;                 
+            --row-px: 2rem;                   
+            --owner-col: minmax(190px, 1.35fr);
+            --middle-col-min: 112px;
+            --checked-col: 90px;
+            --surface-0: #0e1116;
+            --surface-1: #10151d;
+            --surface-2: #131a24;
+            --surface-3: #1a2433;
+            --stroke-soft: rgba(255, 255, 255, 0.06);
+            --stroke-mid: rgba(255, 255, 255, 0.1);
+            --text-main: #f2f5fb;
+            --text-muted: #a8b1c0;
+        }
+
+        /* Parent Grid */
+        .custom-grid-row {
+            display: grid;
+            grid-template-columns: var(--left-col) var(--right-col);
+            gap: 16px;
+            align-items: center;
+        }
+
+        /* Nested Grid: 
+           Owner (2fr) | Stats (1) | Monthly (1) | Total (1) | Status (1) | Checked (1)
+           Total = 7fr, matching the parent's Right Col weight.
+        */
+        .meta-grid {
+            display: grid;
+            grid-template-columns: var(--owner-col) repeat(4, minmax(var(--middle-col-min), 1fr)) var(--checked-col);
+            column-gap: var(--meta-gap);
+            align-items: center;
+        }
+
+        /* Helpers */
+        .meta-cell {
+            justify-self: start;
+            text-align: left;
+            width: 100%;
+            overflow: hidden;
+            text-overflow: ellipsis;
+            white-space: nowrap;
+        }
+        
+        .meta-cell.text-right {
+            justify-self: end;
+            text-align: right;
+        }
+
+        .app-sidebar {
+            background: #0a0e13;
+            border-color: var(--stroke-soft);
+        }
+
+        .app-sidebar nav .material-icons-round {
+            font-size: 21px;
+            font-variation-settings: 'FILL' 0, 'wght' 560, 'GRAD' 0, 'opsz' 24;
+        }
+
+        #sidebar.collapsed nav .material-icons-round {
+            font-size: 22px;
+        }
+
+        .group-panel {
+            background: #111315;
+            border-color: var(--stroke-soft);
+        }
+
+        .content-panel {
+            background: #111315;
+        }
+
+        .topbar {
+            position: sticky;
+            top: 0;
+            z-index: 40;
+            border-bottom: none !important;
+            background: #111315;
+            box-shadow: inset 0 -1px 0 rgba(255, 255, 255, 0.1);
+        }
+
+        .topbar h1 {
+            font-size: 2rem;
+            letter-spacing: -0.02em;
+            font-weight: 800;
+            color: var(--text-main);
+        }
+
+        .search-pill {
+            background: rgba(255, 255, 255, 0.055) !important;
+            border: 1px solid rgba(255, 255, 255, 0.16);
+            box-shadow: none;
+        }
+
+        .search-pill:focus {
+            border-color: rgba(255, 255, 255, 0.38);
+            background: rgba(255, 255, 255, 0.08) !important;
+        }
+
+        .btn-ghost {
+            background: transparent;
+            border-color: rgba(255, 255, 255, 0.24) !important;
+            color: #f2f4f7;
+        }
+
+        .btn-ghost:hover {
+            background: rgba(255, 255, 255, 0.08);
+            border-color: rgba(255, 255, 255, 0.46) !important;
+        }
+
+        .btn-accent {
+            background: #ffffff !important;
+            color: #0b0f14 !important;
+            border: 1px solid rgba(255, 255, 255, 0.96);
+            box-shadow: none;
+        }
+
+        .btn-accent:hover {
+            background: #f1f4f8 !important;
+            color: #090d12 !important;
+        }
+
+        .btn-accent .material-icons-round {
+            color: #0b0f14;
+        }
+
+        /* Keep header/rows aligned even when vertical scrollbar appears */
+        .list-scroll {
+            scrollbar-gutter: stable;
+        }
+
+        .list-wrap {
+            position: relative;
+        }
+
+        .list-shell {
+            background: #111315;
+            border: none;
+            overflow: visible;
+        }
+
+        .playlist-hero {
+            position: relative;
+            overflow: hidden;
+            min-height: 230px;
+            display: flex;
+            align-items: flex-end;
+            border: none;
+            border-radius: 0 !important;
+            background: #141414;
+            box-shadow: none;
+        }
+
+        .playlist-hero::before {
+            content: "";
+            position: absolute;
+            inset: 0;
+            background-image: var(--hero-image, url('https://picsum.photos/seed/spotify-warm-cover/1800/900'));
+            background-size: cover;
+            background-position: center center;
+            filter: grayscale(26%) saturate(50%) brightness(94%) sepia(14%) hue-rotate(-8deg);
+            transform: scale(1.03);
+        }
+
+        .playlist-hero::after {
+            content: "";
+            position: absolute;
+            inset: 0;
+            background:
+                linear-gradient(180deg, rgba(30, 27, 24, 0.12) 0%, rgba(24, 21, 19, 0.36) 45%, rgba(16, 15, 14, 0.82) 100%),
+                radial-gradient(1200px 360px at 30% -20%, rgba(255, 248, 235, 0.22), transparent 65%);
+            pointer-events: none;
+        }
+
+        .playlist-hero > * {
+            position: relative;
+            z-index: 2;
+            width: 100%;
+        }
+
+        .playlist-hero h2 {
+            font-size: 52px;
+            line-height: 0.98;
+            font-weight: 800;
+            letter-spacing: -0.03em;
+            color: #f7f9fb;
+        }
+
+        .hero-kpi {
+            display: inline-flex;
+            align-items: center;
+            gap: 6px;
+            padding: 7px 10px;
+            border-radius: 8px;
+            border: 1px solid rgba(255, 255, 255, 0.2);
+            background: rgba(16, 15, 14, 0.45);
+            color: var(--text-muted);
+        }
+
+        .hero-kpi b {
+            color: #ffffff;
+            font-size: 14px;
+            letter-spacing: 0.02em;
+        }
+
+        .hero-kpi em {
+            font-style: normal;
+            text-transform: uppercase;
+            font-size: 10px;
+            letter-spacing: 0.12em;
+        }
+
+        .list-head {
+            position: sticky !important;
+            top: 0;
+            z-index: 60;
+            border-top: none;
+            border-bottom: 1px solid rgba(255, 255, 255, 0.18);
+            background: #111315;
+            backdrop-filter: none;
+        }
+
+        .list-head.is-stuck {
+            border-bottom-color: transparent;
+        }
+
+        .list-columns-head {
+            letter-spacing: 0.03em;
+            font-size: 12px;
+            color: #9ea7b5;
+        }
+
+        .list-head .meta-grid > .meta-cell {
+            padding-left: 16px;
+            min-height: 16px;
+        }
+
+        .list-head .meta-grid > .meta-cell {
+            border-left: 1px solid rgba(255, 255, 255, 0.2);
+        }
+
+        .list-head .meta-grid > .meta-cell.text-right {
+            border-left: 1px solid rgba(255, 255, 255, 0.2);
+            padding-right: 0;
+        }
+
+        .list-grid {
+            gap: 0 !important;
+            border-top: none;
+        }
+
+        .list-grid > .custom-grid-row {
+            border: none !important;
+            border-bottom: none !important;
+            border-radius: 0 !important;
+            background: transparent !important;
+            box-shadow: none;
+            outline: 1px solid transparent;
+            outline-offset: -1px;
+            position: relative;
+            transition: background 140ms ease, outline-color 140ms ease !important;
+            opacity: 1;
+            animation: none;
+        }
+
+        .list-grid > .custom-grid-row:hover {
+            background: rgba(255, 255, 255, 0.05) !important;
+            border-radius: 0.5rem !important;
+            outline-color: rgba(255, 255, 255, 0.14);
+            box-shadow: none;
+            transform: none;
+        }
+
+        .list-grid > .custom-grid-row > div:first-child img {
+            border-radius: 4px !important;
+            box-shadow: none !important;
+        }
+
+        .list-grid .meta-grid > :nth-child(3),
+        .list-grid .meta-grid > :nth-child(4),
+        .list-grid .meta-grid > :nth-child(6) {
+            font-variant-numeric: tabular-nums;
+            letter-spacing: 0.015em;
+        }
+
+        .content-panel footer {
+            border-top: none !important;
+            background: #111315;
+        }
+
+        @media (max-width: 1280px) {
+            .playlist-hero h2 {
+                font-size: 38px;
+            }
+            .hero-kpi {
+                padding: 7px 10px;
+            }
+        }
+    </style>
+</head>
+
+<body class="bg-background-dark text-white font-display flex h-screen overflow-hidden">
+    <!-- Zone 1: Collapsible Sidebar -->
+    <aside id="sidebar" class="app-sidebar w-64 flex-shrink-0 bg-sidebar-dark flex flex-col border-r border-white/5 h-full">
+        <div class="p-6 flex items-center gap-3 cursor-pointer sidebar-header" onclick="document.getElementById('sidebar').classList.toggle('collapsed')">
+            <svg width="34" height="34" viewBox="0 0 34 34" fill="none" xmlns="http://www.w3.org/2000/svg" class="flex-shrink-0">
+                <circle cx="17" cy="17" r="17" fill="#1DB954"></circle>
+                <rect x="8" y="13" width="2.8" height="8" rx="1.4" fill="#000"></rect>
+                <rect x="12.5" y="9" width="2.8" height="16" rx="1.4" fill="#000"></rect>
+                <rect x="17" y="6" width="2.8" height="22" rx="1.4" fill="#000"></rect>
+                <rect x="21.5" y="11" width="2.8" height="12" rx="1.4" fill="#000"></rect>
+                <rect x="26" y="15" width="2.8" height="4" rx="1.4" fill="#000"></rect>
+            </svg>
+            <span class="font-bold text-xl tracking-tight sidebar-logo-text">SpotiCheck</span>
+        </div>
+        <nav class="flex-1 px-3 space-y-1">
+            <a class="flex items-center gap-4 px-3 py-3 rounded-lg text-secondary-text hover:text-white transition-colors group" href="#">
+                <span class="material-icons-round">dashboard</span>
+                <span class="font-medium sidebar-label">Dashboard</span>
+            </a>
+            <a class="flex items-center gap-4 px-3 py-3 rounded-lg text-white bg-white/10 group" href="#">
+                <span class="material-icons-round text-primary">link</span>
+                <span class="font-medium sidebar-label">Link Checker</span>
+            </a>
+            <a class="flex items-center gap-4 px-3 py-3 rounded-lg text-secondary-text hover:text-white transition-colors group" href="#">
+                <span class="material-icons-round">analytics</span>
+                <span class="font-medium sidebar-label">Analytics</span>
+            </a>
+            <a class="flex items-center gap-4 px-3 py-3 rounded-lg text-secondary-text hover:text-white transition-colors group" href="#">
+                <span class="material-icons-round">settings</span>
+                <span class="font-medium sidebar-label">Settings</span>
+            </a>
+        </nav>
+        <div class="p-4 mt-auto border-t border-white/5 sidebar-profile">
+            <div class="flex items-center gap-3 px-2 py-2 sidebar-profile-wrap">
+                <img alt="Profile" class="w-8 h-8 rounded-full border border-white/10 flex-shrink-0" src="https://randomuser.me/api/portraits/men/32.jpg">
+                <div class="sidebar-user-info overflow-hidden">
+                    <p class="text-sm font-semibold truncate">Alex Rivera</p>
+                    <p class="text-xs text-secondary-text truncate">Premium Admin</p>
+                </div>
+            </div>
+        </div>
+    </aside>
+    <!-- Zone 2: Group Panel -->
+    <section class="group-panel w-[280px] flex-shrink-0 bg-background-dark border-r border-white/5 hidden md:flex flex-col h-full">
+        <div class="p-5 pb-3 border-b border-white/5 space-y-3">
+            <h2 class="text-[11px] font-bold uppercase tracking-[0.15em] text-white">Groups</h2>
+            <div class="relative">
+                <span class="material-icons-round absolute left-2.5 top-1/2 -translate-y-1/2 text-secondary-text text-[18px]">search</span>
+                <input type="text" placeholder="Search groups..." class="w-full bg-white/5 border border-white/10 rounded-lg pl-9 pr-3 py-2 text-sm text-white placeholder-secondary-text focus:outline-none focus:border-primary/50 focus:bg-white/[0.08] transition-all">
+            </div>
+        </div>
+        <div class="flex-1 overflow-y-auto p-3 space-y-1">
+            <button class="w-full flex items-center justify-between px-3 py-3 rounded-lg bg-primary/10 text-white group">
+                <div class="flex items-center gap-3">
+                    <span class="material-icons-round text-primary text-sm">folder</span>
+                    <span class="text-[14px] font-semibold">Jazz Playlists</span>
+                </div>
+                <span class="text-xs font-bold bg-primary/20 text-primary px-2 py-0.5 rounded-full">24</span>
+            </button>
+            <button class="w-full flex items-center justify-between px-3 py-3 rounded-lg text-secondary-text hover:bg-white/5 hover:text-white transition-colors">
+                <div class="flex items-center gap-3">
+                    <span class="material-icons-round text-sm text-secondary-text">folder</span>
+                    <span class="text-[14px] font-semibold">Rock Classics</span>
+                </div>
+                <span class="text-xs font-bold bg-white/10 px-2 py-0.5 rounded-full">18</span>
+            </button>
+            <button class="w-full flex items-center justify-between px-3 py-3 rounded-lg text-secondary-text hover:bg-white/5 hover:text-white transition-colors">
+                <div class="flex items-center gap-3">
+                    <span class="material-icons-round text-sm text-secondary-text">folder</span>
+                    <span class="text-[14px] font-semibold">Top 50 Global</span>
+                </div>
+                <span class="text-xs font-bold bg-white/10 px-2 py-0.5 rounded-full">50</span>
+            </button>
+            <button class="w-full flex items-center justify-between px-3 py-3 rounded-lg text-secondary-text hover:bg-white/5 hover:text-white transition-colors">
+                <div class="flex items-center gap-3">
+                    <span class="material-icons-round text-sm text-secondary-text">folder</span>
+                    <span class="text-[14px] font-semibold">Indie Arrivals</span>
+                </div>
+                <span class="text-xs font-bold bg-white/10 px-2 py-0.5 rounded-full">12</span>
+            </button>
+            <button class="w-full flex items-center gap-3 px-3 py-3 rounded-lg text-secondary-text hover:text-primary transition-colors mt-4">
+                <span class="material-icons-round text-sm">add</span>
+                <span class="font-medium">New Group</span>
+            </button>
+        </div>
+    </section>
+    <!-- Zone 3: List Panel -->
+    <main class="content-panel flex-1 flex flex-col h-full bg-background-dark overflow-hidden">
+        <!-- Top Bar -->
+        <header class="topbar h-20 flex-shrink-0 flex items-center justify-between px-8 border-b border-white/5">
+            <div class="flex flex-col">
+                <nav class="flex items-center gap-2 text-xs text-secondary-text mb-1">
+                    <span>Link Checker</span>
+                    <span class="material-icons-round text-xs">chevron_right</span>
+                    <span class="text-white">Jazz Playlists</span>
+                </nav>
+                <h1 class="text-2xl font-bold">Jazz Playlists</h1>
+            </div>
+            <div class="flex items-center gap-4">
+                <div class="relative group">
+                    <span class="material-icons-round absolute left-3 top-1/2 -translate-y-1/2 text-secondary-text text-xl">search</span>
+                    <input class="search-pill bg-[#242424] border-none rounded-full pl-10 pr-4 py-2 text-sm w-64 focus:ring-1 focus:ring-primary placeholder:text-secondary-text transition-all" placeholder="Search links..." type="text">
+                </div>
+                <button class="btn-ghost flex items-center gap-2 px-4 py-2 rounded-full border border-white/20 hover:border-white transition-colors text-sm font-bold">
+                    <span class="material-icons-round text-lg">refresh</span>
+                    Refresh All
+                </button>
+                <button class="btn-accent flex items-center gap-2 px-6 py-2 rounded-full bg-primary hover:bg-primary/90 text-white transition-all text-sm font-bold">
+                    <span class="material-icons-round text-lg">add</span>
+                    Add Link
+                </button>
+            </div>
+        </header>
+
+        <!-- Main Area: Header + Content List -->
+        <div class="list-wrap flex-1 overflow-y-auto px-0 pb-0 list-scroll">
+            <div class="list-shell">
+            <section class="playlist-hero px-5 py-8 mb-0">
+                <div class="flex items-end justify-between gap-6">
+                    <div>
+                        <p class="text-[11px] uppercase tracking-[0.16em] text-secondary-text font-bold">Live Monitoring</p>
+                        <h2 class="text-[30px] leading-none font-bold mt-2">Jazz Playlists Health</h2>
+                        <p class="text-sm text-secondary-text mt-2">Track monthly and total plays in one focused control view.</p>
+                    </div>
+                    <div class="flex items-center gap-4 text-xs">
+                        <span class="hero-kpi"><b>240</b><em>Links</em></span>
+                        <span class="hero-kpi"><b>218</b><em>Active</em></span>
+                        <span class="hero-kpi"><b>12</b><em>Errors</em></span>
+                    </div>
+                </div>
+            </section>
+            <div class="list-head pt-0 pb-0">
+                <div class="list-columns-head custom-grid-row px-4 py-3 text-[13px] font-medium">
+                    <div class="meta-cell">Asset Details</div>
+                    <div class="meta-grid w-full">
+                        <div class="meta-cell">Owner</div>
+                        <div class="meta-cell">Stats</div>
+                        <div class="meta-cell">Monthly Plays</div>
+                        <div class="meta-cell">Total Plays</div>
+                        <div class="meta-cell">Status</div>
+                        <div class="meta-cell text-right">Checked</div>
+                    </div>
+                </div>
+            </div>
+            <div class="list-grid grid grid-cols-1 gap-2">
+                
+                <!-- Row 1: Playlist - Active -->
+                <div class="custom-grid-row px-4 py-3 bg-white/5 rounded-lg border border-transparent hover:bg-row-hover hover:border-white/10 transition-all group">
+                    <!-- Left: Asset Details -->
+                    <div class="flex items-center gap-4">
+                        <img alt="Cover" class="w-[70px] h-[70px] rounded-lg object-cover shadow-lg" src="https://picsum.photos/seed/jazz1/128/128">
+                        <div>
+                            <span class="text-[10px] font-bold bg-primary/20 text-primary px-1.5 py-0.5 rounded uppercase mb-1 inline-block">Playlist</span>
+                            <h3 class="font-bold text-[15px] leading-snug">Whiskey Blues Best Of Slow Blues &amp; Smoky Bar Vibes</h3>
+                            <p class="text-[11px] text-secondary-text font-mono truncate mt-0.5">spotify:playlist:37i9dQZF1DX8U...</p>
+                        </div>
+                    </div>
+                    <!-- Right: Metadata (Weighted) -->
+                    <div class="meta-grid w-full">
+                        <div class="flex items-center gap-2 meta-cell">
+                            <img alt="Owner" class="w-6 h-6 rounded-full" src="https://randomuser.me/api/portraits/women/44.jpg">
+                            <div>
+                                <div class="text-sm font-medium leading-tight truncate">Sarah Melodic</div>
+                                <div class="text-[11px] text-secondary-text leading-tight">10/02 11:22</div>
+                            </div>
+                        </div>
+                        <div class="flex items-center gap-3 text-secondary-text meta-cell">
+                            <div class="flex items-center gap-1">
+                                <span class="material-icons-round text-sm">favorite_border</span>
+                                <span class="text-xs">12.5k</span>
+                            </div>
+                            <div class="flex items-center gap-1">
+                                <span class="material-icons-round text-sm">music_note</span>
+                                <span class="text-xs">150</span>
+                            </div>
+                        </div>
+                        <div class="text-sm text-secondary-text meta-cell">1,158,201</div>
+                        <div class="text-sm text-secondary-text meta-cell">15,482,900</div>
+                        <div class="flex items-center gap-2 meta-cell">
+                            <span class="w-2 h-2 rounded-full bg-primary shadow-[0_0_8px_rgba(29,185,84,0.6)]"></span>
+                            <span class="text-sm font-medium text-primary">Active</span>
+                        </div>
+                        <div class="text-xs text-secondary-text meta-cell text-right">2m ago</div>
+                    </div>
+                </div>
+
+                <!-- Row 2: Playlist - Error 404 -->
+                <div class="custom-grid-row px-4 py-3 bg-white/5 rounded-lg border border-transparent hover:bg-row-hover hover:border-white/10 transition-all group">
+                    <div class="flex items-center gap-4">
+                        <img alt="Cover" class="w-[70px] h-[70px] rounded-lg object-cover shadow-lg" src="https://picsum.photos/seed/jazz2/128/128">
+                        <div>
+                            <span class="text-[10px] font-bold bg-white/10 text-secondary-text px-1.5 py-0.5 rounded uppercase mb-1 inline-block">Playlist</span>
+                            <h3 class="font-bold text-[15px] leading-snug text-white/80">Winter Jazz Café — Cozy Fireplace Ambience</h3>
+                            <p class="text-[11px] text-red-400 font-medium mt-0.5 flex items-center gap-1"><span class="material-icons-round" style="font-size:12px">warning</span> Error 404: Not Found</p>
+                        </div>
+                    </div>
+                    <div class="meta-grid w-full">
+                        <div class="flex items-center gap-2 meta-cell">
+                            <img alt="Owner" class="w-6 h-6 rounded-full" src="https://randomuser.me/api/portraits/women/68.jpg">
+                            <div>
+                                <div class="text-sm font-medium leading-tight truncate">David Jazz</div>
+                                <div class="text-[11px] text-secondary-text leading-tight">10/02 11:20</div>
+                            </div>
+                        </div>
+                        <div class="flex items-center gap-3 text-secondary-text meta-cell">
+                            <div class="flex items-center gap-1">
+                                <span class="material-icons-round text-sm">favorite_border</span>
+                                <span class="text-xs">4.2k</span>
+                            </div>
+                            <div class="flex items-center gap-1">
+                                <span class="material-icons-round text-sm">music_note</span>
+                                <span class="text-xs">95</span>
+                            </div>
+                        </div>
+                        <div class="text-sm text-secondary-text meta-cell">552,532</div>
+                        <div class="text-sm text-secondary-text meta-cell">5,891,204</div>
+                        <div class="flex items-center gap-2 meta-cell">
+                            <span class="w-2 h-2 rounded-full bg-red-500 shadow-[0_0_8px_rgba(239,68,68,0.5)]"></span>
+                            <span class="text-sm font-medium text-red-500 truncate">Error (404)</span>
+                        </div>
+                        <div class="text-xs text-secondary-text meta-cell text-right">14m ago</div>
+                    </div>
+                </div>
+
+                <!-- Row 3: Album - Pending -->
+                <div class="custom-grid-row px-4 py-3 bg-white/5 rounded-lg border border-transparent hover:bg-row-hover hover:border-white/10 transition-all group">
+                    <div class="flex items-center gap-4">
+                        <img alt="Cover" class="w-[70px] h-[70px] rounded-lg object-cover shadow-lg" src="https://picsum.photos/seed/jazz3/128/128">
+                        <div>
+                            <span class="text-[10px] font-bold bg-purple-500/15 text-purple-400 px-1.5 py-0.5 rounded uppercase mb-1 inline-block">Album</span>
+                            <h3 class="font-bold text-[15px] leading-snug">Midnight Sax — Smooth Saxophone Sessions</h3>
+                            <p class="text-[11px] text-secondary-text font-mono truncate mt-0.5">spotify:album:2N3D9rE...</p>
+                        </div>
+                    </div>
+                    <div class="meta-grid w-full">
+                        <div class="flex items-center gap-2 meta-cell">
+                            <div class="w-6 h-6 bg-purple-500/20 rounded-full flex items-center justify-center text-[10px] font-bold text-purple-400">MC</div>
+                            <div>
+                                <div class="text-sm font-medium leading-tight">Marc C.</div>
+                                <div class="text-[11px] text-secondary-text leading-tight">09/02 14:44</div>
+                            </div>
+                        </div>
+                        <div class="flex items-center gap-3 text-secondary-text meta-cell">
+                            <div class="flex items-center gap-1">
+                                <span class="material-icons-round text-sm">favorite_border</span>
+                                <span class="text-xs">1.8k</span>
+                            </div>
+                            <div class="flex items-center gap-1">
+                                <span class="material-icons-round text-sm">music_note</span>
+                                <span class="text-xs">12</span>
+                            </div>
+                        </div>
+                        <div class="text-sm text-secondary-text meta-cell">128,647</div>
+                        <div class="text-sm text-secondary-text meta-cell">1,450,230</div>
+                        <div class="flex items-center gap-2 meta-cell">
+                            <span class="w-2 h-2 rounded-full bg-yellow-500"></span>
+                            <span class="text-sm font-medium text-yellow-500">Pending</span>
+                        </div>
+                        <div class="text-xs text-secondary-text meta-cell text-right">Just now</div>
+                    </div>
+                </div>
+
+                <!-- Row 4: Playlist - Active -->
+                <div class="custom-grid-row px-4 py-3 bg-white/5 rounded-lg border border-transparent hover:bg-row-hover hover:border-white/10 transition-all group">
+                    <div class="flex items-center gap-4">
+                        <img alt="Cover" class="w-[70px] h-[70px] rounded-lg object-cover shadow-lg" src="https://picsum.photos/seed/jazz4/128/128">
+                        <div>
+                            <span class="text-[10px] font-bold bg-primary/20 text-primary px-1.5 py-0.5 rounded uppercase mb-1 inline-block">Playlist</span>
+                            <h3 class="font-bold text-[15px] leading-snug">Bebop Essentials — Classic Bebop Jazz Standards</h3>
+                            <p class="text-[11px] text-secondary-text font-mono truncate mt-0.5">spotify:playlist:1A4K...</p>
+                        </div>
+                    </div>
+                    <div class="meta-grid w-full">
+                        <div class="flex items-center gap-2 meta-cell">
+                            <img alt="Owner" class="w-6 h-6 rounded-full" src="https://randomuser.me/api/portraits/men/75.jpg">
+                            <div>
+                                <div class="text-sm font-medium leading-tight truncate">Erik Vance</div>
+                                <div class="text-[11px] text-secondary-text leading-tight">06/02 14:29</div>
+                            </div>
+                        </div>
+                        <div class="flex items-center gap-3 text-secondary-text meta-cell">
+                            <div class="flex items-center gap-1">
+                                <span class="material-icons-round text-sm">favorite_border</span>
+                                <span class="text-xs">28.4k</span>
+                            </div>
+                            <div class="flex items-center gap-1">
+                                <span class="material-icons-round text-sm">music_note</span>
+                                <span class="text-xs">210</span>
+                            </div>
+                        </div>
+                        <div class="text-sm text-secondary-text meta-cell">892,104</div>
+                        <div class="text-sm text-secondary-text meta-cell">12,501,890</div>
+                        <div class="flex items-center gap-2 meta-cell">
+                            <span class="w-2 h-2 rounded-full bg-primary shadow-[0_0_8px_rgba(29,185,84,0.6)]"></span>
+                            <span class="text-sm font-medium text-primary">Active</span>
+                        </div>
+                        <div class="text-xs text-secondary-text meta-cell text-right">45m ago</div>
+                    </div>
+                </div>
+
+                <!-- Row 5: Playlist - Active -->
+                <div class="custom-grid-row px-4 py-3 bg-white/5 rounded-lg border border-transparent hover:bg-row-hover hover:border-white/10 transition-all group">
+                    <div class="flex items-center gap-4">
+                        <img alt="Cover" class="w-[70px] h-[70px] rounded-lg object-cover shadow-lg" src="https://picsum.photos/seed/jazz5/128/128">
+                        <div>
+                            <span class="text-[10px] font-bold bg-primary/20 text-primary px-1.5 py-0.5 rounded uppercase mb-1 inline-block">Playlist</span>
+                            <h3 class="font-bold text-[15px] leading-snug">Nu Jazz Waves — Future Jazz &amp; Electronic Grooves</h3>
+                            <p class="text-[11px] text-secondary-text font-mono truncate mt-0.5">spotify:playlist:9Vb2...</p>
+                        </div>
+                    </div>
+                    <div class="meta-grid w-full">
+                        <div class="flex items-center gap-2 meta-cell">
+                            <img alt="Owner" class="w-6 h-6 rounded-full" src="https://randomuser.me/api/portraits/men/22.jpg">
+                            <div>
+                                <div class="text-sm font-medium leading-tight truncate">Liam Stone</div>
+                                <div class="text-[11px] text-secondary-text leading-tight">06/02 14:29</div>
+                            </div>
+                        </div>
+                        <div class="flex items-center gap-3 text-secondary-text meta-cell">
+                            <div class="flex items-center gap-1">
+                                <span class="material-icons-round text-sm">favorite_border</span>
+                                <span class="text-xs">5.9k</span>
+                            </div>
+                            <div class="flex items-center gap-1">
+                                <span class="material-icons-round text-sm">music_note</span>
+                                <span class="text-xs">88</span>
+                            </div>
+                        </div>
+                        <div class="text-sm text-secondary-text meta-cell">238,528</div>
+                        <div class="text-sm text-secondary-text meta-cell">3,120,500</div>
+                        <div class="flex items-center gap-2 meta-cell">
+                            <span class="w-2 h-2 rounded-full bg-primary shadow-[0_0_8px_rgba(29,185,84,0.6)]"></span>
+                            <span class="text-sm font-medium text-primary">Active</span>
+                        </div>
+                        <div class="text-xs text-secondary-text meta-cell text-right">1h ago</div>
+                    </div>
+                </div>
+
+                <!-- Row 6: Track - Active -->
+                <div class="custom-grid-row px-4 py-3 bg-white/5 rounded-lg border border-transparent hover:bg-row-hover hover:border-white/10 transition-all group">
+                    <div class="flex items-center gap-4">
+                        <img alt="Cover" class="w-[70px] h-[70px] rounded-lg object-cover shadow-lg" src="https://picsum.photos/seed/track1/128/128">
+                        <div>
+                            <span class="text-[10px] font-bold bg-sky-500/15 text-sky-400 px-1.5 py-0.5 rounded uppercase mb-1 inline-block">Track</span>
+                            <h3 class="font-bold text-[15px] leading-snug">I Won't Never Go — Smooth Jazz Ballad</h3>
+                            <p class="text-[11px] text-secondary-text font-mono truncate mt-0.5">spotify:track:6rqhFg...</p>
+                        </div>
+                    </div>
+                    <div class="meta-grid w-full">
+                        <div class="flex items-center gap-2 meta-cell">
+                            <img alt="Owner" class="w-6 h-6 rounded-full" src="https://randomuser.me/api/portraits/men/55.jpg">
+                            <div>
+                                <div class="text-sm font-medium leading-tight truncate">Tony Blues</div>
+                                <div class="text-[11px] text-secondary-text leading-tight">10/02 11:20</div>
+                            </div>
+                        </div>
+                        <div class="flex items-center gap-3 text-secondary-text meta-cell">
+                            <div class="flex items-center gap-1">
+                                <span class="material-icons-round text-sm">bookmark_border</span>
+                                <span class="text-xs">18.2k</span>
+                            </div>
+                            <div class="flex items-center gap-1">
+                                <span class="material-icons-round text-sm">schedule</span>
+                                <span class="text-xs">4:32</span>
+                            </div>
+                        </div>
+                        <div class="text-sm text-secondary-text meta-cell">238,528</div>
+                        <div class="text-sm text-secondary-text meta-cell">1,795,709</div>
+                        <div class="flex items-center gap-2 meta-cell">
+                            <span class="w-2 h-2 rounded-full bg-primary shadow-[0_0_8px_rgba(29,185,84,0.6)]"></span>
+                            <span class="text-sm font-medium text-primary">Active</span>
+                        </div>
+                        <div class="text-xs text-secondary-text meta-cell text-right">30m ago</div>
+                    </div>
+                </div>
+
+                <!-- Row 7: Track - Active -->
+                <div class="custom-grid-row px-4 py-3 bg-white/5 rounded-lg border border-transparent hover:bg-row-hover hover:border-white/10 transition-all group">
+                    <div class="flex items-center gap-4">
+                        <img alt="Cover" class="w-[70px] h-[70px] rounded-lg object-cover shadow-lg" src="https://picsum.photos/seed/track2/128/128">
+                        <div>
+                            <span class="text-[10px] font-bold bg-sky-500/15 text-sky-400 px-1.5 py-0.5 rounded uppercase mb-1 inline-block">Track</span>
+                            <h3 class="font-bold text-[15px] leading-snug">All Night Long — Saxophone Lounge Mix</h3>
+                            <p class="text-[11px] text-secondary-text font-mono truncate mt-0.5">spotify:track:8mXk2j...</p>
+                        </div>
+                    </div>
+                    <div class="meta-grid w-full">
+                        <div class="flex items-center gap-2 meta-cell">
+                            <img alt="Owner" class="w-6 h-6 rounded-full" src="https://randomuser.me/api/portraits/women/31.jpg">
+                            <div>
+                                <div class="text-sm font-medium leading-tight truncate">Nina Sax</div>
+                                <div class="text-[11px] text-secondary-text leading-tight">10/02 11:20</div>
+                            </div>
+                        </div>
+                        <div class="flex items-center gap-3 text-secondary-text meta-cell">
+                            <div class="flex items-center gap-1">
+                                <span class="material-icons-round text-sm">bookmark_border</span>
+                                <span class="text-xs">7.4k</span>
+                            </div>
+                            <div class="flex items-center gap-1">
+                                <span class="material-icons-round text-sm">schedule</span>
+                                <span class="text-xs">3:48</span>
+                            </div>
+                        </div>
+                        <div class="text-sm text-secondary-text meta-cell">238,528</div>
+                        <div class="text-sm text-secondary-text meta-cell">570,994</div>
+                        <div class="flex items-center gap-2 meta-cell">
+                            <span class="w-2 h-2 rounded-full bg-primary shadow-[0_0_8px_rgba(29,185,84,0.6)]"></span>
+                            <span class="text-sm font-medium text-primary">Active</span>
+                        </div>
+                        <div class="text-xs text-secondary-text meta-cell text-right">30m ago</div>
+                    </div>
+                </div>
+
+                <!-- Row 8: Track - Active -->
+                <div class="custom-grid-row px-4 py-3 bg-white/5 rounded-lg border border-transparent hover:bg-row-hover hover:border-white/10 transition-all group">
+                    <div class="flex items-center gap-4">
+                        <img alt="Cover" class="w-[70px] h-[70px] rounded-lg object-cover shadow-lg" src="https://picsum.photos/seed/track3/128/128">
+                        <div>
+                            <span class="text-[10px] font-bold bg-sky-500/15 text-sky-400 px-1.5 py-0.5 rounded uppercase mb-1 inline-block">Track</span>
+                            <h3 class="font-bold text-[15px] leading-snug">Slow Tunes — Late Night Jazz Session</h3>
+                            <p class="text-[11px] text-secondary-text font-mono truncate mt-0.5">spotify:track:3kLmNp...</p>
+                        </div>
+                    </div>
+                    <div class="meta-grid w-full">
+                        <div class="flex items-center gap-2 meta-cell">
+                            <img alt="Owner" class="w-6 h-6 rounded-full" src="https://randomuser.me/api/portraits/men/42.jpg">
+                            <div>
+                                <div class="text-sm font-medium leading-tight truncate">Jazz Keys</div>
+                                <div class="text-[11px] text-secondary-text leading-tight">10/02 11:20</div>
+                            </div>
+                        </div>
+                        <div class="flex items-center gap-3 text-secondary-text meta-cell">
+                            <div class="flex items-center gap-1">
+                                <span class="material-icons-round text-sm">bookmark_border</span>
+                                <span class="text-xs">12.1k</span>
+                            </div>
+                            <div class="flex items-center gap-1">
+                                <span class="material-icons-round text-sm">schedule</span>
+                                <span class="text-xs">5:12</span>
+                            </div>
+                        </div>
+                        <div class="text-sm text-secondary-text meta-cell">238,528</div>
+                        <div class="text-sm text-secondary-text meta-cell">976,684</div>
+                        <div class="flex items-center gap-2 meta-cell">
+                            <span class="w-2 h-2 rounded-full bg-primary shadow-[0_0_8px_rgba(29,185,84,0.6)]"></span>
+                            <span class="text-sm font-medium text-primary">Active</span>
+                        </div>
+                        <div class="text-xs text-secondary-text meta-cell text-right">30m ago</div>
+                    </div>
+                </div>
+
+                <!-- Row 9: Playlist - Error 403 -->
+                <div class="custom-grid-row px-4 py-3 bg-white/5 rounded-lg border border-transparent hover:bg-row-hover hover:border-white/10 transition-all group">
+                    <div class="flex items-center gap-4">
+                        <img alt="Cover" class="w-[70px] h-[70px] rounded-lg object-cover shadow-lg" src="https://picsum.photos/seed/jazz7/128/128">
+                        <div>
+                            <span class="text-[10px] font-bold bg-white/10 text-secondary-text px-1.5 py-0.5 rounded uppercase mb-1 inline-block">Playlist</span>
+                            <h3 class="font-bold text-[15px] leading-snug text-white/80">Late Night Bar — Smooth Saxophone &amp; Whiskey Blues</h3>
+                            <p class="text-[11px] text-red-400 font-medium mt-0.5 flex items-center gap-1"><span class="material-icons-round" style="font-size:12px">warning</span> Error 403: Forbidden</p>
+                        </div>
+                    </div>
+                    <div class="meta-grid w-full">
+                        <div class="flex items-center gap-2 meta-cell">
+                            <img alt="Owner" class="w-6 h-6 rounded-full" src="https://randomuser.me/api/portraits/men/85.jpg">
+                            <div>
+                                <div class="text-sm font-medium leading-tight truncate">Chris Miller</div>
+                                <div class="text-[11px] text-secondary-text leading-tight">10/02 11:20</div>
+                            </div>
+                        </div>
+                        <div class="flex items-center gap-3 text-secondary-text meta-cell">
+                            <div class="flex items-center gap-1">
+                                <span class="material-icons-round text-sm">favorite_border</span>
+                                <span class="text-xs">1.2k</span>
+                            </div>
+                            <div class="flex items-center gap-1">
+                                <span class="material-icons-round text-sm">music_note</span>
+                                <span class="text-xs">122</span>
+                            </div>
+                        </div>
+                        <div class="text-sm text-secondary-text meta-cell">—</div>
+                        <div class="text-sm text-secondary-text meta-cell">—</div>
+                        <div class="flex items-center gap-2 meta-cell">
+                            <span class="w-2 h-2 rounded-full bg-red-500 shadow-[0_0_8px_rgba(239,68,68,0.5)]"></span>
+                            <span class="text-sm font-medium text-red-500 truncate">Error (403)</span>
+                        </div>
+                        <div class="text-xs text-secondary-text meta-cell text-right">3h ago</div>
+                    </div>
+                </div>
+
+                <!-- Row 10: Playlist - Active -->
+                <div class="custom-grid-row px-4 py-3 bg-white/5 rounded-lg border border-transparent hover:bg-row-hover hover:border-white/10 transition-all group">
+                    <div class="flex items-center gap-4">
+                        <img alt="Cover" class="w-[70px] h-[70px] rounded-lg object-cover shadow-lg" src="https://picsum.photos/seed/lofi8/128/128">
+                        <div>
+                            <span class="text-[10px] font-bold bg-primary/20 text-primary px-1.5 py-0.5 rounded uppercase mb-1 inline-block">Playlist</span>
+                            <h3 class="font-bold text-[15px] leading-snug">Jazz Morning ☕ Positive Energy Bossa Nova &amp; Café Music</h3>
+                            <p class="text-[11px] text-secondary-text font-mono truncate mt-0.5">spotify:playlist:0Pq2...</p>
+                        </div>
+                    </div>
+                    <div class="meta-grid w-full">
+                        <div class="flex items-center gap-2 meta-cell">
+                            <div class="w-6 h-6 bg-blue-500/20 rounded-full flex items-center justify-center text-[10px] font-bold text-blue-400">JB</div>
+                            <div>
+                                <div class="text-sm font-medium leading-tight truncate">JazzBot</div>
+                                <div class="text-[11px] text-secondary-text leading-tight">10/02 11:24</div>
+                            </div>
+                        </div>
+                        <div class="flex items-center gap-3 text-secondary-text meta-cell">
+                            <div class="flex items-center gap-1">
+                                <span class="material-icons-round text-sm">favorite_border</span>
+                                <span class="text-xs">92.5k</span>
+                            </div>
+                            <div class="flex items-center gap-1">
+                                <span class="material-icons-round text-sm">music_note</span>
+                                <span class="text-xs">450</span>
+                            </div>
+                        </div>
+                        <div class="text-sm text-secondary-text meta-cell">2,341,072</div>
+                        <div class="text-sm text-secondary-text meta-cell">42,620,900</div>
+                        <div class="flex items-center gap-2 meta-cell">
+                            <span class="w-2 h-2 rounded-full bg-primary shadow-[0_0_8px_rgba(29,185,84,0.6)]"></span>
+                            <span class="text-sm font-medium text-primary">Active</span>
+                        </div>
+                        <div class="text-xs text-secondary-text meta-cell text-right">5h ago</div>
+                    </div>
+                </div>
+            </div>
+            </div>
+        </div>
+
+        <!-- Footer Stats -->
+        <footer class="h-11 flex-shrink-0 flex items-center justify-between px-8 bg-sidebar-dark border-t border-white/5 text-xs text-secondary-text">
+            <div class="flex gap-6">
+                <span class="flex items-center gap-1"><b class="text-white">Total Links:</b> 240</span>
+                <span class="flex items-center gap-1"><b class="text-white">Active:</b> 218</span>
+                <span class="flex items-center gap-1"><b class="text-white">Errors:</b> 12</span>
+            </div>
+            <div class="flex items-center gap-4">
+                <button class="hover:text-white transition-colors">Clear Logs</button>
+                <div class="w-[1px] h-3 bg-white/10"></div>
+                <span>Server Status: <span class="text-primary font-bold uppercase">Optimal</span></span>
+            </div>
+        </footer>
+    </main>
+    <script>
+        (function () {
+            const hero = document.querySelector('.playlist-hero');
+            const firstCover = document.querySelector('.list-grid .custom-grid-row img');
+            const listWrap = document.querySelector('.list-wrap');
+            const listHead = document.querySelector('.list-head');
+            if (!hero) return;
+            const src = firstCover && firstCover.getAttribute('src');
+
+            const upscaleCover = (url) => {
+                if (!url) return "";
+                // Picsum thumbnail format: /seed/name/128/128 -> use a large hero size instead.
+                if (url.includes("picsum.photos/seed/")) {
+                    return url.replace(/\/\d+\/\d+(\?.*)?$/, "/1800/900");
+                }
+                return url;
+            };
+
+            const heroImage = upscaleCover(src) || "https://picsum.photos/seed/spotify-warm-cover/1800/900";
+            hero.style.setProperty('--hero-image', `url('${heroImage}')`);
+
+            if (listWrap && listHead) {
+                const updateStickyState = () => {
+                    const stuck = listWrap.scrollTop >= listHead.offsetTop;
+                    listHead.classList.toggle('is-stuck', stuck);
+                };
+                updateStickyState();
+                listWrap.addEventListener('scroll', updateStickyState, { passive: true });
+                window.addEventListener('resize', updateStickyState);
+            }
+        })();
+    </script>
+</body>
+</html>
