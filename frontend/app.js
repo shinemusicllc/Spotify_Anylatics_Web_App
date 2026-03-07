@@ -123,10 +123,32 @@ function formatDurationFromMs(ms) {
     return `${mins}:${String(secs).padStart(2, '0')}`;
 }
 
+function parseServerDate(value) {
+    if (!value) return null;
+    if (value instanceof Date) {
+        return Number.isNaN(value.getTime()) ? null : value;
+    }
+
+    const raw = String(value).trim();
+    if (!raw) return null;
+
+    let normalized = raw.replace(' ', 'T');
+    const hasTimezone = /(?:Z|[+-]\d{2}:\d{2})$/.test(normalized);
+    if (!hasTimezone && /^\d{4}-\d{2}-\d{2}T/.test(normalized)) {
+        // Backend can return naive UTC timestamps; treat them as UTC.
+        normalized += 'Z';
+    }
+
+    const parsed = new Date(normalized);
+    return Number.isNaN(parsed.getTime()) ? null : parsed;
+}
+
 /** Relative time from ISO timestamp */
 function timeAgo(isoDate) {
-    if (!isoDate) return '-';
-    const diff = Date.now() - new Date(isoDate).getTime();
+    const d = parseServerDate(isoDate);
+    if (!d) return '-';
+    const diff = Date.now() - d.getTime();
+    if (diff <= 0) return 'Just now';
     const mins = Math.floor(diff / 60000);
     if (mins < 1) return 'Just now';
     if (mins < 60) return `${mins}m ago`;
@@ -137,9 +159,8 @@ function timeAgo(isoDate) {
 }
 
 function formatUpdatedAt(isoDate) {
-    if (!isoDate) return '-';
-    const d = new Date(isoDate);
-    if (Number.isNaN(d.getTime())) return '-';
+    const d = parseServerDate(isoDate);
+    if (!d) return '-';
     const parts = new Intl.DateTimeFormat('vi-VN', {
         timeZone: 'Asia/Ho_Chi_Minh',
         hour12: false,
@@ -763,7 +784,8 @@ function renderRow(item) {
     const status = getStatusInfo(item);
     const isError = item.status === 'error';
     const spotifyUrl = getSpotifyUrl(item.type, item.spotify_id);
-    const updatedAt = formatUpdatedAt(item.last_checked || item.created_at);
+    const checkedAt = item.last_checked || item.created_at || '';
+    const updatedAt = formatUpdatedAt(checkedAt);
 
     // Owner / Artist display
     const ownerHtml = item.owner_image
@@ -801,9 +823,9 @@ function renderRow(item) {
         </div>
         <!-- Right: Metadata -->
         <div class="meta-grid w-full">
-            <div class="flex items-center gap-2 meta-cell">
+            <div class="flex items-center gap-3 meta-cell">
                 ${ownerHtml}
-                <div>
+                <div class="list-owner-meta">
                     <div class="list-owner-name">${escapeHtml(item.owner_name || '-')}</div>
                     <div class="list-owner-time text-secondary-text">${updatedAt}</div>
                 </div>
@@ -818,7 +840,7 @@ function renderRow(item) {
                 <span class="list-status-label ${status.color} truncate">${status.label}</span>
             </div>
             <div class="meta-cell text-right row-action-cell">
-                <span class="list-checked-text text-secondary-text row-checked">${timeAgo(item.last_checked)}</span>
+                <span class="list-checked-text text-secondary-text row-checked" data-checked-at="${escapeHtml(checkedAt)}">${timeAgo(checkedAt)}</span>
                 <div class="row-action-buttons">
                     <button type="button" class="row-refresh-btn" aria-label="Refresh row">
                         <span class="material-icons-round">refresh</span>
@@ -915,7 +937,16 @@ function renderList(opts = {}) {
 
     // Update KPIs
     updateKPIs();
+    refreshCheckedLabels();
     restoreScroll();
+}
+
+function refreshCheckedLabels() {
+    const labels = document.querySelectorAll('#link-list .row-checked');
+    labels.forEach((label) => {
+        const checkedAt = label.getAttribute('data-checked-at');
+        label.textContent = timeAgo(checkedAt);
+    });
 }
 
 function updateKPIs() {
@@ -1784,6 +1815,9 @@ document.addEventListener('DOMContentLoaded', () => {
         // Update hero image after data is rendered
         setTimeout(updateHeroImage, 100);
     });
+
+    // Keep "Checked" relative times live without page reload.
+    setInterval(refreshCheckedLabels, 30_000);
 
     // MutationObserver to update hero when list changes
     const listEl = document.getElementById('link-list');
