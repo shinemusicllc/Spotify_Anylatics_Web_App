@@ -5,14 +5,17 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
     PIP_NO_CACHE_DIR=1 \
     PLAYWRIGHT_BROWSERS_PATH=/ms-playwright
 
-WORKDIR /app
+WORKDIR /app/backend
 
-COPY requirements.txt .
+# Install Python dependencies first for better layer caching.
+COPY backend/requirements.txt /app/backend/requirements.txt
 RUN pip install --upgrade pip \
     && pip install -r requirements.txt \
     && playwright install --with-deps chromium
 
-COPY . .
+# Copy backend and frontend (served by FastAPI in production).
+COPY backend /app/backend
+COPY frontend /app/frontend
 
 EXPOSE 8000
 

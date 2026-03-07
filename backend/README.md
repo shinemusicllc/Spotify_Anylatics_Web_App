@@ -1,38 +1,41 @@
 # SpotiCheck Backend
 
-## Yêu cầu
+## Local run
 
+Requirements:
 - Python 3.12+
 - PostgreSQL 15+
-
-## Cài đặt
 
 ```bash
 cd backend
 python -m venv venv
-venv\Scripts\activate   # Windows
+venv\Scripts\activate
 pip install -r requirements.txt
 playwright install chromium
+copy .env.example .env
+uvicorn app.main:app --reload --port 8010
 ```
 
-## Cấu hình
+API docs: `http://localhost:8010/docs`
 
-Copy `.env.example` → `.env` và điền thông tin:
+## Railway deploy (Playwright + PostgreSQL)
 
-```bash
-cp .env.example .env
-```
+This repo includes a root `Dockerfile` for Railway, with Chromium dependencies for Playwright.
 
-## Chạy
+Recommended setup:
+1. Create a new Railway project from this GitHub repo.
+2. Add a PostgreSQL service in Railway.
+3. In backend service variables, set:
+   - `DATABASE_URL` = `${{Postgres.DATABASE_URL}}`
+   - `DEBUG=false`
+   - `AUTO_INIT_DB=true`
+   - `SERVE_FRONTEND=true`
+   - `FRONTEND_DIR=../frontend`
+   - `PLAYWRIGHT_ENABLE_FALLBACK=true`
+4. Deploy.
 
-```bash
-# Development
-uvicorn app.main:app --reload --port 8000
+Health check endpoint: `/api/health`
 
-# Production
-uvicorn app.main:app --host 0.0.0.0 --port 8000
-```
-
-## API Docs
-
-Sau khi chạy, mở [http://localhost:8000/docs](http://localhost:8000/docs) để xem Swagger UI.
+Notes:
+- `pgAdmin 4` is not required on Railway.
+- You can still use local pgAdmin to connect to Railway PostgreSQL if needed.

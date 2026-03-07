@@ -45,10 +45,13 @@ class Settings(BaseSettings):
 
     # CORS
     FRONTEND_URL: str = "http://localhost:8080"
+    SERVE_FRONTEND: bool = True
+    FRONTEND_DIR: str = "../frontend"
 
     # App
     SECRET_KEY: str = "change-me-in-production"
-    DEBUG: bool = True
+    DEBUG: bool = False
+    AUTO_INIT_DB: bool = True
 
 
 settings = Settings()

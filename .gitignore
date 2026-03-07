@@ -28,3 +28,4 @@ node_modules/
 # Logs/runtime
 *.log
 *.pid
+backend/refresh_all_compare_report.txt
