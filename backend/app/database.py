@@ -5,8 +5,30 @@ from sqlalchemy.orm import DeclarativeBase
 
 from app.config import settings
 
+def _normalize_database_url(raw_url: str) -> str:
+    """
+    Ensure SQLAlchemy async engine uses asyncpg driver.
+
+    Railway/Postgres plugins often expose `postgresql://...` (or `postgres://...`).
+    This backend uses SQLAlchemy async engine, so it must be:
+    `postgresql+asyncpg://...`
+    """
+    url = (raw_url or "").strip()
+    if not url:
+        return url
+    if url.startswith("postgres://"):
+        url = url.replace("postgres://", "postgresql://", 1)
+    if url.startswith("postgresql+asyncpg://"):
+        return url
+    if url.startswith("postgresql://"):
+        return url.replace("postgresql://", "postgresql+asyncpg://", 1)
+    return url
+
+
+DATABASE_URL = _normalize_database_url(settings.DATABASE_URL)
+
 engine = create_async_engine(
-    settings.DATABASE_URL,
+    DATABASE_URL,
     echo=settings.DEBUG,
     pool_pre_ping=True,
     pool_size=5,
