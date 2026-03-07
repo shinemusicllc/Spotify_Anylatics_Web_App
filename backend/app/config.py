@@ -21,6 +21,7 @@ class Settings(BaseSettings):
     SPOTIFY_CLIENT_ID: str = ""
     SPOTIFY_CLIENT_SECRET: str = ""
     SPOTIFY_CLIENT_TOKEN: str = ""
+    SPOTIFY_HTTP_TIMEOUT_SECONDS: float = 8.0
 
     # Spotify auth (legacy placeholders)
     SPOTIFY_EMAIL: str = ""
@@ -32,6 +33,15 @@ class Settings(BaseSettings):
     RATE_LIMIT_PER_MINUTE: int = 60
     PLAYLIST_PAGE_SIZE: int = 100
     PLAYLIST_MAX_TRACKS: int = 2000
+    PLAYWRIGHT_ENABLE_FALLBACK: bool = True
+    PLAYWRIGHT_INLINE_FALLBACK: bool = False
+    PLAYWRIGHT_FAST_FAIL_ERRORS: bool = False
+    PLAYWRIGHT_TIMEOUT_MS: int = 45000
+    PLAYWRIGHT_WAIT_MS: int = 2500
+    PLAYWRIGHT_MAX_CONCURRENCY: int = 3
+    PLAYWRIGHT_RETRIES: int = 1
+    PLAYWRIGHT_HYDRATE_TIMEOUT_MS: int = 9000
+    PLAYWRIGHT_ALBUM_MAX_TRACKS: int = 80
 
     # CORS
     FRONTEND_URL: str = "http://localhost:8080"

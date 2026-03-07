@@ -1,11 +1,14 @@
 """Items endpoints — query stored items."""
 
 from fastapi import APIRouter, Depends, HTTPException, Query
-from sqlalchemy import select, func
+from sqlalchemy import select, func, delete
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.database import get_db
 from app.models.item import Item
+from app.models.crawl_job import CrawlJob
+from app.models.metrics_snapshot import MetricsSnapshot
+from app.models.raw_response import RawResponse
 from app.schemas.item import ItemResponse, ItemListResponse
 
 router = APIRouter()
@@ -17,6 +20,9 @@ def _item_to_response(item: Item) -> ItemResponse:
     if item.duration_ms:
         mins, secs = divmod(item.duration_ms // 1000, 60)
         duration = f"{mins}:{secs:02d}"
+
+    has_total_plays = item.item_type in {"track", "album", "playlist"}
+    total_plays = item.playcount if has_total_plays else None
 
     return ItemResponse(
         id=str(item.id),
@@ -30,7 +36,7 @@ def _item_to_response(item: Item) -> ItemResponse:
         monthly_listeners=item.monthly_listeners,
         monthly_plays=item.monthly_listeners,  # Alias for frontend
         playcount=item.playcount,
-        total_plays=item.playcount,  # Alias for frontend
+        total_plays=total_plays,
         track_count=item.track_count,
         album_count=item.album_count,
         duration=duration,
@@ -97,3 +103,53 @@ async def get_item(
     if not item:
         raise HTTPException(status_code=404, detail="Item not found")
     return _item_to_response(item)
+
+
+@router.delete("/items/{item_type}/{spotify_id}")
+async def delete_item(
+    item_type: str,
+    spotify_id: str,
+    db: AsyncSession = Depends(get_db),
+):
+    """Delete a single item by type + Spotify ID."""
+    result = await db.execute(
+        select(Item).where(
+            Item.spotify_id == spotify_id,
+            Item.item_type == item_type,
+        )
+    )
+    item = result.scalar_one_or_none()
+    if not item:
+        raise HTTPException(status_code=404, detail="Item not found")
+
+    await db.execute(delete(MetricsSnapshot).where(MetricsSnapshot.item_id == item.id))
+    await db.execute(delete(CrawlJob).where(CrawlJob.item_id == item.id))
+    await db.execute(delete(RawResponse).where(RawResponse.spotify_id == item.spotify_id))
+    await db.delete(item)
+    await db.commit()
+    return {"ok": True, "deleted": 1}
+
+
+@router.delete("/items")
+async def clear_items(
+    group: str | None = Query(None, description="Optional group to clear"),
+    db: AsyncSession = Depends(get_db),
+):
+    """Clear all items (or items in one group)."""
+    selected_items = select(Item.id, Item.spotify_id)
+    if group:
+        selected_items = selected_items.where(Item.group == group)
+
+    rows = (await db.execute(selected_items)).all()
+    if not rows:
+        return {"ok": True, "deleted": 0, "group": group}
+
+    item_ids = [row[0] for row in rows]
+    spotify_ids = [row[1] for row in rows]
+
+    await db.execute(delete(MetricsSnapshot).where(MetricsSnapshot.item_id.in_(item_ids)))
+    await db.execute(delete(CrawlJob).where(CrawlJob.item_id.in_(item_ids)))
+    await db.execute(delete(RawResponse).where(RawResponse.spotify_id.in_(spotify_ids)))
+    result = await db.execute(delete(Item).where(Item.id.in_(item_ids)))
+    await db.commit()
+    return {"ok": True, "deleted": result.rowcount or 0, "group": group}

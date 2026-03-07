@@ -1,12 +1,13 @@
 """Spotify API client with resilient public-data fallbacks."""
 
+import asyncio
 import logging
-from datetime import datetime
 from typing import Any
 
 import httpx
 
 from app.config import settings
+from app.services import spotify_web_scraper
 from app.services.auth_manager import get_auth_headers, invalidate_tokens
 from app.services.rate_limiter import rate_limit
 
@@ -54,6 +55,141 @@ def _first_image_from_sources(sources: list[dict[str, Any]] | None) -> str | Non
     return first.get("url")
 
 
+def _append_crawl_mode(base_mode: str | None, suffix: str) -> str:
+    if not base_mode:
+        return suffix
+    if suffix in base_mode:
+        return base_mode
+    return f"{base_mode}+{suffix}"
+
+
+async def _consume_scrape_task(task: asyncio.Task | None, label: str) -> dict[str, Any] | None:
+    if task is None:
+        return None
+    try:
+        return await task
+    except Exception as ex:
+        logger.warning("Playwright %s scrape task failed: %s", label, ex)
+        return None
+
+
+async def _apply_track_playwright_fallback(
+    track_id: str,
+    result: dict[str, Any],
+    scraped_data: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    if not settings.PLAYWRIGHT_ENABLE_FALLBACK:
+        return result
+    if result.get("error"):
+        return result
+
+    needs_playcount = result.get("playcount") is None
+    needs_duration = result.get("duration_ms") is None
+    should_compare_visible_playcount = scraped_data is not None or settings.PLAYWRIGHT_ENABLE_FALLBACK
+    if not (needs_playcount or needs_duration or should_compare_visible_playcount):
+        return result
+
+    scraped = scraped_data or await spotify_web_scraper.scrape_track_stats(track_id)
+    if not scraped:
+        return result
+
+    merged = dict(result)
+    scraped_playcount = scraped.get("playcount")
+    if scraped_playcount is not None:
+        # Prefer visible playcount from open.spotify page when available.
+        if needs_playcount or merged.get("playcount") != scraped_playcount:
+            merged["playcount"] = scraped_playcount
+    if needs_duration and scraped.get("duration_ms") is not None:
+        merged["duration_ms"] = scraped.get("duration_ms")
+    if merged.get("name") in (None, "") and scraped.get("name"):
+        merged["name"] = scraped.get("name")
+    if scraped_playcount is not None or scraped.get("duration_ms") is not None:
+        merged["crawl_mode"] = _append_crawl_mode(merged.get("crawl_mode"), "playwright")
+    return merged
+
+
+async def _apply_artist_playwright_fallback(
+    artist_id: str,
+    result: dict[str, Any],
+    scraped_data: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    if not settings.PLAYWRIGHT_ENABLE_FALLBACK:
+        return result
+    if result.get("error"):
+        return result
+    if result.get("monthly_listeners") is not None and result.get("followers") is not None:
+        return result
+
+    scraped = scraped_data or await spotify_web_scraper.scrape_artist_stats(artist_id)
+    if not scraped:
+        return result
+
+    merged = dict(result)
+    if merged.get("monthly_listeners") is None and scraped.get("monthly_listeners") is not None:
+        merged["monthly_listeners"] = scraped.get("monthly_listeners")
+    if merged.get("followers") is None and scraped.get("followers") is not None:
+        merged["followers"] = scraped.get("followers")
+    if merged.get("name") in (None, "") and scraped.get("name"):
+        merged["name"] = scraped.get("name")
+    if merged.get("owner_name") in (None, "") and scraped.get("owner_name"):
+        merged["owner_name"] = scraped.get("owner_name")
+    if (
+        scraped.get("monthly_listeners") is not None
+        or scraped.get("followers") is not None
+    ):
+        merged["crawl_mode"] = _append_crawl_mode(merged.get("crawl_mode"), "playwright")
+    return merged
+
+
+async def _apply_album_playwright_fallback(
+    album_id: str,
+    result: dict[str, Any],
+    scraped_data: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    if not settings.PLAYWRIGHT_ENABLE_FALLBACK:
+        return result
+    if result.get("error"):
+        return result
+    if result.get("playcount") is not None or result.get("total_plays") is not None:
+        return result
+
+    expected_tracks = _safe_int(result.get("track_count"))
+    seed_track_ids: list[str] | None = None
+    track_rows = result.get("tracks")
+    if isinstance(track_rows, list):
+        seed_track_ids = [
+            row.get("spotify_id")
+            for row in track_rows
+            if isinstance(row, dict) and isinstance(row.get("spotify_id"), str)
+        ]
+    scraped = scraped_data or await spotify_web_scraper.scrape_album_stats(
+        album_id,
+        expected_tracks=expected_tracks,
+        seed_track_ids=seed_track_ids,
+    )
+    if not scraped:
+        return result
+
+    merged = dict(result)
+    if scraped.get("playcount") is not None:
+        merged["playcount"] = scraped.get("playcount")
+        merged["total_plays"] = scraped.get("playcount")
+    if merged.get("track_count") is None and scraped.get("track_count") is not None:
+        merged["track_count"] = scraped.get("track_count")
+    if scraped.get("tracks_crawled") is not None:
+        merged["tracks_crawled"] = scraped.get("tracks_crawled")
+    if scraped.get("tracks_expected") is not None:
+        merged["tracks_expected"] = scraped.get("tracks_expected")
+    if scraped.get("tracks_with_playcount") is not None:
+        merged["tracks_with_playcount"] = scraped.get("tracks_with_playcount")
+    if merged.get("name") in (None, "") and scraped.get("name"):
+        merged["name"] = scraped.get("name")
+    if merged.get("owner_name") in (None, "") and scraped.get("owner_name"):
+        merged["owner_name"] = scraped.get("owner_name")
+    merged["crawl_mode"] = _append_crawl_mode(merged.get("crawl_mode"), "playwright")
+    return merged
+
+
 async def _get_json(path: str, params: dict[str, Any] | None = None) -> tuple[int, dict[str, Any] | None]:
     try:
         headers = await get_auth_headers()
@@ -62,7 +198,7 @@ async def _get_json(path: str, params: dict[str, Any] | None = None) -> tuple[in
         return 0, None
 
     await rate_limit()
-    async with httpx.AsyncClient(timeout=20) as client:
+    async with httpx.AsyncClient(timeout=settings.SPOTIFY_HTTP_TIMEOUT_SECONDS) as client:
         res = await client.get(f"{SPOTIFY_WEB_API}{path}", headers=headers, params=params)
 
     if res.status_code == 401:
@@ -105,7 +241,7 @@ async def _get_pathfinder_json(payload: dict[str, Any]) -> tuple[int, dict[str, 
         req_headers["client-token"] = settings.SPOTIFY_CLIENT_TOKEN
 
     await rate_limit()
-    async with httpx.AsyncClient(timeout=20) as client:
+    async with httpx.AsyncClient(timeout=settings.SPOTIFY_HTTP_TIMEOUT_SECONDS) as client:
         res = await client.post(SPOTIFY_PATHFINDER_API, headers=req_headers, json=payload)
 
     if res.status_code == 401:
@@ -154,7 +290,7 @@ async def _fallback_oembed(item_type: str, spotify_id: str) -> dict[str, Any] | 
     headers = {"User-Agent": _DEFAULT_UA, "Accept": "application/json"}
     params = {"url": url}
     try:
-        async with httpx.AsyncClient(timeout=15) as client:
+        async with httpx.AsyncClient(timeout=settings.SPOTIFY_HTTP_TIMEOUT_SECONDS) as client:
             res = await client.get(f"{SPOTIFY_OPEN}/oembed", params=params, headers=headers)
         if res.status_code != 200:
             return None
@@ -167,15 +303,6 @@ async def _fallback_oembed(item_type: str, spotify_id: str) -> dict[str, Any] | 
         }
     except Exception as ex:
         logger.warning("oEmbed fallback failed for %s:%s - %s", item_type, spotify_id, ex)
-        return None
-
-
-def _estimate_track_playcount(popularity: int | None) -> int | None:
-    if popularity is None:
-        return None
-    try:
-        return int(popularity) * 10000
-    except (TypeError, ValueError):
         return None
 
 
@@ -192,7 +319,6 @@ def _normalize_playlist_track(item: dict[str, Any]) -> dict[str, Any] | None:
     artists = track.get("artists") or []
     images = album.get("images") or []
     popularity = track.get("popularity")
-    playcount_estimate = _estimate_track_playcount(popularity)
 
     return {
         "spotify_id": track_id,
@@ -213,7 +339,8 @@ def _normalize_playlist_track(item: dict[str, Any]) -> dict[str, Any] | None:
         "preview_url": track.get("preview_url"),
         "spotify_url": (track.get("external_urls") or {}).get("spotify"),
         "popularity": popularity,
-        "playcount_estimate": playcount_estimate,
+        # Web API track item does not provide exact playcount.
+        "playcount_estimate": None,
         "added_at": item.get("added_at"),
     }
 
@@ -427,8 +554,9 @@ async def _fetch_playlist_via_pathfinder(playlist_id: str) -> dict[str, Any] | N
         return None
 
     expected = total_tracks if total_tracks is not None else len(tracks)
+    deep_complete = bool(expected == 0 or len(tracks) >= expected)
     play_values = [t.get("playcount_estimate") for t in tracks if t.get("playcount_estimate") is not None]
-    total_plays = sum(play_values) if play_values else None
+    total_plays = sum(play_values) if deep_complete and len(play_values) >= expected else None
 
     return {
         "name": name,
@@ -440,8 +568,9 @@ async def _fetch_playlist_via_pathfinder(playlist_id: str) -> dict[str, Any] | N
         "tracks": tracks,
         "tracks_crawled": len(tracks),
         "tracks_expected": expected,
+        "tracks_with_playcount": len(play_values),
         "deep_crawl_pages": pages_fetched,
-        "deep_crawl_complete": bool(expected == 0 or len(tracks) >= expected),
+        "deep_crawl_complete": deep_complete,
         "total_plays": total_plays,
         "playcount": total_plays,
         "crawl_mode": "deep_pathfinder",
@@ -450,26 +579,57 @@ async def _fetch_playlist_via_pathfinder(playlist_id: str) -> dict[str, Any] | N
 
 async def query_artist(artist_id: str) -> dict[str, Any] | None:
     """Query artist data from Spotify Web API, fallback to oEmbed."""
+    playwright_task: asyncio.Task | None = None
+    if settings.PLAYWRIGHT_ENABLE_FALLBACK and settings.PLAYWRIGHT_INLINE_FALLBACK:
+        playwright_task = asyncio.create_task(spotify_web_scraper.scrape_artist_stats(artist_id))
+
     pathfinder = await _fetch_artist_via_pathfinder(artist_id)
     if pathfinder is not None:
-        return pathfinder
+        if not settings.PLAYWRIGHT_INLINE_FALLBACK:
+            return pathfinder
+        scraped = await _consume_scrape_task(playwright_task, "artist")
+        return await _apply_artist_playwright_fallback(artist_id, pathfinder, scraped)
 
     status, data = await _get_json(f"/artists/{artist_id}")
     if status == 200 and data:
         images = data.get("images") or []
         followers = (data.get("followers") or {}).get("total")
-        return {
+        result = {
             "name": data.get("name"),
             "image": images[0]["url"] if images else None,
             "followers": followers,
             "monthly_listeners": None,
             "owner_name": data.get("name"),
+            "playcount": None,
+            "total_plays": None,
         }
+        if not settings.PLAYWRIGHT_INLINE_FALLBACK:
+            return result
+        scraped = await _consume_scrape_task(playwright_task, "artist")
+        return await _apply_artist_playwright_fallback(artist_id, result, scraped)
 
     fallback = await _fallback_oembed("artist", artist_id)
     if fallback:
         fallback["monthly_listeners"] = None
-        return fallback
+        fallback["playcount"] = None
+        fallback["total_plays"] = None
+        fallback["crawl_mode"] = "oembed"
+        if not settings.PLAYWRIGHT_INLINE_FALLBACK:
+            return fallback
+        scraped = await _consume_scrape_task(playwright_task, "artist")
+        return await _apply_artist_playwright_fallback(artist_id, fallback, scraped)
+
+    scraped = await _consume_scrape_task(playwright_task, "artist")
+    if scraped:
+        return {
+            "name": scraped.get("name"),
+            "owner_name": scraped.get("owner_name") or scraped.get("name"),
+            "monthly_listeners": scraped.get("monthly_listeners"),
+            "followers": scraped.get("followers"),
+            "playcount": None,
+            "total_plays": None,
+            "crawl_mode": scraped.get("crawl_mode") or "playwright_artist",
+        }
 
     if status == 404:
         return {"error": True, "error_code": 404, "error_message": "Artist not found"}
@@ -480,7 +640,31 @@ async def query_artist(artist_id: str) -> dict[str, Any] | None:
 
 async def get_track(track_id: str) -> dict[str, Any] | None:
     """Get track data from Spotify Web API, fallback to oEmbed."""
+    playwright_task: asyncio.Task | None = None
+    if settings.PLAYWRIGHT_ENABLE_FALLBACK and settings.PLAYWRIGHT_INLINE_FALLBACK:
+        playwright_task = asyncio.create_task(spotify_web_scraper.scrape_track_stats(track_id))
+
     pathfinder = await _fetch_track_via_pathfinder(track_id)
+    if pathfinder is not None:
+        if pathfinder.get("error"):
+            if not settings.PLAYWRIGHT_INLINE_FALLBACK:
+                return pathfinder
+            scraped = await _consume_scrape_task(playwright_task, "track")
+            if scraped:
+                return {
+                    "name": scraped.get("name"),
+                    "duration_ms": scraped.get("duration_ms"),
+                    "playcount": scraped.get("playcount"),
+                    "monthly_plays": None,
+                    "monthly_listeners": None,
+                    "crawl_mode": scraped.get("crawl_mode") or "playwright_track",
+                }
+            return pathfinder
+
+        if not settings.PLAYWRIGHT_INLINE_FALLBACK:
+            return pathfinder
+        scraped = await _consume_scrape_task(playwright_task, "track")
+        return await _apply_track_playwright_fallback(track_id, pathfinder, scraped)
 
     status, data = await _get_json(f"/tracks/{track_id}")
     if status == 200 and data:
@@ -489,42 +673,41 @@ async def get_track(track_id: str) -> dict[str, Any] | None:
         artists = data.get("artists") or []
         primary_artist = artists[0]["name"] if artists else None
 
-        popularity = data.get("popularity")
-        pseudo_playcount = _estimate_track_playcount(popularity)
-
         webapi_result = {
             "name": data.get("name"),
             "image": images[0]["url"] if images else None,
             "owner_name": primary_artist,
             "duration_ms": data.get("duration_ms"),
             "release_date": album.get("release_date"),
-            "playcount": pseudo_playcount,
-            "monthly_plays": pseudo_playcount,
-            "monthly_listeners": pseudo_playcount,
+            "playcount": None,
+            "monthly_plays": None,
+            "monthly_listeners": None,
             "crawl_mode": "webapi_track",
         }
 
-        if pathfinder is not None:
-            merged = dict(pathfinder)
-            for key, value in webapi_result.items():
-                if merged.get(key) in (None, "") and value is not None:
-                    merged[key] = value
-            if pathfinder.get("playcount") is None and webapi_result.get("playcount") is not None:
-                merged["playcount"] = webapi_result["playcount"]
-                merged["monthly_plays"] = webapi_result["playcount"]
-                merged["monthly_listeners"] = webapi_result["playcount"]
-                merged["crawl_mode"] = "pathfinder_track+webapi"
-            return merged
-
-        return webapi_result
-
-    if pathfinder is not None:
-        return pathfinder
+        if not settings.PLAYWRIGHT_INLINE_FALLBACK:
+            return webapi_result
+        scraped = await _consume_scrape_task(playwright_task, "track")
+        return await _apply_track_playwright_fallback(track_id, webapi_result, scraped)
 
     fallback = await _fallback_oembed("track", track_id)
     if fallback:
         fallback["crawl_mode"] = "oembed"
-        return fallback
+        if not settings.PLAYWRIGHT_INLINE_FALLBACK:
+            return fallback
+        scraped = await _consume_scrape_task(playwright_task, "track")
+        return await _apply_track_playwright_fallback(track_id, fallback, scraped)
+
+    scraped = await _consume_scrape_task(playwright_task, "track")
+    if scraped:
+        return {
+            "name": scraped.get("name"),
+            "duration_ms": scraped.get("duration_ms"),
+            "playcount": scraped.get("playcount"),
+            "monthly_plays": None,
+            "monthly_listeners": None,
+            "crawl_mode": scraped.get("crawl_mode") or "playwright_track",
+        }
 
     if status == 404:
         return {"error": True, "error_code": 404, "error_message": "Track not found"}
@@ -582,15 +765,21 @@ async def fetch_playlist(playlist_id: str) -> dict[str, Any] | None:
         )
 
         if playlist_tracks:
-            total_plays = sum(t.get("playcount_estimate") or 0 for t in playlist_tracks)
             expected = total_tracks if total_tracks is not None else len(playlist_tracks)
             deep_complete = len(playlist_tracks) >= expected
+            exact_track_plays = [
+                t.get("playcount_estimate")
+                for t in playlist_tracks
+                if t.get("playcount_estimate") is not None
+            ]
+            total_plays = sum(exact_track_plays) if deep_complete and len(exact_track_plays) >= expected else None
             result.update(
                 {
                     "track_count": expected,
                     "tracks": playlist_tracks,
                     "tracks_crawled": len(playlist_tracks),
                     "tracks_expected": expected,
+                    "tracks_with_playcount": len(exact_track_plays),
                     "deep_crawl_pages": pages_fetched,
                     "deep_crawl_complete": deep_complete,
                     "total_plays": total_plays,
@@ -639,25 +828,58 @@ async def fetch_playlist(playlist_id: str) -> dict[str, Any] | None:
 
 async def fetch_album(album_id: str) -> dict[str, Any] | None:
     """Fetch album metadata from Spotify Web API, fallback to oEmbed."""
+    playwright_task: asyncio.Task | None = None
+    if settings.PLAYWRIGHT_ENABLE_FALLBACK and settings.PLAYWRIGHT_INLINE_FALLBACK:
+        playwright_task = asyncio.create_task(spotify_web_scraper.scrape_album_stats(album_id))
+
     pathfinder = await _fetch_album_via_pathfinder(album_id)
     if pathfinder is not None:
-        return pathfinder
+        if not settings.PLAYWRIGHT_INLINE_FALLBACK:
+            return pathfinder
+        scraped = await _consume_scrape_task(playwright_task, "album")
+        return await _apply_album_playwright_fallback(album_id, pathfinder, scraped)
 
     status, data = await _get_json(f"/albums/{album_id}")
     if status == 200 and data:
         images = data.get("images") or []
         artists = data.get("artists") or []
-        return {
+        result = {
             "name": data.get("name"),
             "image": images[0]["url"] if images else None,
             "owner_name": artists[0]["name"] if artists else None,
             "track_count": data.get("total_tracks"),
             "release_date": data.get("release_date"),
+            "playcount": None,
+            "total_plays": None,
+            "crawl_mode": "webapi_album",
         }
+        if not settings.PLAYWRIGHT_INLINE_FALLBACK:
+            return result
+        scraped = await _consume_scrape_task(playwright_task, "album")
+        return await _apply_album_playwright_fallback(album_id, result, scraped)
 
     fallback = await _fallback_oembed("album", album_id)
     if fallback:
-        return fallback
+        fallback["crawl_mode"] = "oembed"
+        if not settings.PLAYWRIGHT_INLINE_FALLBACK:
+            return fallback
+        scraped = await _consume_scrape_task(playwright_task, "album")
+        return await _apply_album_playwright_fallback(album_id, fallback, scraped)
+
+    scraped = await _consume_scrape_task(playwright_task, "album")
+    if scraped:
+        return {
+            "name": scraped.get("name"),
+            "owner_name": scraped.get("owner_name"),
+            "track_count": scraped.get("track_count"),
+            "tracks_crawled": scraped.get("tracks_crawled"),
+            "tracks_expected": scraped.get("tracks_expected"),
+            "tracks_with_playcount": scraped.get("tracks_with_playcount"),
+            "playcount": scraped.get("playcount"),
+            "total_plays": scraped.get("total_plays"),
+            "deep_crawl_complete": scraped.get("deep_crawl_complete"),
+            "crawl_mode": scraped.get("crawl_mode") or "playwright_album",
+        }
 
     if status == 404:
         return {"error": True, "error_code": 404, "error_message": "Album not found"}
@@ -683,49 +905,6 @@ def _pathfinder_date_to_iso(date_obj: dict[str, Any] | None) -> str | None:
     if year:
         return f"{year:04d}"
     return None
-
-
-def _estimate_months_since_release(release_date: str | None) -> int:
-    if not release_date:
-        return 12
-
-    formats = ["%Y-%m-%d", "%Y-%m", "%Y"]
-    parsed = None
-    for fmt in formats:
-        try:
-            parsed = datetime.strptime(release_date, fmt)
-            break
-        except ValueError:
-            continue
-
-    if parsed is None:
-        return 12
-
-    now = datetime.utcnow()
-    months = (now.year - parsed.year) * 12 + (now.month - parsed.month)
-    if months < 1:
-        return 1
-    return min(months, 120)
-
-
-def _estimate_track_playcount_from_artist_monthly(
-    monthly_listeners: int | None,
-    release_date: str | None,
-    track_count_divisor: int = 1,
-) -> tuple[int | None, int | None]:
-    if monthly_listeners is None or monthly_listeners <= 0:
-        return None, None
-
-    divisor = max(1, track_count_divisor)
-    months_alive = _estimate_months_since_release(release_date)
-
-    # Heuristic: 15% monthly listeners for single-track focus; divide by track count for album context.
-    monthly_est = int((monthly_listeners * 0.15) / divisor)
-    monthly_est = max(1000, monthly_est)
-
-    lifespan_factor = max(1, min(36, months_alive))
-    playcount_est = int(monthly_est * lifespan_factor)
-    return playcount_est, monthly_est
 
 
 def _pathfinder_extract_artists(artists_container: Any) -> tuple[list[dict[str, Any]], list[str]]:
@@ -760,40 +939,6 @@ def _pathfinder_extract_preview_url(previews_container: Any) -> str | None:
     return None
 
 
-def _extract_top_track_playcounts_from_discography(discography: dict[str, Any] | None) -> dict[str, int]:
-    if not isinstance(discography, dict):
-        return {}
-
-    result: dict[str, int] = {}
-    top_items = ((discography.get("topTracks") or {}).get("items") or [])
-    for row in top_items:
-        track = row.get("track") or {}
-        track_id = track.get("id") or _spotify_uri_to_id(track.get("uri"))
-        playcount = _safe_int(track.get("playcount"))
-        if track_id and playcount is not None:
-            result[track_id] = playcount
-    return result
-
-
-async def _fetch_artist_top_tracks_playcount_map(artist_id: str) -> dict[str, int]:
-    status, payload = await _pathfinder_query(
-        operation_name="queryArtist",
-        query_hash=_PATHFINDER_QUERY_ARTIST_HASH,
-        variables={"uri": f"spotify:artist:{artist_id}"},
-    )
-    if status != 200 or not payload:
-        return {}
-
-    artist_union = (payload.get("data") or {}).get("artistUnion")
-    if not isinstance(artist_union, dict):
-        return {}
-    if artist_union.get("__typename") != "Artist":
-        return {}
-
-    discography = artist_union.get("discography") or {}
-    return _extract_top_track_playcounts_from_discography(discography)
-
-
 async def _fetch_track_via_pathfinder(track_id: str) -> dict[str, Any] | None:
     status, payload = await _pathfinder_query(
         operation_name="queryTrack",
@@ -825,39 +970,9 @@ async def _fetch_track_via_pathfinder(track_id: str) -> dict[str, Any] | None:
     )
 
     duration_ms = _safe_int((track_union.get("duration") or {}).get("totalMilliseconds"))
-    track_uri = track_union.get("uri")
-    track_entity_id = track_union.get("id") or _spotify_uri_to_id(track_uri)
     playcount = _safe_int(track_union.get("playcount"))
 
-    if playcount is None and track_entity_id:
-        embedded_map = _extract_top_track_playcounts_from_discography(
-            primary_artist.get("discography") or {}
-        )
-        playcount = embedded_map.get(track_entity_id)
-
-    primary_artist_monthly = _safe_int((primary_artist.get("stats") or {}).get("monthlyListeners"))
-
-    if playcount is None and track_entity_id:
-        primary_artist_id = primary_artist.get("id") or _spotify_uri_to_id(primary_artist.get("uri"))
-        if primary_artist_id:
-            top_map = await _fetch_artist_top_tracks_playcount_map(primary_artist_id)
-            playcount = top_map.get(track_entity_id)
-
-    monthly_est = None
-    if playcount is None:
-        playcount, monthly_est = _estimate_track_playcount_from_artist_monthly(
-            primary_artist_monthly,
-            release_date,
-            track_count_divisor=1,
-        )
-
-    if monthly_est is None and playcount is not None:
-        months_alive = max(1, _estimate_months_since_release(release_date))
-        monthly_est = int(playcount / months_alive)
-
     source = "pathfinder_track"
-    if playcount is not None and _safe_int(track_union.get("playcount")) is None:
-        source = "pathfinder_track_enriched"
 
     return {
         "name": track_union.get("name"),
@@ -867,9 +982,9 @@ async def _fetch_track_via_pathfinder(track_id: str) -> dict[str, Any] | None:
         "duration_ms": duration_ms,
         "release_date": release_date,
         "playcount": playcount,
-        "monthly_plays": monthly_est,
-        "monthly_listeners": monthly_est,
-        "playcount_estimated": _safe_int(track_union.get("playcount")) is None and playcount is not None,
+        "monthly_plays": None,
+        "monthly_listeners": None,
+        "playcount_estimated": False,
         "crawl_mode": source,
     }
 
@@ -913,6 +1028,8 @@ async def _fetch_artist_via_pathfinder(artist_id: str) -> dict[str, Any] | None:
         "owner_image": avatar,
         "followers": _safe_int(stats.get("followers")),
         "monthly_listeners": _safe_int(stats.get("monthlyListeners")),
+        "playcount": None,
+        "total_plays": None,
         "album_count": album_count or None,
         "crawl_mode": "pathfinder_artist",
     }
@@ -961,10 +1078,8 @@ async def _fetch_album_via_pathfinder(album_id: str) -> dict[str, Any] | None:
     owner_name: str | None = None
     owner_image: str | None = None
     release_date: str | None = None
-    owner_monthly_listeners: int | None = None
 
     offset = 0
-    artist_top_cache: dict[str, dict[str, int]] = {}
     while offset < max_tracks:
         current_offset = offset
         status, payload = await _pathfinder_query(
@@ -1005,7 +1120,6 @@ async def _fetch_album_via_pathfinder(album_id: str) -> dict[str, Any] | None:
             owner_image = _first_image_from_sources(
                 ((main_artist.get("visuals") or {}).get("avatarImage") or {}).get("sources") or []
             )
-            owner_monthly_listeners = _safe_int((main_artist.get("stats") or {}).get("monthlyListeners"))
 
         tracks_v2 = album_union.get("tracksV2") or {}
         total_tracks = _safe_int(tracks_v2.get("totalCount")) or total_tracks
@@ -1019,26 +1133,6 @@ async def _fetch_album_via_pathfinder(album_id: str) -> dict[str, Any] | None:
                 normalized["album_id"] = album_id
                 normalized["album_release_date"] = release_date
                 normalized["image"] = normalized.get("image") or image
-
-                if normalized.get("playcount_estimate") is None:
-                    artists_list = normalized.get("artists") or []
-                    primary_artist_ref = artists_list[0] if artists_list else {}
-                    primary_artist_id = primary_artist_ref.get("spotify_id")
-                    track_ref_id = normalized.get("spotify_id")
-                    if primary_artist_id and track_ref_id:
-                        if primary_artist_id not in artist_top_cache:
-                            artist_top_cache[primary_artist_id] = await _fetch_artist_top_tracks_playcount_map(primary_artist_id)
-                        normalized["playcount_estimate"] = artist_top_cache[primary_artist_id].get(track_ref_id)
-
-                if normalized.get("playcount_estimate") is None:
-                    expected_tracks = _safe_int(total_tracks) or max(1, len(rows))
-                    estimated_playcount, _ = _estimate_track_playcount_from_artist_monthly(
-                        owner_monthly_listeners,
-                        release_date,
-                        track_count_divisor=expected_tracks,
-                    )
-                    normalized["playcount_estimate"] = estimated_playcount
-                    normalized["playcount_estimated"] = estimated_playcount is not None
 
                 tracks.append(normalized)
                 if len(tracks) >= max_tracks:
@@ -1060,8 +1154,9 @@ async def _fetch_album_via_pathfinder(album_id: str) -> dict[str, Any] | None:
         return None
 
     expected = total_tracks if total_tracks is not None else len(tracks)
+    deep_complete = bool(expected == 0 or len(tracks) >= expected)
     play_values = [t.get("playcount_estimate") for t in tracks if t.get("playcount_estimate") is not None]
-    total_plays = sum(play_values) if play_values else None
+    total_plays = sum(play_values) if deep_complete and len(play_values) >= expected else None
 
     return {
         "name": name,
@@ -1073,8 +1168,9 @@ async def _fetch_album_via_pathfinder(album_id: str) -> dict[str, Any] | None:
         "tracks": tracks,
         "tracks_crawled": len(tracks),
         "tracks_expected": expected,
+        "tracks_with_playcount": len(play_values),
         "deep_crawl_pages": pages_fetched,
-        "deep_crawl_complete": bool(expected == 0 or len(tracks) >= expected),
+        "deep_crawl_complete": deep_complete,
         "total_plays": total_plays,
         "playcount": total_plays,
         "crawl_mode": "pathfinder_album",

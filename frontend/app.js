@@ -8,13 +8,17 @@
 // ═══════════════════════════════════════════════════════════════════
 const CONFIG = {
     API_BASE: window.location.hostname === 'localhost'
-        ? 'http://localhost:8001/api'
+        ? 'http://localhost:8010/api'
         : '/api',
-    POLL_INTERVAL: 5000,      // 5s polling for pending jobs
+    POLL_INTERVAL: 1200,      // Faster polling for near-real-time row updates
     POPUP_WIDTH: 480,
     POPUP_HEIGHT: 720,
     SEARCH_DEBOUNCE: 300,
 };
+const GROUP_STORAGE_KEY = 'spoticheck_custom_groups_v1';
+const ALL_GROUP_ID = 'all';
+const ALL_GROUP_LABEL = 'All Links';
+const GROUP_SELECT_ALL = '__all__';
 
 // ═══════════════════════════════════════════════════════════════════
 // STATE
@@ -22,10 +26,16 @@ const CONFIG = {
 const state = {
     items: [],
     filteredItems: [],
-    groups: [{ id: 'all', name: 'All Links', count: 0 }],
-    activeGroup: 'all',
+    groups: [{ id: ALL_GROUP_ID, name: ALL_GROUP_LABEL, count: 0 }],
+    customGroups: [],
+    groupSearchQuery: '',
+    activeGroup: ALL_GROUP_ID,
+    isCreatingGroup: false,
+    renamingGroupId: null,
     searchQuery: '',
     pendingJobs: new Set(),
+    pendingJobToItem: new Map(),
+    batchRefresh: null,
     pollTimer: null,
     apiOnline: false,
 };
@@ -62,6 +72,8 @@ class SpotiCheckAPI {
     getItems(type = null) { return this._fetch(type ? `/items/${type}` : '/items'); }
     getItem(type, id)     { return this._fetch(`/items/${type}/${id}`); }
     getJob(jobId)         { return this._fetch(`/jobs/${jobId}`); }
+    deleteItem(type, id)  { return this._fetch(`/items/${type}/${id}`, { method: 'DELETE' }); }
+    clearItems()          { return this._fetch('/items', { method: 'DELETE' }); }
 
     crawl(url, group = null) {
         return this._fetch('/crawl', {
@@ -86,15 +98,34 @@ const api = new SpotiCheckAPI(CONFIG.API_BASE);
 
 /** Format large numbers with suffix (1.2k, 3.4M) */
 function formatNumber(n) {
-    if (n == null || isNaN(n)) return '—';
+    if (n == null || isNaN(n)) return '-';
     if (n >= 1_000_000) return (n / 1_000_000).toFixed(1).replace(/\.0$/, '') + 'M';
     if (n >= 1_000) return (n / 1_000).toFixed(1).replace(/\.0$/, '') + 'k';
     return n.toLocaleString();
 }
 
+/** Format full number with separators: 1000000 -> 1.000.000 */
+function formatDetailedNumber(n) {
+    if (n == null || isNaN(n)) return '-';
+    return Number(n).toLocaleString('vi-VN');
+}
+
+function formatDetailedMetric(n) {
+    if (n == null || isNaN(n)) return '-';
+    return Number(n).toLocaleString('vi-VN');
+}
+
+function formatDurationFromMs(ms) {
+    if (ms == null || isNaN(ms)) return null;
+    const totalSeconds = Math.floor(Number(ms) / 1000);
+    const mins = Math.floor(totalSeconds / 60);
+    const secs = totalSeconds % 60;
+    return `${mins}:${String(secs).padStart(2, '0')}`;
+}
+
 /** Relative time from ISO timestamp */
 function timeAgo(isoDate) {
-    if (!isoDate) return '—';
+    if (!isoDate) return '-';
     const diff = Date.now() - new Date(isoDate).getTime();
     const mins = Math.floor(diff / 60000);
     if (mins < 1) return 'Just now';
@@ -103,6 +134,23 @@ function timeAgo(isoDate) {
     if (hrs < 24) return `${hrs}h ago`;
     const days = Math.floor(hrs / 24);
     return `${days}d ago`;
+}
+
+function formatUpdatedAt(isoDate) {
+    if (!isoDate) return '-';
+    const d = new Date(isoDate);
+    if (Number.isNaN(d.getTime())) return '-';
+    const parts = new Intl.DateTimeFormat('vi-VN', {
+        timeZone: 'Asia/Ho_Chi_Minh',
+        hour12: false,
+        hour: '2-digit',
+        minute: '2-digit',
+        day: '2-digit',
+        month: '2-digit',
+        year: 'numeric',
+    }).formatToParts(d);
+    const get = (type) => parts.find((p) => p.type === type)?.value || '';
+    return `${get('hour')}:${get('minute')} ${get('day')}/${get('month')}/${get('year')}`;
 }
 
 /** Parse Spotify URL to get type and id */
@@ -128,6 +176,424 @@ function debounce(fn, ms) {
     return (...args) => { clearTimeout(t); t = setTimeout(() => fn(...args), ms); };
 }
 
+function itemKey(item) {
+    return `${item?.type || ''}:${item?.spotify_id || ''}`;
+}
+
+function mergeItemsKeepOrder(existingItems, incomingItems) {
+    const existing = Array.isArray(existingItems) ? existingItems : [];
+    const incoming = Array.isArray(incomingItems) ? incomingItems : [];
+
+    const incomingByKey = new Map();
+    incoming.forEach((it) => incomingByKey.set(itemKey(it), it));
+
+    const merged = [];
+    for (const oldItem of existing) {
+        const k = itemKey(oldItem);
+        if (!incomingByKey.has(k)) continue;
+        merged.push({ ...oldItem, ...incomingByKey.get(k) });
+        incomingByKey.delete(k);
+    }
+
+    for (const it of incoming) {
+        const k = itemKey(it);
+        if (!incomingByKey.has(k)) continue;
+        merged.push(it);
+        incomingByKey.delete(k);
+    }
+
+    return merged;
+}
+
+function normalizeGroupName(name) {
+    return String(name || '').trim();
+}
+
+function escapeAttrSelectorValue(value) {
+    const input = String(value || '');
+    if (window.CSS && typeof window.CSS.escape === 'function') {
+        return window.CSS.escape(input);
+    }
+    return input.replace(/\\/g, '\\\\').replace(/"/g, '\\"');
+}
+
+function loadCustomGroups() {
+    try {
+        const raw = localStorage.getItem(GROUP_STORAGE_KEY);
+        const parsed = raw ? JSON.parse(raw) : [];
+        if (!Array.isArray(parsed)) return [];
+        return parsed
+            .map(normalizeGroupName)
+            .filter(Boolean);
+    } catch {
+        return [];
+    }
+}
+
+function saveCustomGroups() {
+    const cleaned = Array.from(new Set(
+        (state.customGroups || [])
+            .map(normalizeGroupName)
+            .filter(Boolean)
+    ));
+    state.customGroups = cleaned;
+    localStorage.setItem(GROUP_STORAGE_KEY, JSON.stringify(cleaned));
+}
+
+function getActiveGroupName() {
+    if (state.activeGroup === ALL_GROUP_ID) return ALL_GROUP_LABEL;
+    const match = state.groups.find((g) => g.id === state.activeGroup);
+    return match?.name || state.activeGroup;
+}
+
+function updateGroupHeader() {
+    const name = getActiveGroupName();
+    const breadcrumb = document.getElementById('breadcrumb-group');
+    const pageTitle = document.getElementById('page-title');
+    if (breadcrumb) breadcrumb.textContent = name;
+    if (pageTitle) pageTitle.textContent = name;
+}
+
+function rebuildGroups() {
+    const counts = new Map();
+    for (const item of state.items) {
+        const group = normalizeGroupName(item.group);
+        if (!group) continue;
+        if (group.toLowerCase() === ALL_GROUP_ID) continue;
+        counts.set(group, (counts.get(group) || 0) + 1);
+    }
+
+    const groups = [{ id: ALL_GROUP_ID, name: ALL_GROUP_LABEL, count: state.items.length }];
+    const namedGroups = [];
+    const seen = new Set();
+    const pushUnique = (rawName) => {
+        const name = normalizeGroupName(rawName);
+        if (!name || name.toLowerCase() === ALL_GROUP_ID) return;
+        const key = name.toLowerCase();
+        if (seen.has(key)) return;
+        seen.add(key);
+        namedGroups.push(name);
+    };
+
+    // Show groups that already contain links first.
+    Array.from(counts.keys())
+        .sort((a, b) => a.localeCompare(b, 'vi'))
+        .forEach(pushUnique);
+
+    // Then append custom empty/user groups; newly created group stays at the bottom.
+    (state.customGroups || []).forEach((rawName) => {
+        const normalized = normalizeGroupName(rawName);
+        if (!normalized) return;
+        if (counts.has(normalized)) return;
+        pushUnique(normalized);
+    });
+
+    // Keep currently-selected group visible even if empty.
+    if (state.activeGroup !== ALL_GROUP_ID) {
+        pushUnique(state.activeGroup);
+    }
+
+    for (const name of namedGroups) {
+        groups.push({
+            id: name,
+            name,
+            count: counts.get(name) || 0,
+        });
+    }
+
+    state.groups = groups;
+    if (!state.groups.some((g) => g.id === state.activeGroup)) {
+        state.activeGroup = ALL_GROUP_ID;
+    }
+}
+
+function renderGroups() {
+    const container = document.getElementById('group-list');
+    if (!container) return;
+
+    const q = state.groupSearchQuery.trim().toLowerCase();
+    const groups = state.groups.filter((g) => {
+        if (g.id === ALL_GROUP_ID) return true;
+        if (!q) return true;
+        return g.name.toLowerCase().includes(q);
+    });
+
+    const groupButtons = groups.map((g) => {
+        const isActive = g.id === state.activeGroup;
+        const canDelete = g.id !== ALL_GROUP_ID;
+        const isRenaming = Boolean(
+            state.renamingGroupId
+            && state.renamingGroupId.toLowerCase() === g.id.toLowerCase()
+        );
+        return `
+            <button class="group-item ${canDelete ? 'group-item-has-delete' : ''} w-full flex items-center justify-between px-3 py-3 rounded-lg transition-colors ${isActive ? 'bg-primary/10 text-white' : 'text-secondary-text hover:text-white hover:bg-white/5'}" data-group="${escapeHtml(g.id)}">
+                <div class="flex items-center gap-3 min-w-0">
+                    <span class="material-icons-round ${isActive ? 'text-primary' : 'text-secondary-text'} text-sm">folder</span>
+                    ${isRenaming
+                        ? `<input
+                            data-role="rename-group-input"
+                            data-group-id="${escapeHtml(g.id)}"
+                            value="${escapeHtml(g.name)}"
+                            class="w-full bg-white/5 border border-primary/50 rounded-lg px-2 py-1 text-[14px] font-semibold text-white focus:outline-none focus:border-primary"
+                        >`
+                        : `<span class="text-[14px] font-semibold truncate" data-role="group-name" data-group-id="${escapeHtml(g.id)}">${escapeHtml(g.name)}</span>`
+                    }
+                </div>
+                <div class="group-item-actions flex items-center gap-2">
+                    ${isRenaming
+                        ? `
+                            <span
+                                class="material-icons-round text-secondary-text hover:text-white text-[18px] cursor-pointer"
+                                title="Save group name"
+                                data-action="save-rename-group"
+                                data-group-id="${escapeHtml(g.id)}"
+                                tabindex="0"
+                            >check</span>
+                            <span
+                                class="material-icons-round text-secondary-text hover:text-white text-[18px] cursor-pointer"
+                                title="Cancel rename"
+                                data-action="cancel-rename-group"
+                                data-group-id="${escapeHtml(g.id)}"
+                                tabindex="0"
+                            >close</span>
+                        `
+                        : `
+                            <span ${g.id === ALL_GROUP_ID ? 'id="group-count-all"' : ''} class="group-count text-xs font-bold ${isActive ? 'bg-primary/20 text-primary' : 'bg-white/10 text-secondary-text'} px-2 py-0.5 rounded-full">${g.count}</span>
+                            ${canDelete ? `
+                            <span
+                                class="group-delete-btn material-icons-round"
+                                title="Delete group"
+                                data-action="delete-group"
+                                data-group-id="${escapeHtml(g.id)}"
+                            >delete</span>` : ''}
+                        `
+                    }
+                </div>
+            </button>
+        `;
+    }).join('');
+
+    const createBox = state.isCreatingGroup
+        ? `
+        <div class="mt-3 p-3 rounded-lg border border-white/10 bg-white/5">
+            <input data-role="new-group-input" type="text" placeholder="Group name..." class="w-full bg-white/5 border border-white/10 rounded-lg px-3 py-2 text-sm text-white placeholder-secondary-text focus:outline-none focus:border-primary/60">
+            <div class="mt-2 flex gap-2">
+                <button data-action="create-group" class="flex-1 px-3 py-2 rounded-lg bg-white hover:bg-white/90 text-black text-sm font-semibold">Create</button>
+                <button data-action="cancel-create-group" class="flex-1 px-3 py-2 rounded-lg border border-white/20 text-secondary-text hover:text-white text-sm">Cancel</button>
+            </div>
+        </div>
+        `
+        : '';
+
+    container.innerHTML = `
+        ${groupButtons}
+        <button class="w-full flex items-center gap-3 px-3 py-3 rounded-lg text-secondary-text hover:text-primary transition-colors mt-4 cursor-pointer" data-action="new-group">
+            <span class="material-icons-round text-sm">add</span>
+            <span class="font-medium">New Group</span>
+        </button>
+        ${createBox}
+    `;
+}
+
+function populateGroupSelect() {
+    const select = document.getElementById('modal-group-select');
+    if (!select) return;
+
+    const options = [`<option value="${GROUP_SELECT_ALL}">${ALL_GROUP_LABEL} (Default)</option>`];
+    for (const g of state.groups) {
+        if (g.id === ALL_GROUP_ID) continue;
+        options.push(`<option value="${escapeHtml(g.id)}">${escapeHtml(g.name)}</option>`);
+    }
+    select.innerHTML = options.join('');
+
+    select.value = GROUP_SELECT_ALL;
+}
+
+function resolveSelectedGroup() {
+    const select = document.getElementById('modal-group-select');
+    const picked = normalizeGroupName(select?.value);
+    if (picked && picked !== GROUP_SELECT_ALL) return picked;
+    return null;
+}
+
+function handleCreateGroup(rawName) {
+    const name = normalizeGroupName(rawName);
+    if (!name) return;
+    if (name.toLowerCase() === ALL_GROUP_ID) {
+        showToast('"All Links" is reserved', 'error');
+        return;
+    }
+
+    const existing = state.groups.find((g) => g.id.toLowerCase() === name.toLowerCase());
+    if (existing) {
+        state.activeGroup = existing.id;
+        state.isCreatingGroup = false;
+        state.renamingGroupId = null;
+        updateGroupHeader();
+        renderGroups();
+        renderList();
+        populateGroupSelect();
+        showToast(`Switched to group: ${existing.name}`, 'info');
+        return;
+    }
+
+    state.customGroups.push(name);
+    saveCustomGroups();
+    state.activeGroup = name;
+    state.isCreatingGroup = false;
+    state.renamingGroupId = null;
+    rebuildGroups();
+    updateGroupHeader();
+    renderGroups();
+    renderList();
+    populateGroupSelect();
+    showToast(`Created group: ${name}`, 'success');
+}
+
+function handleDeleteGroup(rawGroupId) {
+    const groupId = normalizeGroupName(rawGroupId);
+    if (!groupId || groupId.toLowerCase() === ALL_GROUP_ID) return;
+
+    const target = state.groups.find((g) => g.id.toLowerCase() === groupId.toLowerCase());
+    const groupName = target?.name || groupId;
+    const confirmed = window.confirm(`Delete group "${groupName}"?\nAll links in this group will move to All Links.`);
+    if (!confirmed) return;
+
+    const groupKey = groupId.toLowerCase();
+    state.customGroups = (state.customGroups || []).filter((name) => {
+        const normalized = normalizeGroupName(name);
+        return normalized && normalized.toLowerCase() !== groupKey;
+    });
+    saveCustomGroups();
+
+    state.items = state.items.map((item) => {
+        const itemGroup = normalizeGroupName(item.group);
+        if (!itemGroup || itemGroup.toLowerCase() !== groupKey) return item;
+        return { ...item, group: null };
+    });
+
+    if ((state.activeGroup || '').toLowerCase() === groupKey) {
+        state.activeGroup = ALL_GROUP_ID;
+    }
+    state.isCreatingGroup = false;
+    if ((state.renamingGroupId || '').toLowerCase() === groupKey) {
+        state.renamingGroupId = null;
+    }
+    syncGroupUI(true);
+    renderList();
+    showToast(`Deleted group: ${groupName}`, 'success');
+}
+
+function startCreateGroupFlow() {
+    state.isCreatingGroup = true;
+    state.renamingGroupId = null;
+    renderGroups();
+    setTimeout(() => {
+        const input = document.querySelector('#group-list [data-role="new-group-input"]');
+        if (input) input.focus();
+    }, 0);
+}
+
+function cancelCreateGroupFlow() {
+    state.isCreatingGroup = false;
+    renderGroups();
+}
+
+function startRenameGroupFlow(rawGroupId) {
+    const groupId = normalizeGroupName(rawGroupId);
+    if (!groupId || groupId.toLowerCase() === ALL_GROUP_ID) return;
+
+    const target = state.groups.find((g) => normalizeGroupName(g.id).toLowerCase() === groupId.toLowerCase());
+    if (!target) return;
+
+    state.isCreatingGroup = false;
+    state.renamingGroupId = target.id;
+    renderGroups();
+    setTimeout(() => {
+        const input = document.querySelector('#group-list [data-role="rename-group-input"]');
+        if (!input) return;
+        input.focus();
+        const len = input.value.length;
+        input.setSelectionRange(len, len);
+    }, 0);
+}
+
+function cancelRenameGroupFlow() {
+    if (!state.renamingGroupId) return;
+    state.renamingGroupId = null;
+    renderGroups();
+}
+
+function handleRenameGroup(rawGroupId, rawName, opts = {}) {
+    const groupId = normalizeGroupName(rawGroupId);
+    if (!groupId || groupId.toLowerCase() === ALL_GROUP_ID) return;
+
+    const target = state.groups.find((g) => normalizeGroupName(g.id).toLowerCase() === groupId.toLowerCase());
+    if (!target) {
+        state.renamingGroupId = null;
+        renderGroups();
+        return;
+    }
+
+    const nextName = normalizeGroupName(rawName);
+    if (!nextName) {
+        if (opts.onBlur) {
+            cancelRenameGroupFlow();
+        } else {
+            showToast('Group name cannot be empty', 'error');
+        }
+        return;
+    }
+    if (nextName.toLowerCase() === ALL_GROUP_ID) {
+        showToast('"All Links" is reserved', 'error');
+        return;
+    }
+
+    const oldKey = target.id.toLowerCase();
+    const sameByCaseInsensitive = nextName.toLowerCase() === oldKey;
+    const duplicate = state.groups.find((g) => (
+        normalizeGroupName(g.id).toLowerCase() === nextName.toLowerCase()
+        && normalizeGroupName(g.id).toLowerCase() !== oldKey
+    ));
+    if (duplicate) {
+        showToast(`Group "${duplicate.name}" already exists`, 'error');
+        return;
+    }
+
+    if (!sameByCaseInsensitive || nextName !== target.id) {
+        state.customGroups = (state.customGroups || []).map((raw) => {
+            const n = normalizeGroupName(raw);
+            if (n.toLowerCase() !== oldKey) return n;
+            return nextName;
+        });
+        saveCustomGroups();
+
+        state.items = state.items.map((item) => {
+            const itemGroup = normalizeGroupName(item.group);
+            if (itemGroup.toLowerCase() !== oldKey) return item;
+            return { ...item, group: nextName };
+        });
+
+        if (normalizeGroupName(state.activeGroup).toLowerCase() === oldKey) {
+            state.activeGroup = nextName;
+        }
+    }
+
+    state.renamingGroupId = null;
+    syncGroupUI(true);
+    renderList({ preserveScroll: true });
+    if (!sameByCaseInsensitive || nextName !== target.id) {
+        showToast(`Renamed group: ${target.name} → ${nextName}`, 'success');
+    }
+}
+
+function syncGroupUI(syncSelect = false) {
+    rebuildGroups();
+    renderGroups();
+    updateGroupHeader();
+    if (syncSelect) populateGroupSelect();
+}
+
 /** Get badge class based on item type */
 function getBadgeClass(type) {
     const map = { playlist: 'badge-playlist', track: 'badge-track', album: 'badge-album', artist: 'badge-artist' };
@@ -139,10 +605,27 @@ function getMetricLabels(type) {
     switch (type) {
         case 'artist':   return { metric1: 'Monthly Listeners', metric2: 'Followers' };
         case 'track':    return { metric1: 'Monthly Plays',     metric2: 'Total Plays' };
-        case 'album':    return { metric1: '—',                 metric2: 'Total Plays' };
+        case 'album':    return { metric1: '-',                 metric2: 'Total Plays' };
         case 'playlist': return { metric1: 'Followers',         metric2: 'Total Plays' };
         default:         return { metric1: 'Metric 1',          metric2: 'Metric 2' };
     }
+}
+
+function getReleaseYear(item) {
+    const candidates = [
+        item?.release_year,
+        item?.release_date,
+        item?.album_release_date,
+        item?.year,
+    ];
+    for (const value of candidates) {
+        if (value == null) continue;
+        const s = String(value).trim();
+        if (!s) continue;
+        const m = s.match(/\b(19|20)\d{2}\b/);
+        if (m) return m[0];
+    }
+    return '-';
 }
 
 /** Get stat icons based on type */
@@ -151,42 +634,42 @@ function getStatIcons(item) {
         case 'playlist':
             return `
                 <div class="flex items-center gap-1">
-                    <span class="material-icons-round text-sm">favorite_border</span>
-                    <span class="text-xs">${formatNumber(item.followers || item.saves)}</span>
+                    <span class="material-icons-round list-stat-icon">favorite_border</span>
+                    <span class="list-stat-value">${formatNumber(item.followers || item.saves)}</span>
                 </div>
                 <div class="flex items-center gap-1">
-                    <span class="material-icons-round text-sm">music_note</span>
-                    <span class="text-xs">${formatNumber(item.track_count)}</span>
+                    <span class="material-icons-round list-stat-icon">music_note</span>
+                    <span class="list-stat-value">${formatNumber(item.track_count)}</span>
                 </div>`;
         case 'track':
             return `
                 <div class="flex items-center gap-1">
-                    <span class="material-icons-round text-sm">bookmark_border</span>
-                    <span class="text-xs">${formatNumber(item.saves)}</span>
+                    <span class="material-icons-round list-stat-icon">schedule</span>
+                    <span class="list-stat-value">${item.duration || '-'}</span>
                 </div>
                 <div class="flex items-center gap-1">
-                    <span class="material-icons-round text-sm">schedule</span>
-                    <span class="text-xs">${item.duration || '—'}</span>
+                    <span class="material-icons-round list-stat-icon">calendar_today</span>
+                    <span class="list-stat-value">${getReleaseYear(item)}</span>
                 </div>`;
         case 'album':
             return `
                 <div class="flex items-center gap-1">
-                    <span class="material-icons-round text-sm">album</span>
-                    <span class="text-xs">${formatNumber(item.track_count)} tracks</span>
+                    <span class="material-icons-round list-stat-icon">music_note</span>
+                    <span class="list-stat-value">${formatNumber(item.track_count)}</span>
                 </div>
                 <div class="flex items-center gap-1">
-                    <span class="material-icons-round text-sm">calendar_today</span>
-                    <span class="text-xs">${item.release_date || '—'}</span>
+                    <span class="material-icons-round list-stat-icon">calendar_today</span>
+                    <span class="list-stat-value">${getReleaseYear(item)}</span>
                 </div>`;
         case 'artist':
             return `
                 <div class="flex items-center gap-1">
-                    <span class="material-icons-round text-sm">people</span>
-                    <span class="text-xs">${formatNumber(item.followers)}</span>
+                    <span class="material-icons-round list-stat-icon">people</span>
+                    <span class="list-stat-value">${formatNumber(item.followers)}</span>
                 </div>
                 <div class="flex items-center gap-1">
-                    <span class="material-icons-round text-sm">library_music</span>
-                    <span class="text-xs">${formatNumber(item.album_count)} albums</span>
+                    <span class="material-icons-round list-stat-icon">library_music</span>
+                    <span class="list-stat-value">${formatNumber(item.album_count)} albums</span>
                 </div>`;
         default:
             return '';
@@ -196,22 +679,22 @@ function getStatIcons(item) {
 /** Get metric 1 value (context-aware) */
 function getMetric1(item) {
     switch (item.type) {
-        case 'artist':   return formatNumber(item.monthly_listeners);
-        case 'track':    return formatNumber(item.monthly_plays);
-        case 'playlist': return formatNumber(item.followers || item.saves);
-        case 'album':    return '—';
-        default:         return '—';
+        case 'artist':   return formatDetailedMetric(item.monthly_listeners);
+        case 'track':    return formatDetailedMetric(item.monthly_plays);
+        case 'playlist': return formatDetailedMetric(item.followers || item.saves);
+        case 'album':    return '-';
+        default:         return '-';
     }
 }
 
 /** Get metric 2 value (context-aware) */
 function getMetric2(item) {
     switch (item.type) {
-        case 'artist':   return formatNumber(item.followers);
-        case 'track':    return formatNumber(item.playcount);
-        case 'playlist': return formatNumber(item.total_plays);
-        case 'album':    return formatNumber(item.total_plays);
-        default:         return '—';
+        case 'artist':   return formatDetailedMetric(item.total_plays);
+        case 'track':    return formatDetailedMetric(item.playcount);
+        case 'playlist': return formatDetailedMetric(item.total_plays);
+        case 'album':    return formatDetailedMetric(item.total_plays);
+        default:         return '-';
     }
 }
 
@@ -226,6 +709,52 @@ function getStatusInfo(item) {
     return statusMap[item.status] || statusMap.pending;
 }
 
+function normalizeJobResult(result, fallback = {}) {
+    const resultObj = result || {};
+    const merged = { ...fallback, ...resultObj };
+    const has = (key) => Object.prototype.hasOwnProperty.call(resultObj, key);
+    const keepFallbackWhenEmpty = (incoming, current) => {
+        if (incoming === null || incoming === undefined) return current;
+        if (typeof incoming === 'string' && !incoming.trim()) return current;
+        return incoming;
+    };
+
+    let monthly = fallback.monthly_plays ?? fallback.monthly_listeners ?? null;
+    if (has('monthly_plays')) monthly = keepFallbackWhenEmpty(resultObj.monthly_plays, monthly);
+    else if (has('monthly_listeners')) monthly = keepFallbackWhenEmpty(resultObj.monthly_listeners, monthly);
+
+    let total = fallback.total_plays ?? fallback.playcount ?? null;
+    if (has('total_plays')) total = keepFallbackWhenEmpty(resultObj.total_plays, total);
+    else if (has('playcount')) total = keepFallbackWhenEmpty(resultObj.playcount, total);
+
+    let playcount = fallback.playcount ?? fallback.total_plays ?? null;
+    if (has('playcount')) playcount = keepFallbackWhenEmpty(resultObj.playcount, playcount);
+    else if (has('total_plays')) playcount = keepFallbackWhenEmpty(resultObj.total_plays, playcount);
+
+    let duration = fallback.duration ?? null;
+    if (has('duration')) {
+        duration = keepFallbackWhenEmpty(resultObj.duration, duration);
+    } else if (has('duration_ms')) {
+        duration = keepFallbackWhenEmpty(formatDurationFromMs(resultObj.duration_ms), duration);
+    } else if (merged.duration_ms != null) {
+        duration = keepFallbackWhenEmpty(formatDurationFromMs(merged.duration_ms), duration);
+    }
+
+    return {
+        ...fallback,
+        ...resultObj,
+        spotify_id: merged.spotify_id || fallback.spotify_id,
+        type: merged.type || fallback.type,
+        monthly_plays: monthly,
+        monthly_listeners: merged.monthly_listeners ?? monthly,
+        total_plays: total,
+        playcount: playcount,
+        duration: duration,
+        saves: merged.saves ?? merged.followers ?? fallback.saves ?? fallback.followers ?? null,
+        last_checked: new Date().toISOString(),
+    };
+}
+
 // ═══════════════════════════════════════════════════════════════════
 // ROW RENDERER
 // ═══════════════════════════════════════════════════════════════════
@@ -234,20 +763,24 @@ function renderRow(item) {
     const status = getStatusInfo(item);
     const isError = item.status === 'error';
     const spotifyUrl = getSpotifyUrl(item.type, item.spotify_id);
+    const updatedAt = formatUpdatedAt(item.last_checked || item.created_at);
 
     // Owner / Artist display
     const ownerHtml = item.owner_image
-        ? `<img alt="Owner" class="w-6 h-6 rounded-full" src="${item.owner_image}">`
-        : `<div class="w-6 h-6 bg-white/10 rounded-full flex items-center justify-center text-[10px] font-bold text-secondary-text">${(item.owner_name || '?').slice(0, 2).toUpperCase()}</div>`;
+        ? `<img alt="Owner" class="list-owner-avatar" src="${item.owner_image}">`
+        : `<div class="list-owner-avatar list-owner-fallback">${(item.owner_name || '?').slice(0, 2).toUpperCase()}</div>`;
 
     const row = document.createElement('div');
     row.className = 'custom-grid-row px-4 py-3 bg-white/5 rounded-lg border border-transparent hover:bg-row-hover hover:border-white/10 transition-all group';
     row.dataset.spotifyUrl = spotifyUrl;
     row.dataset.itemId = item.id;
     row.dataset.type = item.type;
+    row.dataset.spotifyId = item.spotify_id;
 
     // Click → open popup window
     row.addEventListener('click', (e) => {
+        // Ignore clicks on row actions (delete, etc.)
+        if (e.target.closest('.row-delete-btn') || e.target.closest('.row-refresh-btn')) return;
         // Don't open if user is selecting text
         if (window.getSelection().toString()) return;
         openSpotifyPopup(spotifyUrl);
@@ -256,13 +789,13 @@ function renderRow(item) {
     row.innerHTML = `
         <!-- Left: Asset Details -->
         <div class="flex items-center gap-4">
-            <img alt="Cover" class="w-[70px] h-[70px] rounded-lg object-cover shadow-lg" src="${item.image || `https://picsum.photos/seed/${item.spotify_id}/128/128`}">
+            <img alt="Cover" class="list-cover-image" src="${item.image || `https://picsum.photos/seed/${item.spotify_id}/128/128`}">
             <div>
-                <span class="text-[10px] font-bold ${isError ? 'badge-error' : getBadgeClass(item.type)} px-1.5 py-0.5 rounded uppercase mb-1 inline-block">${item.type}</span>
-                <h3 class="font-bold text-[15px] leading-snug ${isError ? 'text-white/80' : ''}">${escapeHtml(item.name || 'Unknown')}</h3>
+                <span class="list-type-badge ${isError ? 'badge-error' : getBadgeClass(item.type)}">${item.type}</span>
+                <h3 class="list-asset-title ${isError ? 'text-white/80' : ''}">${escapeHtml(item.name || 'Unknown')}</h3>
                 ${isError
-                    ? `<p class="text-[11px] text-red-400 font-medium mt-0.5 flex items-center gap-1"><span class="material-icons-round" style="font-size:12px">warning</span> Error ${item.error_code}: ${item.error_message || 'Unknown error'}</p>`
-                    : `<p class="text-[11px] text-secondary-text font-mono truncate mt-0.5">spotify:${item.type}:${item.spotify_id}</p>`
+                    ? `<p class="list-asset-error text-red-400 font-medium flex items-center gap-1"><span class="material-icons-round list-error-icon">warning</span> Error ${item.error_code}: ${item.error_message || 'Unknown error'}</p>`
+                    : `<p class="list-asset-uri text-secondary-text">spotify:${item.type}:${item.spotify_id}</p>`
                 }
             </div>
         </div>
@@ -271,20 +804,30 @@ function renderRow(item) {
             <div class="flex items-center gap-2 meta-cell">
                 ${ownerHtml}
                 <div>
-                    <div class="text-sm font-medium leading-tight truncate">${escapeHtml(item.owner_name || '—')}</div>
-                    <div class="text-[11px] text-secondary-text leading-tight">${item.added_date || '—'}</div>
+                    <div class="list-owner-name">${escapeHtml(item.owner_name || '-')}</div>
+                    <div class="list-owner-time text-secondary-text">${updatedAt}</div>
                 </div>
             </div>
-            <div class="flex items-center gap-3 text-secondary-text meta-cell">
+            <div class="list-stats-cell text-secondary-text meta-cell">
                 ${getStatIcons(item)}
             </div>
-            <div class="text-sm text-secondary-text meta-cell">${getMetric1(item)}</div>
-            <div class="text-sm text-secondary-text meta-cell">${getMetric2(item)}</div>
+            <div class="list-metric-value text-secondary-text meta-cell">${getMetric1(item)}</div>
+            <div class="list-metric-value text-secondary-text meta-cell">${getMetric2(item)}</div>
             <div class="flex items-center gap-2 meta-cell">
                 <span class="status-dot ${status.dot}"></span>
-                <span class="text-sm font-medium ${status.color} truncate">${status.label}</span>
+                <span class="list-status-label ${status.color} truncate">${status.label}</span>
             </div>
-            <div class="text-xs text-secondary-text meta-cell text-right">${timeAgo(item.last_checked)}</div>
+            <div class="meta-cell text-right row-action-cell">
+                <span class="list-checked-text text-secondary-text row-checked">${timeAgo(item.last_checked)}</span>
+                <div class="row-action-buttons">
+                    <button type="button" class="row-refresh-btn" aria-label="Refresh row">
+                        <span class="material-icons-round">refresh</span>
+                    </button>
+                    <button type="button" class="row-delete-btn" aria-label="Delete link">
+                        <span class="material-icons-round">delete</span>
+                    </button>
+                </div>
+            </div>
         </div>
     `;
 
@@ -302,16 +845,26 @@ function escapeHtml(str) {
 // RENDER ENGINE
 // ═══════════════════════════════════════════════════════════════════
 
-function renderList() {
+function renderList(opts = {}) {
+    const preserveScroll = Boolean(opts?.preserveScroll);
     const container = document.getElementById('link-list');
     const skeleton = document.getElementById('skeleton-container');
     const emptyState = document.getElementById('empty-state');
+    const listWrap = document.querySelector('.list-wrap');
+    const prevScrollTop = preserveScroll && listWrap ? listWrap.scrollTop : null;
+    const restoreScroll = () => {
+        if (prevScrollTop == null || !listWrap) return;
+        requestAnimationFrame(() => {
+            listWrap.scrollTop = prevScrollTop;
+        });
+    };
+    syncGroupUI();
 
     // Filter items
     let items = state.items;
 
     // Group filter
-    if (state.activeGroup !== 'all') {
+    if (state.activeGroup !== ALL_GROUP_ID) {
         items = items.filter(i => i.group === state.activeGroup);
     }
 
@@ -336,6 +889,7 @@ function renderList() {
     if (items.length === 0 && state.items.length === 0) {
         // No data at all → show empty state
         if (emptyState) emptyState.style.display = '';
+        restoreScroll();
         return;
     }
 
@@ -345,8 +899,12 @@ function renderList() {
         // Has data but filtered to zero
         const noResult = document.createElement('div');
         noResult.className = 'custom-grid-row text-center py-12 text-secondary-text';
-        noResult.innerHTML = `<div class="col-span-2">No results for "${escapeHtml(state.searchQuery)}"</div>`;
+        const msg = state.searchQuery
+            ? `No results for "${escapeHtml(state.searchQuery)}"`
+            : `No links in "${escapeHtml(getActiveGroupName())}"`;
+        noResult.innerHTML = `<div class="col-span-2">${msg}</div>`;
         container.appendChild(noResult);
+        restoreScroll();
         return;
     }
 
@@ -357,23 +915,26 @@ function renderList() {
 
     // Update KPIs
     updateKPIs();
+    restoreScroll();
 }
 
 function updateKPIs() {
-    const all = state.items;
-    const active = all.filter(i => i.status === 'active').length;
-    const errors = all.filter(i => i.status === 'error').length;
-    const crawling = all.filter(i => i.status === 'crawling' || i.status === 'pending').length;
+    const scoped = state.activeGroup === ALL_GROUP_ID
+        ? state.items
+        : state.items.filter((i) => i.group === state.activeGroup);
+    const active = scoped.filter(i => i.status === 'active').length;
+    const errors = scoped.filter(i => i.status === 'error').length;
+    const crawling = scoped.filter(i => i.status === 'crawling' || i.status === 'pending').length;
 
-    setText('kpi-total', all.length);
+    setText('kpi-total', scoped.length);
     setText('kpi-active', active);
     setText('kpi-errors', errors);
     setText('kpi-crawling', crawling);
-    setText('footer-total', all.length);
+    setText('footer-total', scoped.length);
     setText('footer-active', active);
     setText('footer-errors', errors);
     setText('footer-crawling', crawling);
-    setText('group-count-all', all.length);
+    setText('group-count-all', state.items.length);
 }
 
 function setText(id, val) {
@@ -396,6 +957,152 @@ function updateApiStatus() {
 // ═══════════════════════════════════════════════════════════════════
 // POPUP WINDOW — Open Spotify link in mini window
 // ═══════════════════════════════════════════════════════════════════
+
+async function handleDeleteItem(item) {
+    if (!item) return;
+    const label = item.name || `${item.type}:${item.spotify_id}`;
+    state.items = state.items.filter((i) => i.id !== item.id);
+    state.pendingJobs.delete(item.id);
+    for (const [jobId, itemId] of state.pendingJobToItem.entries()) {
+        if (itemId === item.id || jobId === item.id) {
+            state.pendingJobToItem.delete(jobId);
+        }
+    }
+    renderList({ preserveScroll: true });
+
+    try {
+        if (state.apiOnline) {
+            await api.deleteItem(item.type, item.spotify_id);
+        }
+        showToast(`Deleted: ${label}`, 'success');
+    } catch (e) {
+        showToast(`Deleted local only: ${label} (${e.message})`, 'info');
+    }
+}
+
+function markItemAsRefreshing(item, nowIso) {
+    return {
+        ...item,
+        status: 'crawling',
+        error_code: null,
+        error_message: null,
+        last_checked: nowIso,
+    };
+}
+
+async function handleRefreshItem(item) {
+    if (!item) return;
+    if (!state.apiOnline) {
+        showToast('API offline, cannot refresh this row', 'info');
+        return;
+    }
+
+    const url = getSpotifyUrl(item.type, item.spotify_id);
+    const now = new Date().toISOString();
+    const idx = state.items.findIndex((i) => i.id === item.id);
+    if (idx >= 0) {
+        state.items[idx] = markItemAsRefreshing(state.items[idx], now);
+    }
+    renderList({ preserveScroll: true });
+
+    try {
+        const result = await api.crawl(url, item.group || null);
+        const jobId = result?.job_id;
+        if (!jobId) {
+            throw new Error('Backend did not return job_id');
+        }
+        state.pendingJobs.add(jobId);
+        state.pendingJobToItem.set(jobId, item.id);
+        startPolling();
+        showToast(`Refreshing: ${item.name || `${item.type}:${item.spotify_id}`}`, 'success');
+    } catch (e) {
+        if (idx >= 0) {
+            state.items[idx] = {
+                ...state.items[idx],
+                status: 'error',
+                error_message: e.message,
+                last_checked: new Date().toISOString(),
+            };
+        }
+        renderList({ preserveScroll: true });
+        showToast(`Refresh failed: ${e.message}`, 'error');
+    }
+}
+
+async function clearList() {
+    if (state.items.length === 0) {
+        showToast('List is already empty', 'info');
+        return;
+    }
+
+    state.items = [];
+    state.filteredItems = [];
+    state.pendingJobs.clear();
+    state.pendingJobToItem.clear();
+    stopPolling();
+    renderList({ preserveScroll: true });
+
+    try {
+        if (state.apiOnline) {
+            await api.clearItems();
+        }
+        showToast('List cleared', 'success');
+    } catch (e) {
+        showToast(`Clear list local only: ${e.message}`, 'info');
+    }
+}
+
+async function refreshAllItems() {
+    const targetItems = state.activeGroup === ALL_GROUP_ID
+        ? state.items
+        : state.items.filter((i) => i.group === state.activeGroup);
+
+    if (targetItems.length === 0) {
+        showToast('No links to refresh', 'info');
+        return;
+    }
+
+    if (!state.apiOnline) {
+        showToast('API offline, loading local data', 'info');
+        await loadData({ preserveScroll: true });
+        return;
+    }
+
+    const now = new Date().toISOString();
+    const targetKeys = new Set(targetItems.map((item) => itemKey(item)));
+    state.items = state.items.map((item) => (
+        targetKeys.has(itemKey(item)) ? markItemAsRefreshing(item, now) : item
+    ));
+    renderList({ preserveScroll: true });
+
+    try {
+        const itemIds = targetItems.map((item) => item.id);
+        const urls = targetItems.map((item) => getSpotifyUrl(item.type, item.spotify_id));
+        const result = await api.crawlBatch(urls);
+        const jobIds = result.job_ids || [];
+        jobIds.forEach((jobId, idx) => {
+            state.pendingJobs.add(jobId);
+            if (itemIds[idx]) {
+                state.pendingJobToItem.set(jobId, itemIds[idx]);
+            }
+        });
+        state.batchRefresh = {
+            active: true,
+            groupName: getActiveGroupName(),
+            expected: jobIds.length,
+            done: 0,
+            errors: 0,
+            jobIds: new Set(jobIds),
+        };
+        startPolling();
+        renderList({ preserveScroll: true });
+        showToast(`Refresh started for ${result.count || urls.length} links`, 'success');
+    } catch (e) {
+        state.batchRefresh = null;
+        await loadData({ preserveScroll: true });
+        showToast(`Refresh fallback loaded data: ${e.message}`, 'info');
+    }
+}
 
 function openSpotifyPopup(url) {
     const w = CONFIG.POPUP_WIDTH;
@@ -421,6 +1128,7 @@ function openModal() {
     document.getElementById('modal-batch-area').classList.add('hidden');
     document.getElementById('modal-url-hint').textContent = 'Supports: playlist, track, album, and artist links';
     document.getElementById('modal-url-hint').className = 'text-xs text-secondary-text mt-2';
+    populateGroupSelect();
 }
 
 function closeModal() {
@@ -445,24 +1153,45 @@ async function submitSingle() {
         return;
     }
 
-    const group = document.getElementById('modal-group-select').value || null;
+    const group = resolveSelectedGroup();
 
     try {
         const result = await api.crawl(url, group);
+        const jobId = result?.job_id;
+        if (!jobId) {
+            throw new Error('Backend did not return job_id');
+        }
         showToast(`Added ${parsed.type}: crawling started`, 'success');
 
-        // Add placeholder item to state
-        const newItem = {
-            id: result.job_id || `temp-${Date.now()}`,
-            spotify_id: parsed.id,
-            type: parsed.type,
-            name: `Loading ${parsed.type}...`,
-            status: 'crawling',
-            group: group,
-            last_checked: new Date().toISOString(),
-        };
-        state.items.unshift(newItem);
-        state.pendingJobs.add(newItem.id);
+        const now = new Date().toISOString();
+        const existingIdx = state.items.findIndex(
+            (item) => item.type === parsed.type && item.spotify_id === parsed.id
+        );
+
+        if (existingIdx >= 0) {
+            state.items[existingIdx] = {
+                ...state.items[existingIdx],
+                status: 'crawling',
+                error_code: null,
+                error_message: null,
+                last_checked: now,
+            };
+            state.pendingJobToItem.set(jobId, state.items[existingIdx].id);
+        } else {
+            const newItem = {
+                id: `temp-${jobId}`,
+                spotify_id: parsed.id,
+                type: parsed.type,
+                name: `Loading ${parsed.type}...`,
+                status: 'crawling',
+                group: group,
+                last_checked: now,
+            };
+            state.items.unshift(newItem);
+            state.pendingJobToItem.set(jobId, newItem.id);
+        }
+
+        state.pendingJobs.add(jobId);
         startPolling();
         renderList();
         closeModal();
@@ -487,28 +1216,58 @@ async function submitBatch() {
         return;
     }
 
-    const group = document.getElementById('modal-group-select').value || null;
+    const group = resolveSelectedGroup();
 
     try {
         const result = await api.crawlBatch(urls, group);
         showToast(`Added ${urls.length} links — crawling started`, 'success');
 
-        // Add placeholders
+        const now = new Date().toISOString();
+        let mappedJobs = 0;
+
+        // Mark existing rows as crawling or add placeholders
         urls.forEach((url, i) => {
             const parsed = parseSpotifyUrl(url);
             if (!parsed) return;
-            const newItem = {
-                id: result.job_ids?.[i] || `temp-${Date.now()}-${i}`,
-                spotify_id: parsed.id,
-                type: parsed.type,
-                name: `Loading ${parsed.type}...`,
-                status: 'crawling',
-                group: group,
-                last_checked: new Date().toISOString(),
-            };
-            state.items.unshift(newItem);
-            state.pendingJobs.add(newItem.id);
+            const jobId = result.job_ids?.[i];
+            if (!jobId) return;
+
+            const existingIdx = state.items.findIndex(
+                (item) => item.type === parsed.type && item.spotify_id === parsed.id
+            );
+
+            if (existingIdx >= 0) {
+                state.items[existingIdx] = {
+                    ...state.items[existingIdx],
+                    status: 'crawling',
+                    error_code: null,
+                    error_message: null,
+                    last_checked: now,
+                };
+                state.pendingJobToItem.set(jobId, state.items[existingIdx].id);
+            } else {
+                const newItem = {
+                    id: `temp-${jobId}`,
+                    spotify_id: parsed.id,
+                    type: parsed.type,
+                    name: `Loading ${parsed.type}...`,
+                    status: 'crawling',
+                    group: group,
+                    last_checked: now,
+                };
+                state.items.unshift(newItem);
+                state.pendingJobToItem.set(jobId, newItem.id);
+            }
+
+            state.pendingJobs.add(jobId);
+            mappedJobs += 1;
         });
+
+        if (mappedJobs === 0) {
+            showToast('No jobs were created by backend', 'error');
+            return;
+        }
+
         startPolling();
         renderList();
         closeModal();
@@ -542,6 +1301,7 @@ function showToast(message, type = 'info') {
 
 function startPolling() {
     if (state.pollTimer) return;
+    pollJobs();
     state.pollTimer = setInterval(pollJobs, CONFIG.POLL_INTERVAL);
 }
 
@@ -558,31 +1318,97 @@ async function pollJobs() {
         return;
     }
 
-    for (const jobId of state.pendingJobs) {
+    let shouldReload = false;
+    let hasTerminalUpdate = false;
+    let shouldNotifyBatchDone = false;
+    for (const jobId of Array.from(state.pendingJobs)) {
         try {
             const job = await api.getJob(jobId);
+            const mappedItemId = state.pendingJobToItem.get(jobId) || jobId;
+            const inBatch = Boolean(
+                state.batchRefresh?.active
+                && state.batchRefresh?.jobIds?.has(jobId)
+            );
             if (job.status === 'completed') {
+                hasTerminalUpdate = true;
                 state.pendingJobs.delete(jobId);
+                state.pendingJobToItem.delete(jobId);
+                const completedAt = job.completed_at || new Date().toISOString();
                 // Update item in state with real data
-                const idx = state.items.findIndex(i => i.id === jobId);
+                const idx = state.items.findIndex(i => i.id === mappedItemId || i.id === jobId);
                 if (idx >= 0 && job.result) {
-                    state.items[idx] = { ...state.items[idx], ...job.result, status: 'active' };
+                    state.items[idx] = {
+                        ...state.items[idx],
+                        ...normalizeJobResult(job.result, state.items[idx]),
+                        status: 'active',
+                        last_checked: completedAt,
+                    };
+                } else if (job.result) {
+                    const bySpotifyId = state.items.findIndex(i => i.spotify_id === job.result.spotify_id);
+                    if (bySpotifyId >= 0) {
+                        state.items[bySpotifyId] = {
+                            ...state.items[bySpotifyId],
+                            ...normalizeJobResult(job.result, state.items[bySpotifyId]),
+                            status: 'active',
+                            last_checked: completedAt,
+                        };
+                    } else {
+                        shouldReload = true;
+                    }
+                } else {
+                    shouldReload = true;
                 }
-                showToast(`Crawl completed: ${job.result?.name || 'item'}`, 'success');
+                if (inBatch && state.batchRefresh) {
+                    state.batchRefresh.done += 1;
+                    shouldNotifyBatchDone = true;
+                } else {
+                    showToast(`Crawl completed: ${job.result?.name || 'item'}`, 'success');
+                }
             } else if (job.status === 'error') {
+                hasTerminalUpdate = true;
                 state.pendingJobs.delete(jobId);
-                const idx = state.items.findIndex(i => i.id === jobId);
+                state.pendingJobToItem.delete(jobId);
+                const idx = state.items.findIndex(i => i.id === mappedItemId || i.id === jobId);
                 if (idx >= 0) {
                     state.items[idx].status = 'error';
                     state.items[idx].error_message = job.error;
+                    state.items[idx].last_checked = job.completed_at || new Date().toISOString();
+                } else {
+                    shouldReload = true;
                 }
-                showToast(`Crawl failed: ${job.error || 'Unknown'}`, 'error');
+                if (inBatch && state.batchRefresh) {
+                    state.batchRefresh.done += 1;
+                    state.batchRefresh.errors += 1;
+                    shouldNotifyBatchDone = true;
+                } else {
+                    showToast(`Crawl failed: ${job.error || 'Unknown'}`, 'error');
+                }
             }
         } catch {
             // API offline, skip this poll cycle
         }
     }
-    renderList();
+
+    if (state.batchRefresh?.active && shouldNotifyBatchDone) {
+        const batch = state.batchRefresh;
+        if (batch.done >= batch.expected) {
+            const ok = Math.max(0, batch.expected - batch.errors);
+            if (batch.errors > 0) {
+                showToast(`Refresh done (${batch.groupName}): ${ok} ok, ${batch.errors} errors`, 'info');
+            } else {
+                showToast(`Refresh done for ${batch.groupName}: ${ok} links`, 'success');
+            }
+            state.batchRefresh = null;
+        }
+    }
+
+    if (shouldReload) {
+        await loadData({ preserveScroll: true });
+    } else if (hasTerminalUpdate) {
+        renderList({ preserveScroll: true });
+    } else {
+        renderList({ preserveScroll: true });
+    }
 }
 
 // ═══════════════════════════════════════════════════════════════════
@@ -704,7 +1530,8 @@ function getDemoData() {
     ];
 }
 
-async function loadData() {
+async function loadData(opts = {}) {
+    const preserveScroll = Boolean(opts?.preserveScroll);
     const skeleton = document.getElementById('skeleton-container');
 
     try {
@@ -714,16 +1541,19 @@ async function loadData() {
         updateApiStatus();
 
         const data = await api.getItems();
-        state.items = data.items || data || [];
+        const incoming = data.items || data || [];
+        state.items = mergeItemsKeepOrder(state.items, incoming);
+        syncGroupUI(true);
         if (skeleton) skeleton.style.display = 'none';
-        renderList();
+        renderList({ preserveScroll });
     } catch {
         // Backend not available — use demo data
         state.apiOnline = false;
         updateApiStatus();
         state.items = getDemoData();
+        syncGroupUI(true);
         if (skeleton) skeleton.style.display = 'none';
-        renderList();
+        renderList({ preserveScroll });
     }
 }
 
@@ -772,6 +1602,9 @@ function initStickyHeader() {
 // ═══════════════════════════════════════════════════════════════════
 
 document.addEventListener('DOMContentLoaded', () => {
+    state.customGroups = loadCustomGroups();
+    syncGroupUI(true);
+
     // Modal
     document.getElementById('btn-add-link').addEventListener('click', openModal);
     document.getElementById('modal-close').addEventListener('click', closeModal);
@@ -791,12 +1624,148 @@ document.addEventListener('DOMContentLoaded', () => {
     document.getElementById('search-input').addEventListener('input', (e) => {
         handleSearch(e.target.value);
     });
+    const groupSearchInput = document.getElementById('group-search');
+    if (groupSearchInput) {
+        groupSearchInput.addEventListener('input', (e) => {
+            state.groupSearchQuery = e.target.value || '';
+            renderGroups();
+        });
+    }
+    const groupList = document.getElementById('group-list');
+    if (groupList) {
+        groupList.addEventListener('click', (e) => {
+            const deleteGroupBtn = e.target.closest('[data-action="delete-group"]');
+            const saveRenameBtn = e.target.closest('[data-action="save-rename-group"]');
+            const cancelRenameBtn = e.target.closest('[data-action="cancel-rename-group"]');
+            const groupBtn = e.target.closest('[data-group]');
+            const newGroupBtn = e.target.closest('[data-action="new-group"]');
+            const createGroupBtn = e.target.closest('[data-action="create-group"]');
+            const cancelCreateBtn = e.target.closest('[data-action="cancel-create-group"]');
+            if (deleteGroupBtn) {
+                e.preventDefault();
+                e.stopPropagation();
+                handleDeleteGroup(deleteGroupBtn.getAttribute('data-group-id'));
+                return;
+            }
+            if (saveRenameBtn) {
+                e.preventDefault();
+                e.stopPropagation();
+                const groupId = saveRenameBtn.getAttribute('data-group-id');
+                const selectorGroupId = escapeAttrSelectorValue(groupId || '');
+                const input = groupList.querySelector(`[data-role="rename-group-input"][data-group-id="${selectorGroupId}"]`);
+                handleRenameGroup(groupId, input?.value || '');
+                return;
+            }
+            if (cancelRenameBtn) {
+                e.preventDefault();
+                e.stopPropagation();
+                cancelRenameGroupFlow();
+                return;
+            }
+            if (createGroupBtn) {
+                const input = groupList.querySelector('[data-role="new-group-input"]');
+                handleCreateGroup(input?.value);
+                return;
+            }
+            if (cancelCreateBtn) {
+                cancelCreateGroupFlow();
+                return;
+            }
+            if (newGroupBtn) {
+                startCreateGroupFlow();
+                return;
+            }
+            if (e.target.closest('[data-role="rename-group-input"]')) return;
+            if (!groupBtn) return;
+            if (state.renamingGroupId) return;
+            const groupId = normalizeGroupName(groupBtn.getAttribute('data-group')) || ALL_GROUP_ID;
+            const currentGroupId = normalizeGroupName(state.activeGroup) || ALL_GROUP_ID;
+            if (groupId.toLowerCase() === currentGroupId.toLowerCase()) {
+                state.isCreatingGroup = false;
+                return;
+            }
+            state.activeGroup = groupId;
+            state.isCreatingGroup = false;
+            updateGroupHeader();
+            renderGroups();
+            renderList();
+        });
+        groupList.addEventListener('dblclick', (e) => {
+            const groupName = e.target.closest('[data-role="group-name"]');
+            if (!groupName) return;
+            const groupId = normalizeGroupName(groupName.getAttribute('data-group-id'));
+            if (!groupId || groupId.toLowerCase() === ALL_GROUP_ID) return;
+            const currentGroupId = normalizeGroupName(state.activeGroup) || ALL_GROUP_ID;
+            if (groupId.toLowerCase() !== currentGroupId.toLowerCase()) return;
+            e.preventDefault();
+            e.stopPropagation();
+            startRenameGroupFlow(groupId);
+        });
+        groupList.addEventListener('keydown', (e) => {
+            const renameInput = e.target.closest('[data-role="rename-group-input"]');
+            if (renameInput) {
+                if (e.key === 'Enter') {
+                    e.preventDefault();
+                    handleRenameGroup(renameInput.getAttribute('data-group-id'), renameInput.value);
+                    return;
+                }
+                if (e.key === 'Escape') {
+                    e.preventDefault();
+                    cancelRenameGroupFlow();
+                    return;
+                }
+            }
 
-    // Refresh
-    document.getElementById('btn-refresh').addEventListener('click', () => {
-        showToast('Refreshing all links...', 'info');
-        loadData();
-    });
+            if (e.key !== 'Enter') return;
+            const input = e.target.closest('[data-role="new-group-input"]');
+            if (!input) return;
+            e.preventDefault();
+            handleCreateGroup(input.value);
+        });
+        groupList.addEventListener('focusout', (e) => {
+            const renameInput = e.target.closest('[data-role="rename-group-input"]');
+            if (!renameInput || !state.renamingGroupId) return;
+            const related = e.relatedTarget;
+            if (related && related.closest('[data-action="save-rename-group"], [data-action="cancel-rename-group"]')) {
+                return;
+            }
+            handleRenameGroup(renameInput.getAttribute('data-group-id'), renameInput.value, { onBlur: true });
+        });
+    }
+
+    // Refresh/Clear fallback binding (skip when inline onclick exists)
+    const refreshBtn = document.getElementById('btn-refresh');
+    if (refreshBtn && !refreshBtn.getAttribute('onclick')) {
+        refreshBtn.addEventListener('click', refreshAllItems);
+    }
+
+    const clearBtn = document.getElementById('btn-clear-list');
+    if (clearBtn && !clearBtn.getAttribute('onclick')) {
+        clearBtn.addEventListener('click', clearList);
+    }
+
+    const listElForDelete = document.getElementById('link-list');
+    if (listElForDelete) {
+        listElForDelete.addEventListener('click', (e) => {
+            const btn = e.target.closest('.row-delete-btn');
+            const refreshBtn = e.target.closest('.row-refresh-btn');
+            if (!btn && !refreshBtn) return;
+            e.preventDefault();
+            e.stopPropagation();
+            const row = (btn || refreshBtn).closest('.custom-grid-row');
+            if (!row) return;
+            const item = state.items.find((i) =>
+                String(i.id) === String(row.dataset.itemId)
+                || (i.type === row.dataset.type && i.spotify_id === row.dataset.spotifyId)
+            );
+            if (!item) return;
+            if (btn) {
+                handleDeleteItem(item);
+            } else if (refreshBtn) {
+                handleRefreshItem(item);
+            }
+        });
+    }
 
     // Keyboard shortcuts
     document.addEventListener('keydown', (e) => {
@@ -823,3 +1792,7 @@ document.addEventListener('DOMContentLoaded', () => {
         obs.observe(listEl, { childList: true });
     }
 });
+
+// Fallback hooks for inline onclick handlers
+window.clearList = clearList;
+window.refreshAllItems = refreshAllItems;
