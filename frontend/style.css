@@ -761,11 +761,12 @@ h3 {
 
 .modal-input {
   width: 100%;
-  background: rgba(255, 255, 255, 0.06);
-  border: 1px solid rgba(255, 255, 255, 0.14);
-  border-radius: 14px;
+  background: #1a1d21 !important;
+  border: 1px solid rgba(255, 255, 255, 0.14) !important;
+  border-radius: 14px !important;
   padding: 14px 16px;
-  color: #f2f5fb;
+  color: #f2f5fb !important;
+  -webkit-text-fill-color: #f2f5fb !important;
   font-size: 15px;
   outline: none;
   transition:
@@ -774,12 +775,14 @@ h3 {
 }
 
 .modal-input:focus {
-  border-color: #1db954;
-  background: rgba(255, 255, 255, 0.09);
+  border-color: #1db954 !important;
+  background: #1e2228 !important;
+  box-shadow: 0 0 0 3px rgba(29, 185, 84, 0.16);
 }
 
 .modal-input::placeholder {
   color: #6b7280;
+  -webkit-text-fill-color: #6b7280;
 }
 
 .modal-input-link,
@@ -807,44 +810,36 @@ h3 {
 }
 
 #modal-url-input {
-  border-radius: 16px !important;
-  background-color: #ffffff !important;
-  color: #0f172a !important;
+  border-radius: 14px !important;
+  background-color: #1a1d21 !important;
+  color: #f2f5fb !important;
   font-weight: 600;
   opacity: 1;
-  -webkit-text-fill-color: #0f172a !important;
-  caret-color: #0f172a;
+  -webkit-text-fill-color: #f2f5fb !important;
+  caret-color: #f2f5fb;
 }
 
 #modal-url-input:placeholder-shown {
-  color: #94a3b8 !important;
   font-weight: 500;
-  -webkit-text-fill-color: #94a3b8 !important;
-}
-
-#modal-url-input:not(:placeholder-shown) {
-  color: #0f172a !important;
-  font-weight: 600;
-  -webkit-text-fill-color: #0f172a !important;
 }
 
 #modal-url-input:focus {
-  background-color: #ffffff !important;
+  background-color: #1e2228 !important;
 }
 
 #modal-url-input::placeholder {
   color: #6b7280;
+  -webkit-text-fill-color: #6b7280;
   opacity: 1;
 }
 
 #modal-url-input:-webkit-autofill,
 #modal-url-input:-webkit-autofill:hover,
 #modal-url-input:-webkit-autofill:focus {
-  -webkit-text-fill-color: #0f172a !important;
-  -webkit-box-shadow: 0 0 0 1000px #ffffff inset !important;
-  box-shadow: 0 0 0 1000px #ffffff inset !important;
-  caret-color: #0f172a;
-  transition: background-color 9999s ease-out 0s;
+  -webkit-text-fill-color: #f2f5fb !important;
+  -webkit-box-shadow: 0 0 0 1000px #1a1d21 inset !important;
+  box-shadow: 0 0 0 1000px #1a1d21 inset !important;
+  caret-color: #f2f5fb;
 }
 
 /* ── Skeleton Loading ──────────────────────────────────────────── */
@@ -983,26 +978,39 @@ h3 {
 /* -- Settings --------------------------------------------------------- */
 .settings-input {
   width: 100%;
-  background: rgba(255, 255, 255, 0.06);
-  border: 1px solid rgba(255, 255, 255, 0.14);
-  border-radius: 14px;
-  padding: 12px 16px;
-  color: #f2f5fb;
+  background: #1a1d21 !important;
+  border: 1px solid rgba(255, 255, 255, 0.14) !important;
+  border-radius: 14px !important;
+  padding: 12px 16px !important;
+  color: #f2f5fb !important;
+  -webkit-text-fill-color: #f2f5fb !important;
   font-size: 14px;
   outline: none;
   transition: border-color 200ms ease, background 200ms ease, box-shadow 200ms ease;
 }
 .settings-input:focus {
-  border-color: #1db954;
-  background: rgba(255, 255, 255, 0.09);
-  box-shadow: 0 0 0 3px rgba(29, 185, 84, 0.16);
+  border-color: #1db954 !important;
+  background: #1e2228 !important;
+  box-shadow: 0 0 0 3px rgba(29, 185, 84, 0.16) !important;
 }
 .settings-input::placeholder {
   color: #6b7280;
+  -webkit-text-fill-color: #6b7280;
 }
 .settings-input:disabled {
   opacity: 0.5;
   cursor: not-allowed;
+  background: #151719 !important;
+  color: #8a8f98 !important;
+  -webkit-text-fill-color: #8a8f98 !important;
+}
+.settings-input:-webkit-autofill,
+.settings-input:-webkit-autofill:hover,
+.settings-input:-webkit-autofill:focus {
+  -webkit-text-fill-color: #f2f5fb !important;
+  -webkit-box-shadow: 0 0 0 1000px #1a1d21 inset !important;
+  box-shadow: 0 0 0 1000px #1a1d21 inset !important;
+  caret-color: #f2f5fb;
 }
 
 
