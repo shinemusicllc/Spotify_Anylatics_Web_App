@@ -289,6 +289,46 @@ async def admin_reset_password(
     return {"ok": True, "message": f"Password reset for {user.username}"}
 
 
+
+
+@router.get("/users/{user_id}/groups")
+async def admin_get_user_groups(
+    user_id: str,
+    admin: User = Depends(get_admin_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Admin — get any user's groups."""
+    result = await db.execute(select(User).where(User.id == user_id))
+    user = result.scalar_one_or_none()
+    if not user:
+        raise HTTPException(status_code=404, detail="User not found")
+    try:
+        groups = json.loads(user.custom_groups) if user.custom_groups else []
+    except (json.JSONDecodeError, TypeError):
+        groups = []
+    return {"groups": groups}
+
+
+@router.put("/users/{user_id}/groups")
+async def admin_save_user_groups(
+    user_id: str,
+    req: dict,
+    admin: User = Depends(get_admin_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Admin — save any user's groups."""
+    result = await db.execute(select(User).where(User.id == user_id))
+    user = result.scalar_one_or_none()
+    if not user:
+        raise HTTPException(status_code=404, detail="User not found")
+    groups = req.get("groups", [])
+    if not isinstance(groups, list):
+        raise HTTPException(status_code=400, detail="groups must be an array")
+    cleaned = list(dict.fromkeys(str(g).strip() for g in groups if str(g).strip()))
+    user.custom_groups = json.dumps(cleaned)
+    await db.flush()
+    return {"groups": cleaned}
+
 @router.delete("/users/{user_id}")
 async def admin_delete_user(
     user_id: str,

@@ -348,11 +348,17 @@ function loadCustomGroups() {
     }
 }
 
-async function syncGroupsFromServer() {
+async function syncGroupsFromServer(targetUserId) {
     try {
         var token = getAuthToken();
         if (!token) return;
-        var res = await fetch(CONFIG.API_BASE + '/auth/me/groups', {
+        var url = CONFIG.API_BASE;
+        if (targetUserId) {
+            url += '/auth/users/' + targetUserId + '/groups';
+        } else {
+            url += '/auth/me/groups';
+        }
+        var res = await fetch(url, {
             headers: { 'Authorization': 'Bearer ' + token },
         });
         if (!res.ok) {
@@ -362,26 +368,38 @@ async function syncGroupsFromServer() {
         var data = await res.json();
         var serverGroups = (data.groups || []).map(normalizeGroupName).filter(Boolean);
 
-        // Merge with local groups (local may have new groups not yet synced)
-        var localGroups = state.customGroups || [];
-        var merged = Array.from(new Set([...serverGroups, ...localGroups]));
-        state.customGroups = merged;
-
-        // Save merged back to server and localStorage
-        await saveGroupsToServer(merged);
-        localStorage.setItem(getUserGroupStorageKey(), JSON.stringify(merged));
+        if (targetUserId) {
+            // Admin viewing another user's groups — replace entirely, don't merge with local
+            state.customGroups = serverGroups;
+        } else {
+            // Own groups — merge with local
+            var localGroups = state.customGroups || [];
+            var merged = Array.from(new Set([...serverGroups, ...localGroups]));
+            state.customGroups = merged;
+            await saveGroupsToServer(merged);
+            localStorage.setItem(getUserGroupStorageKey(), JSON.stringify(merged));
+        }
         syncGroupUI(true);
-        console.log('[Groups Sync] Synced', merged.length, 'groups:', merged);
+        console.log('[Groups Sync] Synced', state.customGroups.length, 'groups for', targetUserId || 'self');
     } catch (err) {
         console.warn('[Groups Sync] Error:', err.message);
     }
 }
 
-async function saveGroupsToServer(groups) {
+async function saveGroupsToServer(groups, targetUserId) {
     try {
         var token = getAuthToken();
         if (!token) return;
-        await fetch(CONFIG.API_BASE + '/auth/me/groups', {
+        var url = CONFIG.API_BASE;
+        // If admin is filtering a specific user, save to that user
+        var uid = targetUserId || state.adminFilterUserId;
+        var currentUser = getAuthUser();
+        if (uid && currentUser && currentUser.role === 'admin' && uid !== currentUser.id) {
+            url += '/auth/users/' + uid + '/groups';
+        } else {
+            url += '/auth/me/groups';
+        }
+        await fetch(url, {
             method: 'PUT',
             headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + token },
             body: JSON.stringify({ groups: groups || state.customGroups }),
@@ -398,8 +416,13 @@ function saveCustomGroups() {
             .filter(Boolean)
     ));
     state.customGroups = cleaned;
-    localStorage.setItem(getUserGroupStorageKey(), JSON.stringify(cleaned));
-    // Sync to server in background
+    // If admin is filtering another user, don't save to own localStorage
+    var currentUser = getAuthUser();
+    var filteringOther = state.adminFilterUserId && currentUser && currentUser.role === 'admin' && state.adminFilterUserId !== currentUser.id;
+    if (!filteringOther) {
+        localStorage.setItem(getUserGroupStorageKey(), JSON.stringify(cleaned));
+    }
+    // Sync to server in background (will auto-target filtered user if admin)
     saveGroupsToServer(cleaned);
 }
 
@@ -1769,6 +1792,14 @@ async function setupAdminUserFilter() {
                 updateGroupHeader();
             }
             loadData({ preserveScroll: false });
+            // Load the selected user's groups (or own groups if All Users)
+            if (val) {
+                syncGroupsFromServer(val);
+            } else {
+                // Switching back to All Users — reload own groups
+                state.customGroups = loadCustomGroups();
+                syncGroupsFromServer();
+            }
         }
     });
     filterDiv.appendChild(filterDropdown);
