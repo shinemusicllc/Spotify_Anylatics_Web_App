@@ -1728,6 +1728,7 @@ async function loadData(opts = {}) {
             params.user_id = state.adminFilterUserId;
         }
         const data = await api.getItems(params);
+        if (!data) return; // auth redirect in progress
         const incoming = data.items || data || [];
         state.items = mergeItemsKeepOrder(state.items, incoming);
         syncGroupUI(true);
