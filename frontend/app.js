@@ -1684,7 +1684,7 @@ async function setupAdminUserFilter() {
     filterDiv.id = 'admin-user-filter-wrap';
     filterDiv.innerHTML = `
         <label class="block text-[11px] font-bold uppercase tracking-[0.12em] text-secondary-text mb-2">Filter by User</label>
-        <select id="admin-user-filter" class="w-full bg-white/5 border border-white/10 rounded-lg px-3 py-2 text-sm text-white focus:outline-none focus:border-primary/50 transition-all" style="appearance:none; color-scheme:dark;">
+        <select id="admin-user-filter" class="settings-input" style="font-size:13px; padding:10px 40px 10px 14px;">
             <option value="">All Users</option>
         </select>
     `;
