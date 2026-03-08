@@ -74,7 +74,7 @@ async def init_db():
         "ALTER TABLE crawl_jobs ADD COLUMN IF NOT EXISTS user_id UUID REFERENCES users(id)",
         "CREATE INDEX IF NOT EXISTS ix_crawl_jobs_user_id ON crawl_jobs(user_id)",
         "ALTER TABLE users ADD COLUMN IF NOT EXISTS avatar TEXT",
-        "ALTER TABLE users ADD COLUMN IF NOT EXISTS groups TEXT",
+        "ALTER TABLE users ADD COLUMN IF NOT EXISTS custom_groups TEXT",
     ]
     for sql in migrations:
         try:

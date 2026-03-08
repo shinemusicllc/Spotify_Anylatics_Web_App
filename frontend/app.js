@@ -355,7 +355,10 @@ async function syncGroupsFromServer() {
         var res = await fetch(CONFIG.API_BASE + '/auth/me/groups', {
             headers: { 'Authorization': 'Bearer ' + token },
         });
-        if (!res.ok) return;
+        if (!res.ok) {
+            console.warn('[Groups Sync] Server returned', res.status);
+            return;
+        }
         var data = await res.json();
         var serverGroups = (data.groups || []).map(normalizeGroupName).filter(Boolean);
 
@@ -368,8 +371,9 @@ async function syncGroupsFromServer() {
         await saveGroupsToServer(merged);
         localStorage.setItem(getUserGroupStorageKey(), JSON.stringify(merged));
         syncGroupUI(true);
+        console.log('[Groups Sync] Synced', merged.length, 'groups:', merged);
     } catch (err) {
-        // Silently fail - localStorage fallback still works
+        console.warn('[Groups Sync] Error:', err.message);
     }
 }
 

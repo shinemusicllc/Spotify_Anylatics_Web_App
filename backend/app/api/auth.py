@@ -209,7 +209,7 @@ async def get_my_groups(
 ):
     """Get the current user's groups list."""
     try:
-        groups = json.loads(current_user.groups) if current_user.groups else []
+        groups = json.loads(current_user.custom_groups) if current_user.custom_groups else []
     except (json.JSONDecodeError, TypeError):
         groups = []
     return {"groups": groups}
@@ -227,7 +227,7 @@ async def save_my_groups(
         raise HTTPException(status_code=400, detail="groups must be an array")
     # Deduplicate and clean
     cleaned = list(dict.fromkeys(str(g).strip() for g in groups if str(g).strip()))
-    current_user.groups = json.dumps(cleaned)
+    current_user.custom_groups = json.dumps(cleaned)
     await db.flush()
     return {"groups": cleaned}
 
