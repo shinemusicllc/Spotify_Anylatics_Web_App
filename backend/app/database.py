@@ -1,5 +1,6 @@
 """SQLAlchemy async engine & session factory."""
 
+from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 from sqlalchemy.orm import DeclarativeBase
 
@@ -60,6 +61,20 @@ async def get_db() -> AsyncSession:
 
 
 async def init_db():
-    """Create all tables (dev only — use Alembic in production)."""
+    """Create all tables and add missing columns for migrations."""
     async with engine.begin() as conn:
         await conn.run_sync(Base.metadata.create_all)
+
+    # Add columns that may be missing from older deployments.
+    async with engine.begin() as conn:
+        migrations = [
+            ("items", "user_id", "ALTER TABLE items ADD COLUMN user_id UUID REFERENCES users(id)"),
+            ("items", "user_id_idx", "CREATE INDEX IF NOT EXISTS ix_items_user_id ON items(user_id)"),
+            ("crawl_jobs", "user_id", "ALTER TABLE crawl_jobs ADD COLUMN user_id UUID REFERENCES users(id)"),
+            ("crawl_jobs", "user_id_idx", "CREATE INDEX IF NOT EXISTS ix_crawl_jobs_user_id ON crawl_jobs(user_id)"),
+        ]
+        for table, col, sql in migrations:
+            try:
+                await conn.execute(text(sql))
+            except Exception:
+                pass  # Column/index already exists
