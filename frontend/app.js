@@ -513,22 +513,35 @@ function renderGroups() {
 }
 
 function populateGroupSelect() {
-    const select = document.getElementById('modal-group-select');
-    if (!select) return;
+    var wrap = document.getElementById('modal-group-select-wrap');
+    if (!wrap) return;
 
-    const options = [`<option value="${GROUP_SELECT_ALL}">${ALL_GROUP_LABEL} (Default)</option>`];
-    for (const g of state.groups) {
+    var options = [{value: GROUP_SELECT_ALL, label: ALL_GROUP_LABEL + ' (Default)'}];
+    for (var i = 0; i < state.groups.length; i++) {
+        var g = state.groups[i];
         if (g.id === ALL_GROUP_ID) continue;
-        options.push(`<option value="${escapeHtml(g.id)}">${escapeHtml(g.name)}</option>`);
+        options.push({value: g.id, label: g.name});
     }
-    select.innerHTML = options.join('');
 
-    select.value = GROUP_SELECT_ALL;
+    // Check if dropdown already exists
+    var existing = document.getElementById('modal-group-select-dropdown');
+    if (existing) {
+        updateCustomDropdownOptions('modal-group-select-dropdown', options, GROUP_SELECT_ALL);
+    } else {
+        var dd = createCustomDropdown({
+            id: 'modal-group-select',
+            options: options,
+            selected: GROUP_SELECT_ALL,
+            cssClass: 'dropdown-modal'
+        });
+        wrap.innerHTML = '';
+        wrap.appendChild(dd);
+    }
 }
 
 function resolveSelectedGroup() {
-    const select = document.getElementById('modal-group-select');
-    const picked = normalizeGroupName(select?.value);
+    var dd = document.getElementById('modal-group-select-dropdown');
+    var picked = normalizeGroupName(dd ? dd.getAttribute('data-value') : null);
     if (picked && picked !== GROUP_SELECT_ALL) return picked;
     return null;
 }
@@ -1682,12 +1695,37 @@ async function setupAdminUserFilter() {
     const filterDiv = document.createElement('div');
     filterDiv.className = 'px-5 py-2 border-b border-white/5';
     filterDiv.id = 'admin-user-filter-wrap';
-    filterDiv.innerHTML = `
-        <label class="block text-[11px] font-bold uppercase tracking-[0.12em] text-secondary-text mb-2">Filter by User</label>
-        <select id="admin-user-filter" class="settings-input" style="font-size:13px; padding:10px 40px 10px 14px;">
-            <option value="">All Users</option>
-        </select>
-    `;
+    var filterLabel = document.createElement('label');
+    filterLabel.className = 'block text-[11px] font-bold uppercase tracking-[0.12em] text-secondary-text mb-2';
+    filterLabel.textContent = 'Filter by User';
+    filterDiv.appendChild(filterLabel);
+
+    var filterOptions = [{value: '', label: 'All Users'}];
+    for (var fi = 0; fi < state.adminUserList.length; fi++) {
+        var fu = state.adminUserList[fi];
+        filterOptions.push({value: fu.id || fu._id || '', label: fu.display_name || fu.username || fu.email || String(fu.id)});
+    }
+    var filterDropdown = createCustomDropdown({
+        id: 'admin-user-filter',
+        options: filterOptions,
+        selected: '',
+        onChange: function(val) {
+            state.adminFilterUserId = val || null;
+            var pageTitle = document.getElementById('page-title');
+            var breadcrumb = document.getElementById('breadcrumb-group');
+            if (val) {
+                var selectedUser = state.adminUserList.find(function(u) { return String(u.id || u._id) === val; });
+                var username = (selectedUser && (selectedUser.display_name || selectedUser.username)) || val;
+                var groupName = getActiveGroupName();
+                if (pageTitle) pageTitle.textContent = groupName + ' (' + username + ')';
+                if (breadcrumb) breadcrumb.textContent = groupName + ' (' + username + ')';
+            } else {
+                updateGroupHeader();
+            }
+            loadData({ preserveScroll: false });
+        }
+    });
+    filterDiv.appendChild(filterDropdown);
 
     // Insert after admin badge (if present), before the group search area
     const adminBadge = document.getElementById('admin-badge');
@@ -1697,36 +1735,6 @@ async function setupAdminUserFilter() {
         groupPanel.insertBefore(filterDiv, groupPanel.firstChild);
     }
 
-    const select = document.getElementById('admin-user-filter');
-    if (select) {
-        for (const u of state.adminUserList) {
-            const opt = document.createElement('option');
-            opt.value = u.id || u._id || '';
-            opt.textContent = u.display_name || u.username || u.email || String(u.id);
-            select.appendChild(opt);
-        }
-
-        select.addEventListener('change', () => {
-            state.adminFilterUserId = select.value || null;
-
-            // Update page title to show selected user
-            const pageTitle = document.getElementById('page-title');
-            const breadcrumb = document.getElementById('breadcrumb-group');
-            if (select.value) {
-                const selectedUser = state.adminUserList.find(
-                    (u) => String(u.id || u._id) === select.value
-                );
-                const username = selectedUser?.display_name || selectedUser?.username || select.value;
-                const groupName = getActiveGroupName();
-                if (pageTitle) pageTitle.textContent = `${groupName} (${username})`;
-                if (breadcrumb) breadcrumb.textContent = `${groupName} (${username})`;
-            } else {
-                updateGroupHeader();
-            }
-
-            loadData({ preserveScroll: false });
-        });
-    }
 }
 
 async function loadData(opts = {}) {
@@ -1993,6 +2001,117 @@ async function handleAvatarRemove() {
 }
 
 
+
+// ═══════════════════════════════════════════════════════════════════
+// CUSTOM DROPDOWN COMPONENT
+// ═══════════════════════════════════════════════════════════════════
+
+/**
+ * Creates a custom dropdown replacing a native <select>
+ * @param {object} opts - { id, options: [{value, label}], selected, onChange, cssClass }
+ * @returns {HTMLElement} the custom dropdown element
+ */
+function createCustomDropdown(opts) {
+    var wrap = document.createElement('div');
+    wrap.className = 'custom-dropdown' + (opts.cssClass ? ' ' + opts.cssClass : '');
+    wrap.id = (opts.id || '') + '-dropdown';
+    wrap.setAttribute('data-value', opts.selected || '');
+
+    var arrowSvg = '<svg class="custom-dropdown-arrow" viewBox="0 0 12 8" fill="none"><path d="M1 1.5l5 5 5-5" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg>';
+
+    var selectedLabel = '';
+    for (var i = 0; i < opts.options.length; i++) {
+        if (opts.options[i].value === (opts.selected || '')) {
+            selectedLabel = opts.options[i].label;
+            break;
+        }
+    }
+    if (!selectedLabel && opts.options.length > 0) selectedLabel = opts.options[0].label;
+
+    var toggle = document.createElement('div');
+    toggle.className = 'custom-dropdown-toggle';
+    toggle.setAttribute('tabindex', '0');
+    toggle.innerHTML = '<span class="custom-dropdown-label" style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap">' + selectedLabel + '</span>' + arrowSvg;
+    wrap.appendChild(toggle);
+
+    var menu = document.createElement('div');
+    menu.className = 'custom-dropdown-menu';
+
+    for (var i = 0; i < opts.options.length; i++) {
+        var opt = document.createElement('div');
+        opt.className = 'custom-dropdown-option' + (opts.options[i].value === (opts.selected || '') ? ' selected' : '');
+        opt.setAttribute('data-value', opts.options[i].value);
+        opt.textContent = opts.options[i].label;
+        menu.appendChild(opt);
+    }
+    wrap.appendChild(menu);
+
+    // Toggle open/close
+    toggle.addEventListener('click', function(e) {
+        e.stopPropagation();
+        // Close all other open dropdowns
+        document.querySelectorAll('.custom-dropdown.open').forEach(function(d) {
+            if (d !== wrap) d.classList.remove('open');
+        });
+        wrap.classList.toggle('open');
+    });
+
+    toggle.addEventListener('keydown', function(e) {
+        if (e.key === 'Enter' || e.key === ' ') {
+            e.preventDefault();
+            toggle.click();
+        } else if (e.key === 'Escape') {
+            wrap.classList.remove('open');
+        }
+    });
+
+    // Select option
+    menu.addEventListener('click', function(e) {
+        var optEl = e.target.closest('.custom-dropdown-option');
+        if (!optEl) return;
+        var val = optEl.getAttribute('data-value');
+        wrap.setAttribute('data-value', val);
+        toggle.querySelector('.custom-dropdown-label').textContent = optEl.textContent;
+        menu.querySelectorAll('.custom-dropdown-option').forEach(function(o) { o.classList.remove('selected'); });
+        optEl.classList.add('selected');
+        wrap.classList.remove('open');
+        if (opts.onChange) opts.onChange(val);
+    });
+
+    return wrap;
+}
+
+// Update options of an existing custom dropdown
+function updateCustomDropdownOptions(dropdownId, options, selected) {
+    var wrap = document.getElementById(dropdownId);
+    if (!wrap) return;
+    var menu = wrap.querySelector('.custom-dropdown-menu');
+    var label = wrap.querySelector('.custom-dropdown-label');
+    if (!menu || !label) return;
+
+    menu.innerHTML = '';
+    var selectedLabel = '';
+    for (var i = 0; i < options.length; i++) {
+        var opt = document.createElement('div');
+        opt.className = 'custom-dropdown-option' + (options[i].value === (selected || '') ? ' selected' : '');
+        opt.setAttribute('data-value', options[i].value);
+        opt.textContent = options[i].label;
+        menu.appendChild(opt);
+        if (options[i].value === (selected || '')) selectedLabel = options[i].label;
+    }
+    if (!selectedLabel && options.length > 0) selectedLabel = options[0].label;
+    label.textContent = selectedLabel;
+    wrap.setAttribute('data-value', selected || '');
+}
+
+// Close dropdowns when clicking outside
+document.addEventListener('click', function() {
+    document.querySelectorAll('.custom-dropdown.open').forEach(function(d) {
+        d.classList.remove('open');
+    });
+});
+
+
 // ═══════════════════════════════════════════════════════════════════
 // ADMIN USER MANAGEMENT
 // ═══════════════════════════════════════════════════════════════════
@@ -2122,7 +2241,22 @@ function openAdminEditModal(userId) {
     document.getElementById('admin-edit-username').value = user.username;
     document.getElementById('admin-edit-displayname').value = user.display_name || '';
     document.getElementById('admin-edit-email').value = user.email || '';
-    document.getElementById('admin-edit-role').value = user.role;
+    // Create or update role dropdown
+    var roleWrap = document.getElementById('admin-edit-role-wrap');
+    if (roleWrap) {
+        var existingRoleDD = document.getElementById('admin-edit-role-dropdown');
+        if (existingRoleDD) {
+            updateCustomDropdownOptions('admin-edit-role-dropdown', [{value:'user',label:'User'},{value:'admin',label:'Admin'}], user.role);
+        } else {
+            var roleDD = createCustomDropdown({
+                id: 'admin-edit-role',
+                options: [{value:'user',label:'User'},{value:'admin',label:'Admin'}],
+                selected: user.role
+            });
+            roleWrap.innerHTML = '';
+            roleWrap.appendChild(roleDD);
+        }
+    }
     document.getElementById('admin-edit-status').style.display = 'none';
 
     var modal = document.getElementById('admin-edit-modal');
@@ -2138,7 +2272,8 @@ async function saveAdminEditUser() {
     var userId = document.getElementById('admin-edit-user-id').value;
     var displayName = document.getElementById('admin-edit-displayname').value.trim();
     var email = document.getElementById('admin-edit-email').value.trim();
-    var role = document.getElementById('admin-edit-role').value;
+    var roleDD = document.getElementById('admin-edit-role-dropdown');
+    var role = roleDD ? roleDD.getAttribute('data-value') : 'user';
     var statusEl = document.getElementById('admin-edit-status');
 
     try {
