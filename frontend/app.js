@@ -2123,12 +2123,12 @@ function openAdminEditModal(userId) {
     document.getElementById('admin-edit-status').style.display = 'none';
 
     var modal = document.getElementById('admin-edit-modal');
-    if (modal) { modal.style.display = ''; modal.classList.add('active'); }
+    if (modal) modal.classList.add('open');
 }
 
 function closeAdminEditModal() {
     var modal = document.getElementById('admin-edit-modal');
-    if (modal) { modal.style.display = 'none'; modal.classList.remove('active'); }
+    if (modal) modal.classList.remove('open');
 }
 
 async function saveAdminEditUser() {
@@ -2166,12 +2166,12 @@ function openAdminPwModal(userId, username) {
     document.getElementById('admin-pw-status').style.display = 'none';
 
     var modal = document.getElementById('admin-pw-modal');
-    if (modal) { modal.style.display = ''; modal.classList.add('active'); }
+    if (modal) modal.classList.add('open');
 }
 
 function closeAdminPwModal() {
     var modal = document.getElementById('admin-pw-modal');
-    if (modal) { modal.style.display = 'none'; modal.classList.remove('active'); }
+    if (modal) modal.classList.remove('open');
 }
 
 async function submitAdminResetPassword() {
@@ -2480,6 +2480,16 @@ document.addEventListener('DOMContentLoaded', () => {
         if (e.target.files[0]) handleAvatarUpload(e.target.files[0]);
     });
     document.getElementById('settings-avatar-remove')?.addEventListener('click', handleAvatarRemove);
+
+    // Admin modal click-outside-to-close
+    ['admin-edit-modal', 'admin-pw-modal'].forEach(function(id) {
+        var el = document.getElementById(id);
+        if (el) el.addEventListener('click', function(e) {
+            if (e.target.classList.contains('modal-overlay')) {
+                el.classList.remove('open');
+            }
+        });
+    });
 
     // Keyboard shortcuts
     document.addEventListener('keydown', (e) => {
