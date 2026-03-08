@@ -21,6 +21,7 @@ class UserResponse(BaseModel):
     email: str
     display_name: str | None
     role: str
+    avatar: str | None = None
     created_at: str | None = None
 
     model_config = {"from_attributes": True}
@@ -30,3 +31,17 @@ class AuthResponse(BaseModel):
     access_token: str
     token_type: str = "bearer"
     user: UserResponse
+
+
+class UpdateProfileRequest(BaseModel):
+    display_name: str | None = None
+    email: str | None = None
+
+
+class ChangePasswordRequest(BaseModel):
+    current_password: str
+    new_password: str
+
+
+class UpdateAvatarRequest(BaseModel):
+    avatar: str  # base64 data URL

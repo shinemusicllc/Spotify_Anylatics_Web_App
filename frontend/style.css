@@ -997,3 +997,28 @@ h3 {
     font-size: 28px;
   }
 }
+
+/* -- Settings --------------------------------------------------------- */
+.settings-input {
+  width: 100%;
+  background: rgba(255, 255, 255, 0.06);
+  border: 1px solid rgba(255, 255, 255, 0.14);
+  border-radius: 14px;
+  padding: 12px 16px;
+  color: #f2f5fb;
+  font-size: 14px;
+  outline: none;
+  transition: border-color 200ms ease, background 200ms ease, box-shadow 200ms ease;
+}
+.settings-input:focus {
+  border-color: #1db954;
+  background: rgba(255, 255, 255, 0.09);
+  box-shadow: 0 0 0 3px rgba(29, 185, 84, 0.16);
+}
+.settings-input::placeholder {
+  color: #6b7280;
+}
+.settings-input:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}

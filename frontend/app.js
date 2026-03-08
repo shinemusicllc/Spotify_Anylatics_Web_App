@@ -53,7 +53,10 @@ function setupAuthUI() {
         const initials = (user.display_name || user.username || '??').slice(0, 2).toUpperCase();
         const profileWrap = document.querySelector('.sidebar-profile-wrap');
         if (profileWrap) {
-            profileWrap.innerHTML = '<div class="w-8 h-8 rounded-full flex-shrink-0 bg-gradient-to-br from-emerald-400 via-cyan-500 to-blue-700 text-white text-[11px] font-bold leading-none grid place-items-center overflow-hidden ring-1 ring-white/10">' + initials + '</div>' +
+            const avatarHtml = user.avatar
+                ? '<img src="' + user.avatar + '" class="w-8 h-8 rounded-full object-cover flex-shrink-0 ring-1 ring-white/10">'
+                : '<div class="w-8 h-8 rounded-full flex-shrink-0 bg-gradient-to-br from-emerald-400 via-cyan-500 to-blue-700 text-white text-[11px] font-bold leading-none grid place-items-center overflow-hidden ring-1 ring-white/10">' + initials + '</div>';
+            profileWrap.innerHTML = avatarHtml +
                 '<div class="sidebar-user-info overflow-hidden">' +
                 '<p class="text-sm font-semibold truncate">' + (user.display_name || user.username) + '</p>' +
                 '<p class="text-xs text-secondary-text truncate">' + (user.role === 'admin' ? 'Admin' : 'User') + '</p>' +
@@ -1793,6 +1796,184 @@ function initStickyHeader() {
     window.addEventListener('resize', updateStickyState);
 }
 
+
+// ===================================================================
+// SETTINGS
+// ===================================================================
+
+function showSettings() {
+    document.querySelector('.list-wrap').style.display = 'none';
+    const settingsPanel = document.getElementById('settings-panel');
+    if (settingsPanel) settingsPanel.style.display = '';
+
+    const breadcrumb = document.getElementById('breadcrumb-group');
+    const pageTitle = document.getElementById('page-title');
+    if (breadcrumb) { breadcrumb.textContent = 'Settings'; breadcrumb.previousElementSibling && (breadcrumb.previousElementSibling.previousElementSibling.textContent = 'Account'); }
+    if (pageTitle) pageTitle.textContent = 'Account Settings';
+
+    document.getElementById('btn-refresh')?.style && (document.getElementById('btn-refresh').style.display = 'none');
+    document.getElementById('btn-add-link')?.style && (document.getElementById('btn-add-link').style.display = 'none');
+    document.getElementById('search-input')?.parentElement && (document.getElementById('search-input').parentElement.style.display = 'none');
+
+    loadSettingsData();
+}
+
+function hideSettings() {
+    const settingsPanel = document.getElementById('settings-panel');
+    if (settingsPanel) settingsPanel.style.display = 'none';
+    document.querySelector('.list-wrap').style.display = '';
+
+    document.getElementById('btn-refresh')?.style && (document.getElementById('btn-refresh').style.display = '');
+    document.getElementById('btn-add-link')?.style && (document.getElementById('btn-add-link').style.display = '');
+    document.getElementById('search-input')?.parentElement && (document.getElementById('search-input').parentElement.style.display = '');
+
+    updateGroupHeader();
+}
+
+function loadSettingsData() {
+    const user = getAuthUser();
+    if (!user) return;
+
+    document.getElementById('settings-username').value = user.username || '';
+    document.getElementById('settings-displayname').value = user.display_name || '';
+    document.getElementById('settings-email').value = user.email || '';
+    document.getElementById('settings-role').textContent = user.role === 'admin' ? 'Admin' : 'User';
+    document.getElementById('settings-created').textContent = user.created_at ? new Date(user.created_at).toLocaleDateString() : '-';
+
+    updateSettingsAvatar(user);
+
+    document.getElementById('settings-current-pw').value = '';
+    document.getElementById('settings-new-pw').value = '';
+    document.getElementById('settings-confirm-pw').value = '';
+}
+
+function updateSettingsAvatar(user) {
+    const preview = document.getElementById('settings-avatar-preview');
+    if (!preview) return;
+    if (user.avatar) {
+        preview.innerHTML = '<img src="' + user.avatar + '" class="w-full h-full object-cover">';
+    } else {
+        const initials = (user.display_name || user.username || '??').slice(0, 2).toUpperCase();
+        preview.innerHTML = initials;
+    }
+}
+
+async function handleSaveProfile() {
+    const displayName = document.getElementById('settings-displayname').value.trim();
+    const email = document.getElementById('settings-email').value.trim();
+    const statusEl = document.getElementById('settings-profile-status');
+
+    try {
+        const token = getAuthToken();
+        const res = await fetch(CONFIG.API_BASE + '/auth/me', {
+            method: 'PATCH',
+            headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + token },
+            body: JSON.stringify({ display_name: displayName || null, email: email || null }),
+        });
+        const data = await res.json();
+        if (!res.ok) throw new Error(data.detail || 'Failed to update profile');
+
+        localStorage.setItem('spoticheck_user', JSON.stringify(data));
+        setupAuthUI();
+
+        statusEl.textContent = 'Saved!';
+        statusEl.style.display = '';
+        statusEl.style.color = '#1db954';
+        setTimeout(() => { statusEl.style.display = 'none'; }, 3000);
+    } catch (err) {
+        statusEl.textContent = err.message;
+        statusEl.style.display = '';
+        statusEl.style.color = '#ef4444';
+        setTimeout(() => { statusEl.style.display = 'none'; }, 5000);
+    }
+}
+
+async function handleChangePassword() {
+    const currentPw = document.getElementById('settings-current-pw').value;
+    const newPw = document.getElementById('settings-new-pw').value;
+    const confirmPw = document.getElementById('settings-confirm-pw').value;
+    const statusEl = document.getElementById('settings-pw-status');
+
+    if (!currentPw || !newPw) { statusEl.textContent = 'Please fill in all fields'; statusEl.style.display = ''; statusEl.style.color = '#ef4444'; return; }
+    if (newPw !== confirmPw) { statusEl.textContent = 'New passwords do not match'; statusEl.style.display = ''; statusEl.style.color = '#ef4444'; return; }
+    if (newPw.length < 4) { statusEl.textContent = 'Password must be at least 4 characters'; statusEl.style.display = ''; statusEl.style.color = '#ef4444'; return; }
+
+    try {
+        const token = getAuthToken();
+        const res = await fetch(CONFIG.API_BASE + '/auth/me/password', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + token },
+            body: JSON.stringify({ current_password: currentPw, new_password: newPw }),
+        });
+        const data = await res.json();
+        if (!res.ok) throw new Error(data.detail || 'Failed to change password');
+
+        document.getElementById('settings-current-pw').value = '';
+        document.getElementById('settings-new-pw').value = '';
+        document.getElementById('settings-confirm-pw').value = '';
+
+        statusEl.textContent = 'Password changed!';
+        statusEl.style.display = '';
+        statusEl.style.color = '#1db954';
+        setTimeout(() => { statusEl.style.display = 'none'; }, 3000);
+    } catch (err) {
+        statusEl.textContent = err.message;
+        statusEl.style.display = '';
+        statusEl.style.color = '#ef4444';
+        setTimeout(() => { statusEl.style.display = 'none'; }, 5000);
+    }
+}
+
+async function handleAvatarUpload(file) {
+    if (!file) return;
+    if (file.size > 500000) { showToast('Image too large (max 500KB)', 'error'); return; }
+
+    const reader = new FileReader();
+    reader.onload = async function(e) {
+        const dataUrl = e.target.result;
+        try {
+            const token = getAuthToken();
+            const res = await fetch(CONFIG.API_BASE + '/auth/me/avatar', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + token },
+                body: JSON.stringify({ avatar: dataUrl }),
+            });
+            const data = await res.json();
+            if (!res.ok) throw new Error(data.detail || 'Failed to upload avatar');
+
+            const user = getAuthUser();
+            user.avatar = dataUrl;
+            localStorage.setItem('spoticheck_user', JSON.stringify(user));
+            updateSettingsAvatar(user);
+            setupAuthUI();
+            showToast('Avatar updated!', 'success');
+        } catch (err) {
+            showToast(err.message, 'error');
+        }
+    };
+    reader.readAsDataURL(file);
+}
+
+async function handleAvatarRemove() {
+    try {
+        const token = getAuthToken();
+        const res = await fetch(CONFIG.API_BASE + '/auth/me/avatar', {
+            method: 'DELETE',
+            headers: { 'Authorization': 'Bearer ' + token },
+        });
+        if (!res.ok) { const d = await res.json(); throw new Error(d.detail || 'Failed'); }
+
+        const user = getAuthUser();
+        user.avatar = null;
+        localStorage.setItem('spoticheck_user', JSON.stringify(user));
+        updateSettingsAvatar(user);
+        setupAuthUI();
+        showToast('Avatar removed', 'success');
+    } catch (err) {
+        showToast(err.message, 'error');
+    }
+}
+
 // ═══════════════════════════════════════════════════════════════════
 // INIT
 // ═══════════════════════════════════════════════════════════════════
@@ -1965,6 +2146,45 @@ document.addEventListener('DOMContentLoaded', () => {
             }
         });
     }
+
+
+    // Settings nav
+    document.getElementById('nav-settings').addEventListener('click', (e) => {
+        e.preventDefault();
+        document.querySelectorAll('#sidebar nav a').forEach(a => {
+            a.classList.remove('text-white', 'bg-white/10');
+            a.classList.add('text-secondary-text');
+            a.querySelector('.material-icons-round')?.classList.remove('text-primary');
+        });
+        const navSettings = document.getElementById('nav-settings');
+        navSettings.classList.add('text-white', 'bg-white/10');
+        navSettings.classList.remove('text-secondary-text');
+        navSettings.querySelector('.material-icons-round')?.classList.add('text-primary');
+        showSettings();
+    });
+
+    document.getElementById('nav-links').addEventListener('click', (e) => {
+        e.preventDefault();
+        document.querySelectorAll('#sidebar nav a').forEach(a => {
+            a.classList.remove('text-white', 'bg-white/10');
+            a.classList.add('text-secondary-text');
+            a.querySelector('.material-icons-round')?.classList.remove('text-primary');
+        });
+        const navLinks = document.getElementById('nav-links');
+        navLinks.classList.add('text-white', 'bg-white/10');
+        navLinks.classList.remove('text-secondary-text');
+        navLinks.querySelector('.material-icons-round')?.classList.add('text-primary');
+        hideSettings();
+        updateGroupHeader();
+    });
+
+    // Settings event listeners
+    document.getElementById('settings-save-profile')?.addEventListener('click', handleSaveProfile);
+    document.getElementById('settings-change-pw')?.addEventListener('click', handleChangePassword);
+    document.getElementById('settings-avatar-input')?.addEventListener('change', (e) => {
+        if (e.target.files[0]) handleAvatarUpload(e.target.files[0]);
+    });
+    document.getElementById('settings-avatar-remove')?.addEventListener('click', handleAvatarRemove);
 
     // Keyboard shortcuts
     document.addEventListener('keydown', (e) => {

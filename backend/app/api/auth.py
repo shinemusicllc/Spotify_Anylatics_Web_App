@@ -13,6 +13,9 @@ from app.schemas.auth import (
     LoginRequest,
     AuthResponse,
     UserResponse,
+    UpdateProfileRequest,
+    ChangePasswordRequest,
+    UpdateAvatarRequest,
 )
 from app.services.auth import (
     hash_password,
@@ -32,6 +35,7 @@ def _user_response(user: User) -> UserResponse:
         email=user.email,
         display_name=user.display_name,
         role=user.role,
+        avatar=user.avatar,
         created_at=user.created_at.isoformat() if user.created_at else None,
     )
 
@@ -107,6 +111,67 @@ async def login(req: LoginRequest, db: AsyncSession = Depends(get_db)):
 async def me(current_user: User = Depends(get_current_user)):
     """Return the current authenticated user."""
     return _user_response(current_user)
+
+
+@router.patch("/me", response_model=UserResponse)
+async def update_profile(
+    req: UpdateProfileRequest,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Update current user profile."""
+    if req.display_name is not None:
+        current_user.display_name = req.display_name
+    if req.email is not None:
+        existing = await db.execute(
+            select(User).where(User.email == req.email, User.id != current_user.id)
+        )
+        if existing.scalar_one_or_none():
+            raise HTTPException(status_code=409, detail="Email already in use")
+        current_user.email = req.email
+    await db.flush()
+    return _user_response(current_user)
+
+
+@router.post("/me/password")
+async def change_password(
+    req: ChangePasswordRequest,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Change current user password."""
+    if not verify_password(req.current_password, current_user.password_hash):
+        raise HTTPException(status_code=400, detail="Current password is incorrect")
+    if len(req.new_password) < 4:
+        raise HTTPException(status_code=400, detail="Password must be at least 4 characters")
+    current_user.password_hash = hash_password(req.new_password)
+    await db.flush()
+    return {"ok": True, "message": "Password changed successfully"}
+
+
+@router.post("/me/avatar")
+async def update_avatar(
+    req: UpdateAvatarRequest,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Upload avatar as base64 data URL."""
+    if len(req.avatar) > 500_000:
+        raise HTTPException(status_code=400, detail="Avatar too large (max 500KB)")
+    current_user.avatar = req.avatar
+    await db.flush()
+    return {"ok": True, "avatar": req.avatar}
+
+
+@router.delete("/me/avatar")
+async def delete_avatar(
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Remove avatar."""
+    current_user.avatar = None
+    await db.flush()
+    return {"ok": True}
 
 
 @router.get("/users", response_model=list[UserResponse])

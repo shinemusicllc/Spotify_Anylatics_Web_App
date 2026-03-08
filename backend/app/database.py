@@ -72,6 +72,7 @@ async def init_db():
             ("items", "user_id_idx", "CREATE INDEX IF NOT EXISTS ix_items_user_id ON items(user_id)"),
             ("crawl_jobs", "user_id", "ALTER TABLE crawl_jobs ADD COLUMN user_id UUID REFERENCES users(id)"),
             ("crawl_jobs", "user_id_idx", "CREATE INDEX IF NOT EXISTS ix_crawl_jobs_user_id ON crawl_jobs(user_id)"),
+            ("users", "avatar", "ALTER TABLE users ADD COLUMN avatar TEXT"),
         ]
         for table, col, sql in migrations:
             try:

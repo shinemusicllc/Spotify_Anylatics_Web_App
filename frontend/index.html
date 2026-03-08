@@ -245,6 +245,94 @@
             </div>
         </div>
 
+
+        <!-- Settings Panel -->
+        <div id="settings-panel" class="flex-1 overflow-y-auto px-8 py-8" style="display:none">
+            <div class="max-w-2xl">
+                <h2 class="text-2xl font-bold mb-8" style="font-family:'Inter Tight','Inter',system-ui,sans-serif; letter-spacing:-0.02em;">Account Settings</h2>
+
+                <!-- Avatar Section -->
+                <div class="mb-8 p-6 rounded-xl border border-white/10" style="background:#1a1d21">
+                    <h3 class="text-sm font-bold uppercase tracking-widest text-secondary-text mb-4">Profile Picture</h3>
+                    <div class="flex items-center gap-6">
+                        <div id="settings-avatar-preview" class="w-20 h-20 rounded-full bg-gradient-to-br from-emerald-400 via-cyan-500 to-blue-700 text-white text-2xl font-bold grid place-items-center overflow-hidden ring-2 ring-white/10 flex-shrink-0">
+                            ??
+                        </div>
+                        <div class="flex flex-col gap-3">
+                            <label class="btn-accent inline-flex items-center gap-2 px-5 py-2.5 rounded-full text-sm font-bold cursor-pointer" style="width:fit-content">
+                                <span class="material-icons-round text-base">upload</span>
+                                Upload Photo
+                                <input type="file" id="settings-avatar-input" accept="image/*" class="hidden">
+                            </label>
+                            <button id="settings-avatar-remove" class="text-xs text-secondary-text hover:text-red-400 transition-colors cursor-pointer text-left" style="width:fit-content">Remove photo</button>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Profile Info Section -->
+                <div class="mb-8 p-6 rounded-xl border border-white/10" style="background:#1a1d21">
+                    <h3 class="text-sm font-bold uppercase tracking-widest text-secondary-text mb-4">Profile Information</h3>
+                    <div class="space-y-4">
+                        <div>
+                            <label class="block text-[13px] font-semibold text-secondary-text mb-2">Username</label>
+                            <input id="settings-username" type="text" class="settings-input" disabled style="opacity:0.5;cursor:not-allowed">
+                            <p class="text-xs text-secondary-text mt-1">Username cannot be changed</p>
+                        </div>
+                        <div>
+                            <label class="block text-[13px] font-semibold text-secondary-text mb-2">Display Name</label>
+                            <input id="settings-displayname" type="text" class="settings-input" placeholder="Your display name">
+                        </div>
+                        <div>
+                            <label class="block text-[13px] font-semibold text-secondary-text mb-2">Email</label>
+                            <input id="settings-email" type="email" class="settings-input" placeholder="your@email.com">
+                        </div>
+                        <div class="pt-2">
+                            <button id="settings-save-profile" class="btn-accent inline-flex items-center gap-2 px-6 py-2.5 rounded-full text-sm font-bold cursor-pointer">
+                                <span class="material-icons-round text-base">save</span>
+                                Save Changes
+                            </button>
+                            <span id="settings-profile-status" class="ml-3 text-sm text-primary font-medium" style="display:none"></span>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Change Password Section -->
+                <div class="mb-8 p-6 rounded-xl border border-white/10" style="background:#1a1d21">
+                    <h3 class="text-sm font-bold uppercase tracking-widest text-secondary-text mb-4">Change Password</h3>
+                    <div class="space-y-4">
+                        <div>
+                            <label class="block text-[13px] font-semibold text-secondary-text mb-2">Current Password</label>
+                            <input id="settings-current-pw" type="password" class="settings-input" placeholder="Enter current password">
+                        </div>
+                        <div>
+                            <label class="block text-[13px] font-semibold text-secondary-text mb-2">New Password</label>
+                            <input id="settings-new-pw" type="password" class="settings-input" placeholder="Enter new password">
+                        </div>
+                        <div>
+                            <label class="block text-[13px] font-semibold text-secondary-text mb-2">Confirm New Password</label>
+                            <input id="settings-confirm-pw" type="password" class="settings-input" placeholder="Confirm new password">
+                        </div>
+                        <div class="pt-2">
+                            <button id="settings-change-pw" class="btn-ghost inline-flex items-center gap-2 px-6 py-2.5 rounded-full border border-white/20 text-sm font-bold cursor-pointer">
+                                <span class="material-icons-round text-base">lock</span>
+                                Change Password
+                            </button>
+                            <span id="settings-pw-status" class="ml-3 text-sm font-medium" style="display:none"></span>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Account Info (read-only) -->
+                <div class="p-6 rounded-xl border border-white/10" style="background:#1a1d21">
+                    <h3 class="text-sm font-bold uppercase tracking-widest text-secondary-text mb-4">Account Info</h3>
+                    <div class="space-y-2 text-sm">
+                        <div class="flex justify-between"><span class="text-secondary-text">Role</span><span id="settings-role" class="text-white font-medium">-</span></div>
+                        <div class="flex justify-between"><span class="text-secondary-text">Member since</span><span id="settings-created" class="text-white font-medium">-</span></div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
         <!-- Footer Stats -->
         <footer class="h-11 flex-shrink-0 flex items-center justify-between px-8 bg-sidebar-dark border-t border-white/5 text-xs text-secondary-text">
             <div class="flex gap-6">
