@@ -369,15 +369,21 @@ async function syncGroupsFromServer(targetUserId) {
         var serverGroups = (data.groups || []).map(normalizeGroupName).filter(Boolean);
 
         if (targetUserId) {
-            // Admin viewing another user's groups — replace entirely, don't merge with local
+            // Admin viewing another user's groups
             state.customGroups = serverGroups;
         } else {
-            // Own groups — merge with local
-            var localGroups = state.customGroups || [];
-            var merged = Array.from(new Set([...serverGroups, ...localGroups]));
-            state.customGroups = merged;
-            await saveGroupsToServer(merged);
-            localStorage.setItem(getUserGroupStorageKey(), JSON.stringify(merged));
+            // Own groups — server is source of truth
+            // But if server is empty and local has groups, push local to server (first sync)
+            var localGroups = (state.customGroups || []).filter(Boolean);
+            if (serverGroups.length === 0 && localGroups.length > 0) {
+                // First time sync: upload local groups to server
+                state.customGroups = localGroups;
+                await saveGroupsToServer(localGroups);
+            } else {
+                // Server has data — use server as source of truth
+                state.customGroups = serverGroups;
+            }
+            localStorage.setItem(getUserGroupStorageKey(), JSON.stringify(state.customGroups));
         }
         syncGroupUI(true);
         console.log('[Groups Sync] Synced', state.customGroups.length, 'groups for', targetUserId || 'self');
