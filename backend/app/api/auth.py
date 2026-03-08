@@ -1,5 +1,6 @@
 """Auth endpoints — register, login, user info."""
 
+import json
 from datetime import datetime
 
 from fastapi import APIRouter, Depends, HTTPException, status
@@ -195,6 +196,40 @@ async def delete_avatar(
     current_user.avatar = None
     await db.flush()
     return {"ok": True}
+
+
+# ---------------------------------------------------------------------------
+# Groups sync endpoints
+# ---------------------------------------------------------------------------
+
+
+@router.get("/me/groups")
+async def get_my_groups(
+    current_user: User = Depends(get_current_user),
+):
+    """Get the current user's groups list."""
+    try:
+        groups = json.loads(current_user.groups) if current_user.groups else []
+    except (json.JSONDecodeError, TypeError):
+        groups = []
+    return {"groups": groups}
+
+
+@router.put("/me/groups")
+async def save_my_groups(
+    req: dict,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Save the current user's groups list."""
+    groups = req.get("groups", [])
+    if not isinstance(groups, list):
+        raise HTTPException(status_code=400, detail="groups must be an array")
+    # Deduplicate and clean
+    cleaned = list(dict.fromkeys(str(g).strip() for g in groups if str(g).strip()))
+    current_user.groups = json.dumps(cleaned)
+    await db.flush()
+    return {"groups": cleaned}
 
 
 # ---------------------------------------------------------------------------

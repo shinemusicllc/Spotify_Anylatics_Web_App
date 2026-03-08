@@ -335,6 +335,7 @@ function escapeAttrSelectorValue(value) {
 }
 
 function loadCustomGroups() {
+    // Load from localStorage as fallback (will be overwritten by server sync)
     try {
         const raw = localStorage.getItem(getUserGroupStorageKey());
         const parsed = raw ? JSON.parse(raw) : [];
@@ -347,6 +348,45 @@ function loadCustomGroups() {
     }
 }
 
+async function syncGroupsFromServer() {
+    try {
+        var token = getAuthToken();
+        if (!token) return;
+        var res = await fetch(CONFIG.API_BASE + '/auth/me/groups', {
+            headers: { 'Authorization': 'Bearer ' + token },
+        });
+        if (!res.ok) return;
+        var data = await res.json();
+        var serverGroups = (data.groups || []).map(normalizeGroupName).filter(Boolean);
+
+        // Merge with local groups (local may have new groups not yet synced)
+        var localGroups = state.customGroups || [];
+        var merged = Array.from(new Set([...serverGroups, ...localGroups]));
+        state.customGroups = merged;
+
+        // Save merged back to server and localStorage
+        await saveGroupsToServer(merged);
+        localStorage.setItem(getUserGroupStorageKey(), JSON.stringify(merged));
+        syncGroupUI(true);
+    } catch (err) {
+        // Silently fail - localStorage fallback still works
+    }
+}
+
+async function saveGroupsToServer(groups) {
+    try {
+        var token = getAuthToken();
+        if (!token) return;
+        await fetch(CONFIG.API_BASE + '/auth/me/groups', {
+            method: 'PUT',
+            headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + token },
+            body: JSON.stringify({ groups: groups || state.customGroups }),
+        });
+    } catch (err) {
+        // Silently fail
+    }
+}
+
 function saveCustomGroups() {
     const cleaned = Array.from(new Set(
         (state.customGroups || [])
@@ -355,6 +395,8 @@ function saveCustomGroups() {
     ));
     state.customGroups = cleaned;
     localStorage.setItem(getUserGroupStorageKey(), JSON.stringify(cleaned));
+    // Sync to server in background
+    saveGroupsToServer(cleaned);
 }
 
 function getActiveGroupName() {
@@ -2690,6 +2732,8 @@ document.addEventListener('DOMContentLoaded', () => {
     loadData().then(() => {
         // Update hero image after data is rendered
         setTimeout(updateHeroImage, 100);
+        // Sync groups from server
+        syncGroupsFromServer();
     });
 
     // Keep "Checked" relative times live without page reload.

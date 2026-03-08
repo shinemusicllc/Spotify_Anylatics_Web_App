@@ -29,3 +29,4 @@ class User(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
     last_login: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
     avatar: Mapped[str | None] = mapped_column(Text, nullable=True)
+    groups: Mapped[str | None] = mapped_column(Text, nullable=True)  # JSON array of group names
