@@ -12,6 +12,10 @@
   padding: 0;
 }
 
+:root, html {
+  color-scheme: dark;
+}
+
 body {
   font-family: "Inter", "Inter Tight", system-ui, sans-serif;
   -webkit-font-smoothing: antialiased;
@@ -1051,20 +1055,61 @@ select option:hover {
 }
 
 /* ── Fix inputs that may have white/light background ─────────── */
+input[type="text"],
+input[type="email"],
+input[type="password"],
+input[type="search"],
+input[type="url"],
+textarea,
+select {
+  color-scheme: dark;
+}
+
 .settings-input,
 .modal-input,
 input.settings-input,
-textarea.settings-input {
+textarea.settings-input,
+#settings-panel input,
+#settings-panel select,
+#admin-edit-modal input,
+#admin-edit-modal select,
+#admin-pw-modal input {
   background-color: #1a1d21 !important;
   color: #f2f5fb !important;
+  -webkit-text-fill-color: #f2f5fb !important;
 }
 
 .settings-input:focus,
-.modal-input:focus {
+.modal-input:focus,
+#settings-panel input:focus,
+#admin-edit-modal input:focus,
+#admin-pw-modal input:focus {
   background-color: #1e2228 !important;
 }
 
-.settings-input:disabled {
+.settings-input:disabled,
+#settings-panel input:disabled {
   background-color: #151719 !important;
+  color: #8a8f98 !important;
+  -webkit-text-fill-color: #8a8f98 !important;
   opacity: 0.5;
+}
+
+/* Force autofill to dark bg */
+input:-webkit-autofill,
+input:-webkit-autofill:hover,
+input:-webkit-autofill:focus {
+  -webkit-text-fill-color: #f2f5fb !important;
+  -webkit-box-shadow: 0 0 0 1000px #1a1d21 inset !important;
+  box-shadow: 0 0 0 1000px #1a1d21 inset !important;
+  caret-color: #f2f5fb;
+}
+
+/* Force dark dropdown options across browsers */
+select option,
+#admin-user-filter option,
+#admin-edit-role option,
+#modal-group-select option {
+  background-color: #1a1d21 !important;
+  color: #f2f5fb !important;
 }
