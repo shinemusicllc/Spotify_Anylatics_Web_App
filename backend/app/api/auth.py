@@ -49,10 +49,12 @@ async def register(req: RegisterRequest, db: AsyncSession = Depends(get_db)):
             detail="Username or email already registered",
         )
 
-    # First user becomes admin
-    count_result = await db.execute(select(func.count()).select_from(User))
-    user_count = count_result.scalar() or 0
-    role = "admin" if user_count == 0 else "user"
+    # If no admin exists yet, this user becomes admin
+    admin_result = await db.execute(
+        select(func.count()).select_from(User).where(User.role == "admin")
+    )
+    admin_count = admin_result.scalar() or 0
+    role = "admin" if admin_count == 0 else "user"
 
     user = User(
         username=req.username,
@@ -116,3 +118,39 @@ async def list_users(
     result = await db.execute(select(User).order_by(User.created_at))
     users = result.scalars().all()
     return [_user_response(u) for u in users]
+
+@router.patch("/users/{target_user_id}/role")
+async def update_user_role(
+    target_user_id: str,
+    role: str = "admin",
+    admin: User = Depends(get_admin_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Admin only - change user role."""
+    result = await db.execute(select(User).where(User.id == target_user_id))
+    target = result.scalar_one_or_none()
+    if not target:
+        raise HTTPException(status_code=404, detail="User not found")
+    if role not in ("admin", "user"):
+        raise HTTPException(status_code=400, detail="Invalid role")
+    target.role = role
+    await db.flush()
+    return _user_response(target)
+
+
+@router.post("/promote-self")
+async def promote_self_to_admin(
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Promote yourself to admin IF no admin exists in the system."""
+    admin_check = await db.execute(
+        select(func.count()).select_from(User).where(User.role == "admin")
+    )
+    if (admin_check.scalar() or 0) > 0:
+        raise HTTPException(status_code=403, detail="Admin already exists")
+    current_user.role = "admin"
+    await db.flush()
+    token = create_access_token({"sub": str(current_user.id)})
+    return AuthResponse(access_token=token, user=_user_response(current_user))
+

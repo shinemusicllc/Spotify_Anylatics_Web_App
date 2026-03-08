@@ -1716,31 +1716,39 @@ async function loadData(opts = {}) {
     const preserveScroll = Boolean(opts?.preserveScroll);
     const skeleton = document.getElementById('skeleton-container');
 
+    // Health check (separate from data fetch)
     try {
-        // Try to connect to backend API
         await api.health();
         state.apiOnline = true;
         updateApiStatus();
+    } catch {
+        state.apiOnline = false;
+        updateApiStatus();
+    }
 
+    // Fetch items
+    try {
         const params = {};
         const currentUser = getAuthUser();
         if (currentUser?.role === 'admin' && state.adminFilterUserId) {
             params.user_id = state.adminFilterUserId;
         }
         const data = await api.getItems(params);
-        if (!data) return; // auth redirect in progress
+        if (!data) return;
         const incoming = data.items || data || [];
         state.items = mergeItemsKeepOrder(state.items, incoming);
         syncGroupUI(true);
         if (skeleton) skeleton.style.display = 'none';
         renderList({ preserveScroll });
-    } catch {
-        // Backend not available — use demo data
-        state.apiOnline = false;
-        updateApiStatus();
-        state.items = getDemoData();
-        syncGroupUI(true);
+    } catch (err) {
+        console.error('loadData error:', err);
         if (skeleton) skeleton.style.display = 'none';
+        if (getAuthToken()) {
+            state.items = [];
+        } else {
+            state.items = getDemoData();
+        }
+        syncGroupUI(true);
         renderList({ preserveScroll });
     }
 }
