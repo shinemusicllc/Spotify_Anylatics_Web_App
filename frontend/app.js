@@ -2081,12 +2081,13 @@ function renderAdminUsers(users) {
 
         var isSelf = currentUser && currentUser.id === u.id;
 
-        var deactivateBtn = '';
+        var extraBtns = '';
         if (!isSelf) {
             var toggleColor = u.is_active ? 'red' : 'emerald';
             var toggleTitle = u.is_active ? 'Deactivate' : 'Activate';
             var toggleIcon = u.is_active ? 'person_off' : 'person';
-            deactivateBtn = '<button data-action="toggle-active" data-uid="' + u.id + '" data-uname="' + u.username + '" data-active="' + u.is_active + '" class="p-2 rounded-lg hover:bg-white/10 text-secondary-text hover:text-' + toggleColor + '-400 transition-colors cursor-pointer" title="' + toggleTitle + '"><span class="material-icons-round text-lg">' + toggleIcon + '</span></button>';
+            extraBtns = '<button data-action="toggle-active" data-uid="' + u.id + '" data-uname="' + u.username + '" data-active="' + u.is_active + '" class="p-2 rounded-lg hover:bg-white/10 text-secondary-text hover:text-' + toggleColor + '-400 transition-colors cursor-pointer" title="' + toggleTitle + '"><span class="material-icons-round text-lg">' + toggleIcon + '</span></button>' +
+                '<button data-action="delete-user" data-uid="' + u.id + '" data-uname="' + u.username + '" class="p-2 rounded-lg hover:bg-white/10 text-secondary-text hover:text-red-500 transition-colors cursor-pointer" title="Delete user permanently"><span class="material-icons-round text-lg">delete_forever</span></button>';
         }
 
         html += '<div class="p-5 rounded-xl border border-white/10 hover:border-white/20 transition-colors" style="background:#1a1d21">' +
@@ -2105,7 +2106,7 @@ function renderAdminUsers(users) {
                 '<div class="flex items-center gap-2 flex-shrink-0">' +
                     '<button data-action="edit-user" data-uid="' + u.id + '" class="p-2 rounded-lg hover:bg-white/10 text-secondary-text hover:text-white transition-colors cursor-pointer" title="Edit user"><span class="material-icons-round text-lg">edit</span></button>' +
                     '<button data-action="reset-pw" data-uid="' + u.id + '" data-uname="' + u.username + '" class="p-2 rounded-lg hover:bg-white/10 text-secondary-text hover:text-white transition-colors cursor-pointer" title="Reset password"><span class="material-icons-round text-lg">lock_reset</span></button>' +
-                    deactivateBtn +
+                    extraBtns +
                 '</div>' +
             '</div>' +
         '</div>';
@@ -2237,6 +2238,26 @@ async function adminToggleActive(userId, username, isCurrentlyActive) {
     }
 }
 
+
+async function adminDeleteUser(userId, username) {
+    if (!confirm('WARNING: This will permanently delete user "' + username + '" and ALL their data (links, groups, crawl jobs).\n\nThis action CANNOT be undone. Continue?')) return;
+    if (!confirm('Are you REALLY sure? Type OK to confirm you want to delete "' + username + '" permanently.')) return;
+
+    try {
+        var token = getAuthToken();
+        var res = await fetch(CONFIG.API_BASE + '/auth/users/' + userId, {
+            method: 'DELETE',
+            headers: { 'Authorization': 'Bearer ' + token },
+        });
+        var data = await res.json();
+        if (!res.ok) throw new Error(data.detail || 'Failed to delete user');
+        showToast('User ' + username + ' deleted permanently', 'success');
+        loadAdminUsers();
+    } catch (err) {
+        showToast(err.message, 'error');
+    }
+}
+
 // Expose to window for inline onclick handlers
 window.openAdminEditModal = openAdminEditModal;
 window.closeAdminEditModal = closeAdminEditModal;
@@ -2245,6 +2266,7 @@ window.openAdminPwModal = openAdminPwModal;
 window.closeAdminPwModal = closeAdminPwModal;
 window.submitAdminResetPassword = submitAdminResetPassword;
 window.adminToggleActive = adminToggleActive;
+window.adminDeleteUser = adminDeleteUser;
 window.showAdminUsers = showAdminUsers;
 window.hideAdminUsers = hideAdminUsers;
 
@@ -2511,6 +2533,8 @@ document.addEventListener('DOMContentLoaded', () => {
             } else if (action === 'toggle-active') {
                 var isActive = btn.getAttribute('data-active') === 'true';
                 adminToggleActive(uid, uname, isActive);
+            } else if (action === 'delete-user') {
+                adminDeleteUser(uid, uname);
             }
         });
     }

@@ -3,11 +3,13 @@
 from datetime import datetime
 
 from fastapi import APIRouter, Depends, HTTPException, status
-from sqlalchemy import select, func
+from sqlalchemy import select, func, delete
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.database import get_db
 from app.models.user import User
+from app.models.item import Item
+from app.models.crawl_job import CrawlJob
 from app.schemas.auth import (
     RegisterRequest,
     LoginRequest,
@@ -258,13 +260,22 @@ async def admin_delete_user(
     admin: User = Depends(get_admin_user),
     db: AsyncSession = Depends(get_db),
 ):
-    """Admin — deactivate a user account."""
+    """Admin — permanently delete a user and all their data (items, crawl jobs)."""
     if str(admin.id) == user_id:
-        raise HTTPException(status_code=400, detail="Cannot deactivate your own account")
+        raise HTTPException(status_code=400, detail="Cannot delete your own account")
     result = await db.execute(select(User).where(User.id == user_id))
     user = result.scalar_one_or_none()
     if not user:
         raise HTTPException(status_code=404, detail="User not found")
-    user.is_active = False
+
+    username = user.username
+
+    # Delete crawl jobs belonging to user
+    await db.execute(delete(CrawlJob).where(CrawlJob.user_id == user_id))
+    # Delete items belonging to user
+    await db.execute(delete(Item).where(Item.user_id == user_id))
+    # Delete the user
+    await db.execute(delete(User).where(User.id == user_id))
     await db.flush()
-    return {"ok": True, "message": f"User {user.username} deactivated"}
+
+    return {"ok": True, "message": f"User {username} and all their data deleted"}
