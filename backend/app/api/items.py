@@ -48,6 +48,7 @@ def _item_to_response(item: Item) -> ItemResponse:
         error_code=item.error_code,
         error_message=item.error_message,
         group=item.group,
+        user_id=str(item.user_id) if item.user_id else None,
         last_checked=item.last_checked,
         created_at=item.created_at,
     )
@@ -58,6 +59,7 @@ async def list_items(
     type: str | None = Query(None, description="Filter by item type"),
     group: str | None = Query(None, description="Filter by group"),
     status: str | None = Query(None, description="Filter by status"),
+    user_id: str | None = Query(None, description="Filter by user (admin only)"),
     limit: int = Query(100, le=500),
     offset: int = Query(0, ge=0),
     db: AsyncSession = Depends(get_db),
@@ -66,9 +68,11 @@ async def list_items(
     """List all items with optional filters."""
     query = select(Item).order_by(Item.updated_at.desc())
 
-    # Non-admin users only see their own items
+    # Non-admin users only see their own items; admin can filter by user_id
     if current_user.role != "admin":
         query = query.where(Item.user_id == current_user.id)
+    elif user_id:
+        query = query.where(Item.user_id == user_id)
 
     if type:
         query = query.where(Item.item_type == type)
@@ -151,15 +155,18 @@ async def delete_item(
 @router.delete("/items")
 async def clear_items(
     group: str | None = Query(None, description="Optional group to clear"),
+    user_id: str | None = Query(None, description="Filter by user (admin only)"),
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
     """Clear all items (or items in one group)."""
     selected_items = select(Item.id, Item.spotify_id)
 
-    # Non-admin users only clear their own items
+    # Non-admin users only clear their own items; admin can filter by user_id
     if current_user.role != "admin":
         selected_items = selected_items.where(Item.user_id == current_user.id)
+    elif user_id:
+        selected_items = selected_items.where(Item.user_id == user_id)
 
     if group:
         selected_items = selected_items.where(Item.group == group)

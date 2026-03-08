@@ -36,6 +36,7 @@ class ItemResponse(BaseModel):
 
     # Grouping
     group: str | None = None
+    user_id: str | None = None
     added_date: str | None = None
 
     # Timestamps

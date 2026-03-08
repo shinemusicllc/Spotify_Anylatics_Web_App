@@ -20,6 +20,12 @@ const ALL_GROUP_ID = 'all';
 const ALL_GROUP_LABEL = 'All Links';
 const GROUP_SELECT_ALL = '__all__';
 
+function getUserGroupStorageKey() {
+    const user = getAuthUser();
+    const userId = user?.id || 'anonymous';
+    return `spoticheck_custom_groups_v1_${userId}`;
+}
+
 // ===================================================================
 // AUTH
 // ===================================================================
@@ -72,6 +78,7 @@ function setupAuthUI() {
             badge.innerHTML = '<span class="inline-flex items-center gap-1.5 text-[11px] font-bold uppercase tracking-[0.12em] text-primary"><span class="material-icons-round text-sm">admin_panel_settings</span>Admin Mode</span>';
             groupPanel.insertBefore(badge, groupPanel.firstChild);
         }
+        setupAdminUserFilter();
     }
 }
 
@@ -94,6 +101,8 @@ const state = {
     batchRefresh: null,
     pollTimer: null,
     apiOnline: false,
+    adminFilterUserId: null,
+    adminUserList: [],
 };
 
 // ═══════════════════════════════════════════════════════════════════
@@ -133,7 +142,13 @@ class SpotiCheckAPI {
         }
     }
     health()              { return this._fetch('/health'); }
-    getItems(type = null) { return this._fetch(type ? `/items/${type}` : '/items'); }
+    getItems(params = {}) {
+        const qs = new URLSearchParams();
+        if (params.type) qs.set('type', params.type);
+        if (params.user_id) qs.set('user_id', params.user_id);
+        const suffix = qs.toString() ? `?${qs.toString()}` : '';
+        return this._fetch(`/items${suffix}`);
+    }
     getItem(type, id)     { return this._fetch(`/items/${type}/${id}`); }
     getJob(jobId)         { return this._fetch(`/jobs/${jobId}`); }
     deleteItem(type, id)  { return this._fetch(`/items/${type}/${id}`, { method: 'DELETE' }); }
@@ -304,7 +319,7 @@ function escapeAttrSelectorValue(value) {
 
 function loadCustomGroups() {
     try {
-        const raw = localStorage.getItem(GROUP_STORAGE_KEY);
+        const raw = localStorage.getItem(getUserGroupStorageKey());
         const parsed = raw ? JSON.parse(raw) : [];
         if (!Array.isArray(parsed)) return [];
         return parsed
@@ -322,7 +337,7 @@ function saveCustomGroups() {
             .filter(Boolean)
     ));
     state.customGroups = cleaned;
-    localStorage.setItem(GROUP_STORAGE_KEY, JSON.stringify(cleaned));
+    localStorage.setItem(getUserGroupStorageKey(), JSON.stringify(cleaned));
 }
 
 function getActiveGroupName() {
@@ -1625,6 +1640,78 @@ function getDemoData() {
     ];
 }
 
+async function setupAdminUserFilter() {
+    const user = getAuthUser();
+    if (!user || user.role !== 'admin') return;
+
+    try {
+        const token = getAuthToken();
+        const res = await fetch(`${CONFIG.API_BASE}/auth/users`, {
+            headers: {
+                'Content-Type': 'application/json',
+                'Authorization': `Bearer ${token}`,
+            },
+        });
+        if (!res.ok) return;
+        const users = await res.json();
+        state.adminUserList = Array.isArray(users) ? users : (users.users || []);
+    } catch {
+        return;
+    }
+
+    const groupPanel = document.getElementById('group-panel');
+    if (!groupPanel || document.getElementById('admin-user-filter')) return;
+
+    const filterDiv = document.createElement('div');
+    filterDiv.className = 'px-5 py-2 border-b border-white/5';
+    filterDiv.id = 'admin-user-filter-wrap';
+    filterDiv.innerHTML = `
+        <label class="block text-[11px] font-bold uppercase tracking-[0.12em] text-secondary-text mb-2">Filter by User</label>
+        <select id="admin-user-filter" class="w-full bg-white/5 border border-white/10 rounded-lg px-3 py-2 text-sm text-white focus:outline-none focus:border-primary/50 transition-all" style="appearance:none; color-scheme:dark;">
+            <option value="">All Users</option>
+        </select>
+    `;
+
+    // Insert after admin badge (if present), before the group search area
+    const adminBadge = document.getElementById('admin-badge');
+    if (adminBadge && adminBadge.nextSibling) {
+        groupPanel.insertBefore(filterDiv, adminBadge.nextSibling);
+    } else {
+        groupPanel.insertBefore(filterDiv, groupPanel.firstChild);
+    }
+
+    const select = document.getElementById('admin-user-filter');
+    if (select) {
+        for (const u of state.adminUserList) {
+            const opt = document.createElement('option');
+            opt.value = u.id || u._id || '';
+            opt.textContent = u.display_name || u.username || u.email || String(u.id);
+            select.appendChild(opt);
+        }
+
+        select.addEventListener('change', () => {
+            state.adminFilterUserId = select.value || null;
+
+            // Update page title to show selected user
+            const pageTitle = document.getElementById('page-title');
+            const breadcrumb = document.getElementById('breadcrumb-group');
+            if (select.value) {
+                const selectedUser = state.adminUserList.find(
+                    (u) => String(u.id || u._id) === select.value
+                );
+                const username = selectedUser?.display_name || selectedUser?.username || select.value;
+                const groupName = getActiveGroupName();
+                if (pageTitle) pageTitle.textContent = `${groupName} (${username})`;
+                if (breadcrumb) breadcrumb.textContent = `${groupName} (${username})`;
+            } else {
+                updateGroupHeader();
+            }
+
+            loadData({ preserveScroll: false });
+        });
+    }
+}
+
 async function loadData(opts = {}) {
     const preserveScroll = Boolean(opts?.preserveScroll);
     const skeleton = document.getElementById('skeleton-container');
@@ -1635,7 +1722,12 @@ async function loadData(opts = {}) {
         state.apiOnline = true;
         updateApiStatus();
 
-        const data = await api.getItems();
+        const params = {};
+        const currentUser = getAuthUser();
+        if (currentUser?.role === 'admin' && state.adminFilterUserId) {
+            params.user_id = state.adminFilterUserId;
+        }
+        const data = await api.getItems(params);
         const incoming = data.items || data || [];
         state.items = mergeItemsKeepOrder(state.items, incoming);
         syncGroupUI(true);
