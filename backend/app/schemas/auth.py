@@ -21,8 +21,10 @@ class UserResponse(BaseModel):
     email: str
     display_name: str | None
     role: str
-    avatar: str | None = None
+    is_active: bool = True
     created_at: str | None = None
+    last_login: str | None = None
+    avatar: str | None = None
 
     model_config = {"from_attributes": True}
 
@@ -45,3 +47,14 @@ class ChangePasswordRequest(BaseModel):
 
 class UpdateAvatarRequest(BaseModel):
     avatar: str  # base64 data URL
+
+
+class AdminUpdateUserRequest(BaseModel):
+    display_name: str | None = None
+    email: str | None = None
+    role: str | None = None
+    is_active: bool | None = None
+
+
+class AdminResetPasswordRequest(BaseModel):
+    new_password: str

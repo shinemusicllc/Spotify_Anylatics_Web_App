@@ -84,6 +84,18 @@ function setupAuthUI() {
             groupPanel.insertBefore(badge, groupPanel.firstChild);
         }
         setupAdminUserFilter();
+        // Add Users nav item for admin
+        const nav = document.querySelector('#sidebar nav');
+        if (nav && !document.getElementById('nav-users')) {
+            const usersLink = document.createElement('a');
+            usersLink.id = 'nav-users';
+            usersLink.className = 'flex items-center gap-4 px-3 py-3 rounded-lg text-secondary-text hover:text-white transition-colors group cursor-pointer';
+            usersLink.href = '#';
+            usersLink.innerHTML = '<span class="material-icons-round">group</span><span class="font-medium sidebar-label">Users</span>';
+            // Insert before Settings
+            const settingsNav = document.getElementById('nav-settings');
+            if (settingsNav) nav.insertBefore(usersLink, settingsNav);
+        }
     }
 }
 
@@ -1805,6 +1817,8 @@ function initStickyHeader() {
 
 function showSettings() {
     document.querySelector('.list-wrap').style.display = 'none';
+    const adminPanel = document.getElementById('admin-users-panel');
+    if (adminPanel) adminPanel.style.display = 'none';
     const settingsPanel = document.getElementById('settings-panel');
     if (settingsPanel) settingsPanel.style.display = '';
 
@@ -1823,6 +1837,8 @@ function showSettings() {
 function hideSettings() {
     const settingsPanel = document.getElementById('settings-panel');
     if (settingsPanel) settingsPanel.style.display = 'none';
+    const adminPanel = document.getElementById('admin-users-panel');
+    if (adminPanel) adminPanel.style.display = 'none';
     document.querySelector('.list-wrap').style.display = '';
 
     document.getElementById('btn-refresh')?.style && (document.getElementById('btn-refresh').style.display = '');
@@ -1975,6 +1991,261 @@ async function handleAvatarRemove() {
         showToast(err.message, 'error');
     }
 }
+
+
+// ═══════════════════════════════════════════════════════════════════
+// ADMIN USER MANAGEMENT
+// ═══════════════════════════════════════════════════════════════════
+
+function showAdminUsers() {
+    document.querySelector('.list-wrap').style.display = 'none';
+    const settingsPanel = document.getElementById('settings-panel');
+    if (settingsPanel) settingsPanel.style.display = 'none';
+    const adminPanel = document.getElementById('admin-users-panel');
+    if (adminPanel) adminPanel.style.display = '';
+
+    const breadcrumb = document.getElementById('breadcrumb-group');
+    const pageTitle = document.getElementById('page-title');
+    if (breadcrumb) {
+        breadcrumb.textContent = 'Users';
+        if (breadcrumb.previousElementSibling) breadcrumb.previousElementSibling.previousElementSibling.textContent = 'Admin';
+    }
+    if (pageTitle) pageTitle.textContent = 'User Management';
+
+    document.getElementById('btn-refresh')?.style && (document.getElementById('btn-refresh').style.display = 'none');
+    document.getElementById('btn-add-link')?.style && (document.getElementById('btn-add-link').style.display = 'none');
+    document.getElementById('search-input')?.parentElement && (document.getElementById('search-input').parentElement.style.display = 'none');
+
+    loadAdminUsers();
+}
+
+function hideAdminUsers() {
+    const adminPanel = document.getElementById('admin-users-panel');
+    if (adminPanel) adminPanel.style.display = 'none';
+    document.querySelector('.list-wrap').style.display = '';
+
+    document.getElementById('btn-refresh')?.style && (document.getElementById('btn-refresh').style.display = '');
+    document.getElementById('btn-add-link')?.style && (document.getElementById('btn-add-link').style.display = '');
+    document.getElementById('search-input')?.parentElement && (document.getElementById('search-input').parentElement.style.display = '');
+
+    updateGroupHeader();
+}
+
+let _adminUsersCache = [];
+
+async function _fetchAdminUsers() {
+    const token = getAuthToken();
+    const res = await fetch(CONFIG.API_BASE + '/auth/users', {
+        headers: { 'Authorization': 'Bearer ' + token },
+    });
+    if (!res.ok) throw new Error('Failed to load users');
+    _adminUsersCache = await res.json();
+    return _adminUsersCache;
+}
+
+async function loadAdminUsers() {
+    try {
+        const users = await _fetchAdminUsers();
+        renderAdminUsers(users);
+    } catch (err) {
+        showToast(err.message, 'error');
+    }
+}
+
+function renderAdminUsers(users) {
+    const container = document.getElementById('admin-users-list');
+    const countEl = document.getElementById('admin-users-count');
+    if (!container) return;
+    if (countEl) countEl.textContent = users.length + ' user' + (users.length !== 1 ? 's' : '');
+
+    const currentUser = getAuthUser();
+
+    container.innerHTML = users.map(function(u) {
+        var initials = (u.display_name || u.username || '??').slice(0, 2).toUpperCase();
+        var avatarHtml = u.avatar
+            ? '<img src="' + u.avatar + '" class="w-12 h-12 rounded-full object-cover flex-shrink-0 ring-1 ring-white/10">'
+            : '<div class="w-12 h-12 rounded-full flex-shrink-0 bg-gradient-to-br from-emerald-400 via-cyan-500 to-blue-700 text-white text-sm font-bold grid place-items-center ring-1 ring-white/10">' + initials + '</div>';
+
+        var roleBadge = u.role === 'admin'
+            ? '<span class="inline-flex items-center gap-1 text-[11px] font-bold uppercase tracking-wider text-primary bg-primary/10 px-2 py-0.5 rounded-full"><span class="material-icons-round" style="font-size:12px">admin_panel_settings</span>Admin</span>'
+            : '<span class="text-[11px] font-bold uppercase tracking-wider text-secondary-text bg-white/5 px-2 py-0.5 rounded-full">User</span>';
+
+        var statusBadge = u.is_active
+            ? '<span class="inline-flex items-center gap-1 text-[11px] font-medium text-emerald-400"><span class="w-1.5 h-1.5 rounded-full bg-emerald-400"></span>Active</span>'
+            : '<span class="inline-flex items-center gap-1 text-[11px] font-medium text-red-400"><span class="w-1.5 h-1.5 rounded-full bg-red-400"></span>Inactive</span>';
+
+        var lastLogin = u.last_login ? new Date(u.last_login).toLocaleDateString() + ' ' + new Date(u.last_login).toLocaleTimeString([], {hour: '2-digit', minute: '2-digit'}) : 'Never';
+        var created = u.created_at ? new Date(u.created_at).toLocaleDateString() : '-';
+
+        var isSelf = currentUser && currentUser.id === u.id;
+        var safeUsername = u.username.replace(/'/g, "\\'");
+
+        var deactivateBtn = '';
+        if (!isSelf) {
+            var toggleColor = u.is_active ? 'red' : 'emerald';
+            var toggleTitle = u.is_active ? 'Deactivate' : 'Activate';
+            var toggleIcon = u.is_active ? 'person_off' : 'person';
+            deactivateBtn = '<button onclick="adminToggleActive(\'' + u.id + '\', \'' + safeUsername + '\', ' + u.is_active + ')" class="p-2 rounded-lg hover:bg-white/10 text-secondary-text hover:text-' + toggleColor + '-400 transition-colors cursor-pointer" title="' + toggleTitle + '"><span class="material-icons-round text-lg">' + toggleIcon + '</span></button>';
+        }
+
+        return '<div class="p-5 rounded-xl border border-white/10 hover:border-white/20 transition-colors" style="background:#1a1d21">' +
+            '<div class="flex items-center gap-4">' +
+                avatarHtml +
+                '<div class="flex-1 min-w-0">' +
+                    '<div class="flex items-center gap-2 mb-0.5 flex-wrap">' +
+                        '<span class="font-semibold text-white truncate">' + (u.display_name || u.username) + '</span>' +
+                        roleBadge +
+                        statusBadge +
+                        (isSelf ? '<span class="text-[11px] text-secondary-text">(you)</span>' : '') +
+                    '</div>' +
+                    '<div class="text-sm text-secondary-text truncate">@' + u.username + ' &middot; ' + u.email + '</div>' +
+                    '<div class="text-xs text-secondary-text mt-1">Joined ' + created + ' &middot; Last login: ' + lastLogin + '</div>' +
+                '</div>' +
+                '<div class="flex items-center gap-2 flex-shrink-0">' +
+                    '<button onclick="openAdminEditModal(\'' + u.id + '\')" class="p-2 rounded-lg hover:bg-white/10 text-secondary-text hover:text-white transition-colors cursor-pointer" title="Edit user"><span class="material-icons-round text-lg">edit</span></button>' +
+                    '<button onclick="openAdminPwModal(\'' + u.id + '\', \'' + safeUsername + '\')" class="p-2 rounded-lg hover:bg-white/10 text-secondary-text hover:text-white transition-colors cursor-pointer" title="Reset password"><span class="material-icons-round text-lg">lock_reset</span></button>' +
+                    deactivateBtn +
+                '</div>' +
+            '</div>' +
+        '</div>';
+    }).join('');
+}
+
+function openAdminEditModal(userId) {
+    var user = _adminUsersCache.find(function(u) { return u.id === userId; });
+    if (!user) { loadAdminUsers(); return; }
+
+    document.getElementById('admin-edit-user-id').value = user.id;
+    document.getElementById('admin-edit-username').value = user.username;
+    document.getElementById('admin-edit-displayname').value = user.display_name || '';
+    document.getElementById('admin-edit-email').value = user.email || '';
+    document.getElementById('admin-edit-role').value = user.role;
+    document.getElementById('admin-edit-status').style.display = 'none';
+
+    var modal = document.getElementById('admin-edit-modal');
+    if (modal) { modal.style.display = ''; modal.classList.add('active'); }
+}
+
+function closeAdminEditModal() {
+    var modal = document.getElementById('admin-edit-modal');
+    if (modal) { modal.style.display = 'none'; modal.classList.remove('active'); }
+}
+
+async function saveAdminEditUser() {
+    var userId = document.getElementById('admin-edit-user-id').value;
+    var displayName = document.getElementById('admin-edit-displayname').value.trim();
+    var email = document.getElementById('admin-edit-email').value.trim();
+    var role = document.getElementById('admin-edit-role').value;
+    var statusEl = document.getElementById('admin-edit-status');
+
+    try {
+        var token = getAuthToken();
+        var res = await fetch(CONFIG.API_BASE + '/auth/users/' + userId, {
+            method: 'PATCH',
+            headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + token },
+            body: JSON.stringify({ display_name: displayName || null, email: email || null, role: role }),
+        });
+        var data = await res.json();
+        if (!res.ok) throw new Error(data.detail || 'Failed to update user');
+
+        showToast('User updated!', 'success');
+        closeAdminEditModal();
+        loadAdminUsers();
+    } catch (err) {
+        statusEl.textContent = err.message;
+        statusEl.style.display = '';
+        statusEl.style.color = '#ef4444';
+        setTimeout(function() { statusEl.style.display = 'none'; }, 5000);
+    }
+}
+
+function openAdminPwModal(userId, username) {
+    document.getElementById('admin-pw-user-id').value = userId;
+    document.getElementById('admin-pw-username').textContent = username;
+    document.getElementById('admin-pw-new').value = '';
+    document.getElementById('admin-pw-status').style.display = 'none';
+
+    var modal = document.getElementById('admin-pw-modal');
+    if (modal) { modal.style.display = ''; modal.classList.add('active'); }
+}
+
+function closeAdminPwModal() {
+    var modal = document.getElementById('admin-pw-modal');
+    if (modal) { modal.style.display = 'none'; modal.classList.remove('active'); }
+}
+
+async function submitAdminResetPassword() {
+    var userId = document.getElementById('admin-pw-user-id').value;
+    var newPw = document.getElementById('admin-pw-new').value;
+    var statusEl = document.getElementById('admin-pw-status');
+
+    if (!newPw || newPw.length < 4) {
+        statusEl.textContent = 'Password must be at least 4 characters';
+        statusEl.style.display = '';
+        statusEl.style.color = '#ef4444';
+        return;
+    }
+
+    try {
+        var token = getAuthToken();
+        var res = await fetch(CONFIG.API_BASE + '/auth/users/' + userId + '/reset-password', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + token },
+            body: JSON.stringify({ new_password: newPw }),
+        });
+        var data = await res.json();
+        if (!res.ok) throw new Error(data.detail || 'Failed to reset password');
+
+        showToast('Password reset successfully!', 'success');
+        closeAdminPwModal();
+    } catch (err) {
+        statusEl.textContent = err.message;
+        statusEl.style.display = '';
+        statusEl.style.color = '#ef4444';
+        setTimeout(function() { statusEl.style.display = 'none'; }, 5000);
+    }
+}
+
+async function adminToggleActive(userId, username, isCurrentlyActive) {
+    var action = isCurrentlyActive ? 'deactivate' : 'activate';
+    if (!confirm('Are you sure you want to ' + action + ' user "' + username + '"?')) return;
+
+    try {
+        var token = getAuthToken();
+        if (isCurrentlyActive) {
+            var res = await fetch(CONFIG.API_BASE + '/auth/users/' + userId, {
+                method: 'DELETE',
+                headers: { 'Authorization': 'Bearer ' + token },
+            });
+            var data = await res.json();
+            if (!res.ok) throw new Error(data.detail || 'Failed');
+        } else {
+            var res = await fetch(CONFIG.API_BASE + '/auth/users/' + userId, {
+                method: 'PATCH',
+                headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + token },
+                body: JSON.stringify({ is_active: true }),
+            });
+            var data = await res.json();
+            if (!res.ok) throw new Error(data.detail || 'Failed');
+        }
+        showToast('User ' + action + 'd!', 'success');
+        loadAdminUsers();
+    } catch (err) {
+        showToast(err.message, 'error');
+    }
+}
+
+// Expose to window for inline onclick handlers
+window.openAdminEditModal = openAdminEditModal;
+window.closeAdminEditModal = closeAdminEditModal;
+window.saveAdminEditUser = saveAdminEditUser;
+window.openAdminPwModal = openAdminPwModal;
+window.closeAdminPwModal = closeAdminPwModal;
+window.submitAdminResetPassword = submitAdminResetPassword;
+window.adminToggleActive = adminToggleActive;
+window.showAdminUsers = showAdminUsers;
+window.hideAdminUsers = hideAdminUsers;
+
 
 // ═══════════════════════════════════════════════════════════════════
 // INIT
@@ -2162,6 +2433,7 @@ document.addEventListener('DOMContentLoaded', () => {
         navSettings.classList.add('text-white', 'bg-white/10');
         navSettings.classList.remove('text-secondary-text');
         navSettings.querySelector('.material-icons-round')?.classList.add('text-primary');
+        hideAdminUsers();
         showSettings();
     });
 
@@ -2177,8 +2449,29 @@ document.addEventListener('DOMContentLoaded', () => {
         navLinks.classList.remove('text-secondary-text');
         navLinks.querySelector('.material-icons-round')?.classList.add('text-primary');
         hideSettings();
+        hideAdminUsers();
         updateGroupHeader();
     });
+
+    // Users nav (admin)
+    const navUsersEl = document.getElementById('nav-users');
+    if (navUsersEl) {
+        navUsersEl.addEventListener('click', function(e) {
+            e.preventDefault();
+            document.querySelectorAll('#sidebar nav a').forEach(function(a) {
+                a.classList.remove('text-white', 'bg-white/10');
+                a.classList.add('text-secondary-text');
+                var icon = a.querySelector('.material-icons-round');
+                if (icon) icon.classList.remove('text-primary');
+            });
+            navUsersEl.classList.add('text-white', 'bg-white/10');
+            navUsersEl.classList.remove('text-secondary-text');
+            var icon = navUsersEl.querySelector('.material-icons-round');
+            if (icon) icon.classList.add('text-primary');
+            hideSettings();
+            showAdminUsers();
+        });
+    }
 
     // Settings event listeners
     document.getElementById('settings-save-profile')?.addEventListener('click', handleSaveProfile);

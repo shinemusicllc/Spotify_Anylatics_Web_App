@@ -16,6 +16,8 @@ from app.schemas.auth import (
     UpdateProfileRequest,
     ChangePasswordRequest,
     UpdateAvatarRequest,
+    AdminUpdateUserRequest,
+    AdminResetPasswordRequest,
 )
 from app.services.auth import (
     hash_password,
@@ -35,8 +37,10 @@ def _user_response(user: User) -> UserResponse:
         email=user.email,
         display_name=user.display_name,
         role=user.role,
-        avatar=user.avatar,
+        is_active=user.is_active,
         created_at=user.created_at.isoformat() if user.created_at else None,
+        last_login=user.last_login.isoformat() if user.last_login else None,
+        avatar=user.avatar,
     )
 
 
@@ -53,12 +57,10 @@ async def register(req: RegisterRequest, db: AsyncSession = Depends(get_db)):
             detail="Username or email already registered",
         )
 
-    # If no admin exists yet, this user becomes admin
-    admin_result = await db.execute(
-        select(func.count()).select_from(User).where(User.role == "admin")
-    )
-    admin_count = admin_result.scalar() or 0
-    role = "admin" if admin_count == 0 else "user"
+    # First user becomes admin
+    count_result = await db.execute(select(func.count()).select_from(User))
+    user_count = count_result.scalar() or 0
+    role = "admin" if user_count == 0 else "user"
 
     user = User(
         username=req.username,
@@ -113,16 +115,33 @@ async def me(current_user: User = Depends(get_current_user)):
     return _user_response(current_user)
 
 
+@router.get("/users", response_model=list[UserResponse])
+async def list_users(
+    admin: User = Depends(get_admin_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Admin only — list all users."""
+    result = await db.execute(select(User).order_by(User.created_at))
+    users = result.scalars().all()
+    return [_user_response(u) for u in users]
+
+
+# ---------------------------------------------------------------------------
+# Profile / settings endpoints
+# ---------------------------------------------------------------------------
+
+
 @router.patch("/me", response_model=UserResponse)
 async def update_profile(
     req: UpdateProfileRequest,
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
-    """Update current user profile."""
+    """Update the current user's display name and/or email."""
     if req.display_name is not None:
         current_user.display_name = req.display_name
     if req.email is not None:
+        # Check email uniqueness
         existing = await db.execute(
             select(User).where(User.email == req.email, User.id != current_user.id)
         )
@@ -139,11 +158,13 @@ async def change_password(
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
-    """Change current user password."""
+    """Change the current user's password."""
     if not verify_password(req.current_password, current_user.password_hash):
         raise HTTPException(status_code=400, detail="Current password is incorrect")
     if len(req.new_password) < 4:
-        raise HTTPException(status_code=400, detail="Password must be at least 4 characters")
+        raise HTTPException(
+            status_code=400, detail="Password must be at least 4 characters"
+        )
     current_user.password_hash = hash_password(req.new_password)
     await db.flush()
     return {"ok": True, "message": "Password changed successfully"}
@@ -155,8 +176,8 @@ async def update_avatar(
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
-    """Upload avatar as base64 data URL."""
-    if len(req.avatar) > 500_000:
+    """Upload/replace the current user's avatar (base64 data URL)."""
+    if len(req.avatar) > 500_000:  # ~500KB limit
         raise HTTPException(status_code=400, detail="Avatar too large (max 500KB)")
     current_user.avatar = req.avatar
     await db.flush()
@@ -168,54 +189,82 @@ async def delete_avatar(
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
-    """Remove avatar."""
+    """Remove the current user's avatar."""
     current_user.avatar = None
     await db.flush()
     return {"ok": True}
 
 
-@router.get("/users", response_model=list[UserResponse])
-async def list_users(
-    admin: User = Depends(get_admin_user),
-    db: AsyncSession = Depends(get_db),
-):
-    """Admin only — list all users."""
-    result = await db.execute(select(User).order_by(User.created_at))
-    users = result.scalars().all()
-    return [_user_response(u) for u in users]
+# ---------------------------------------------------------------------------
+# Admin user management endpoints
+# ---------------------------------------------------------------------------
 
-@router.patch("/users/{target_user_id}/role")
-async def update_user_role(
-    target_user_id: str,
-    role: str = "admin",
+
+@router.patch("/users/{user_id}", response_model=UserResponse)
+async def admin_update_user(
+    user_id: str,
+    req: AdminUpdateUserRequest,
     admin: User = Depends(get_admin_user),
     db: AsyncSession = Depends(get_db),
 ):
-    """Admin only - change user role."""
-    result = await db.execute(select(User).where(User.id == target_user_id))
-    target = result.scalar_one_or_none()
-    if not target:
+    """Admin — edit any user's profile, role, or active status."""
+    result = await db.execute(select(User).where(User.id == user_id))
+    user = result.scalar_one_or_none()
+    if not user:
         raise HTTPException(status_code=404, detail="User not found")
-    if role not in ("admin", "user"):
-        raise HTTPException(status_code=400, detail="Invalid role")
-    target.role = role
+
+    if req.display_name is not None:
+        user.display_name = req.display_name
+    if req.email is not None:
+        existing = await db.execute(
+            select(User).where(User.email == req.email, User.id != user.id)
+        )
+        if existing.scalar_one_or_none():
+            raise HTTPException(status_code=409, detail="Email already in use")
+        user.email = req.email
+    if req.role is not None:
+        if req.role not in ("admin", "user"):
+            raise HTTPException(status_code=400, detail="Role must be 'admin' or 'user'")
+        user.role = req.role
+    if req.is_active is not None:
+        user.is_active = req.is_active
+
     await db.flush()
-    return _user_response(target)
+    return _user_response(user)
 
 
-@router.post("/promote-self")
-async def promote_self_to_admin(
-    current_user: User = Depends(get_current_user),
+@router.post("/users/{user_id}/reset-password")
+async def admin_reset_password(
+    user_id: str,
+    req: AdminResetPasswordRequest,
+    admin: User = Depends(get_admin_user),
     db: AsyncSession = Depends(get_db),
 ):
-    """Promote yourself to admin IF no admin exists in the system."""
-    admin_check = await db.execute(
-        select(func.count()).select_from(User).where(User.role == "admin")
-    )
-    if (admin_check.scalar() or 0) > 0:
-        raise HTTPException(status_code=403, detail="Admin already exists")
-    current_user.role = "admin"
+    """Admin — set a new password for any user (no old password needed)."""
+    result = await db.execute(select(User).where(User.id == user_id))
+    user = result.scalar_one_or_none()
+    if not user:
+        raise HTTPException(status_code=404, detail="User not found")
+    if len(req.new_password) < 4:
+        raise HTTPException(status_code=400, detail="Password must be at least 4 characters")
+    user.password_hash = hash_password(req.new_password)
     await db.flush()
-    token = create_access_token({"sub": str(current_user.id)})
-    return AuthResponse(access_token=token, user=_user_response(current_user))
+    return {"ok": True, "message": f"Password reset for {user.username}"}
 
+
+@router.delete("/users/{user_id}")
+async def admin_delete_user(
+    user_id: str,
+    admin: User = Depends(get_admin_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Admin — deactivate a user account."""
+    if str(admin.id) == user_id:
+        raise HTTPException(status_code=400, detail="Cannot deactivate your own account")
+    result = await db.execute(select(User).where(User.id == user_id))
+    user = result.scalar_one_or_none()
+    if not user:
+        raise HTTPException(status_code=404, detail="User not found")
+    user.is_active = False
+    await db.flush()
+    return {"ok": True, "message": f"User {user.username} deactivated"}
