@@ -53,6 +53,8 @@ function setupAuthUI() {
         const initials = (user.display_name || user.username || '??').slice(0, 2).toUpperCase();
         const profileWrap = document.querySelector('.sidebar-profile-wrap');
         if (profileWrap) {
+            profileWrap.style.cursor = 'pointer';
+            profileWrap.onclick = () => document.getElementById('nav-settings')?.click();
             const avatarHtml = user.avatar
                 ? '<img src="' + user.avatar + '" class="w-8 h-8 rounded-full object-cover flex-shrink-0 ring-1 ring-white/10">'
                 : '<div class="w-8 h-8 rounded-full flex-shrink-0 bg-gradient-to-br from-emerald-400 via-cyan-500 to-blue-700 text-white text-[11px] font-bold leading-none grid place-items-center overflow-hidden ring-1 ring-white/10">' + initials + '</div>';
