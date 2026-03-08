@@ -66,16 +66,18 @@ async def init_db():
         await conn.run_sync(Base.metadata.create_all)
 
     # Add columns that may be missing from older deployments.
-    async with engine.begin() as conn:
-        migrations = [
-            ("items", "user_id", "ALTER TABLE items ADD COLUMN user_id UUID REFERENCES users(id)"),
-            ("items", "user_id_idx", "CREATE INDEX IF NOT EXISTS ix_items_user_id ON items(user_id)"),
-            ("crawl_jobs", "user_id", "ALTER TABLE crawl_jobs ADD COLUMN user_id UUID REFERENCES users(id)"),
-            ("crawl_jobs", "user_id_idx", "CREATE INDEX IF NOT EXISTS ix_crawl_jobs_user_id ON crawl_jobs(user_id)"),
-            ("users", "avatar", "ALTER TABLE users ADD COLUMN avatar TEXT"),
-        ]
-        for table, col, sql in migrations:
-            try:
+    # Each migration runs in its own transaction because PostgreSQL
+    # aborts the entire transaction when any statement fails.
+    migrations = [
+        "ALTER TABLE items ADD COLUMN IF NOT EXISTS user_id UUID REFERENCES users(id)",
+        "CREATE INDEX IF NOT EXISTS ix_items_user_id ON items(user_id)",
+        "ALTER TABLE crawl_jobs ADD COLUMN IF NOT EXISTS user_id UUID REFERENCES users(id)",
+        "CREATE INDEX IF NOT EXISTS ix_crawl_jobs_user_id ON crawl_jobs(user_id)",
+        "ALTER TABLE users ADD COLUMN IF NOT EXISTS avatar TEXT",
+    ]
+    for sql in migrations:
+        try:
+            async with engine.begin() as conn:
                 await conn.execute(text(sql))
-            except Exception:
-                pass  # Column/index already exists
+        except Exception:
+            pass
