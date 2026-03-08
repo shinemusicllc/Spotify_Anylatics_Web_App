@@ -2053,14 +2053,16 @@ async function loadAdminUsers() {
 }
 
 function renderAdminUsers(users) {
-    const container = document.getElementById('admin-users-list');
-    const countEl = document.getElementById('admin-users-count');
+    var container = document.getElementById('admin-users-list');
+    var countEl = document.getElementById('admin-users-count');
     if (!container) return;
     if (countEl) countEl.textContent = users.length + ' user' + (users.length !== 1 ? 's' : '');
 
-    const currentUser = getAuthUser();
+    var currentUser = getAuthUser();
+    var html = '';
 
-    container.innerHTML = users.map(function(u) {
+    for (var i = 0; i < users.length; i++) {
+        var u = users[i];
         var initials = (u.display_name || u.username || '??').slice(0, 2).toUpperCase();
         var avatarHtml = u.avatar
             ? '<img src="' + u.avatar + '" class="w-12 h-12 rounded-full object-cover flex-shrink-0 ring-1 ring-white/10">'
@@ -2078,17 +2080,16 @@ function renderAdminUsers(users) {
         var created = u.created_at ? new Date(u.created_at).toLocaleDateString() : '-';
 
         var isSelf = currentUser && currentUser.id === u.id;
-        var safeUsername = u.username.replace(/'/g, "\\'");
 
         var deactivateBtn = '';
         if (!isSelf) {
             var toggleColor = u.is_active ? 'red' : 'emerald';
             var toggleTitle = u.is_active ? 'Deactivate' : 'Activate';
             var toggleIcon = u.is_active ? 'person_off' : 'person';
-            deactivateBtn = '<button onclick="adminToggleActive(\'' + u.id + '\', \'' + safeUsername + '\', ' + u.is_active + ')" class="p-2 rounded-lg hover:bg-white/10 text-secondary-text hover:text-' + toggleColor + '-400 transition-colors cursor-pointer" title="' + toggleTitle + '"><span class="material-icons-round text-lg">' + toggleIcon + '</span></button>';
+            deactivateBtn = '<button data-action="toggle-active" data-uid="' + u.id + '" data-uname="' + u.username + '" data-active="' + u.is_active + '" class="p-2 rounded-lg hover:bg-white/10 text-secondary-text hover:text-' + toggleColor + '-400 transition-colors cursor-pointer" title="' + toggleTitle + '"><span class="material-icons-round text-lg">' + toggleIcon + '</span></button>';
         }
 
-        return '<div class="p-5 rounded-xl border border-white/10 hover:border-white/20 transition-colors" style="background:#1a1d21">' +
+        html += '<div class="p-5 rounded-xl border border-white/10 hover:border-white/20 transition-colors" style="background:#1a1d21">' +
             '<div class="flex items-center gap-4">' +
                 avatarHtml +
                 '<div class="flex-1 min-w-0">' +
@@ -2102,13 +2103,14 @@ function renderAdminUsers(users) {
                     '<div class="text-xs text-secondary-text mt-1">Joined ' + created + ' &middot; Last login: ' + lastLogin + '</div>' +
                 '</div>' +
                 '<div class="flex items-center gap-2 flex-shrink-0">' +
-                    '<button onclick="openAdminEditModal(\'' + u.id + '\')" class="p-2 rounded-lg hover:bg-white/10 text-secondary-text hover:text-white transition-colors cursor-pointer" title="Edit user"><span class="material-icons-round text-lg">edit</span></button>' +
-                    '<button onclick="openAdminPwModal(\'' + u.id + '\', \'' + safeUsername + '\')" class="p-2 rounded-lg hover:bg-white/10 text-secondary-text hover:text-white transition-colors cursor-pointer" title="Reset password"><span class="material-icons-round text-lg">lock_reset</span></button>' +
+                    '<button data-action="edit-user" data-uid="' + u.id + '" class="p-2 rounded-lg hover:bg-white/10 text-secondary-text hover:text-white transition-colors cursor-pointer" title="Edit user"><span class="material-icons-round text-lg">edit</span></button>' +
+                    '<button data-action="reset-pw" data-uid="' + u.id + '" data-uname="' + u.username + '" class="p-2 rounded-lg hover:bg-white/10 text-secondary-text hover:text-white transition-colors cursor-pointer" title="Reset password"><span class="material-icons-round text-lg">lock_reset</span></button>' +
                     deactivateBtn +
                 '</div>' +
             '</div>' +
         '</div>';
-    }).join('');
+    }
+    container.innerHTML = html;
 }
 
 function openAdminEditModal(userId) {
@@ -2490,6 +2492,28 @@ document.addEventListener('DOMContentLoaded', () => {
             }
         });
     });
+
+    // Admin users list event delegation
+    var adminList = document.getElementById('admin-users-list');
+    if (adminList) {
+        adminList.addEventListener('click', function(e) {
+            var btn = e.target.closest('[data-action]');
+            if (!btn) return;
+            e.preventDefault();
+            e.stopPropagation();
+            var action = btn.getAttribute('data-action');
+            var uid = btn.getAttribute('data-uid');
+            var uname = btn.getAttribute('data-uname');
+            if (action === 'edit-user') {
+                openAdminEditModal(uid);
+            } else if (action === 'reset-pw') {
+                openAdminPwModal(uid, uname);
+            } else if (action === 'toggle-active') {
+                var isActive = btn.getAttribute('data-active') === 'true';
+                adminToggleActive(uid, uname, isActive);
+            }
+        });
+    }
 
     // Keyboard shortcuts
     document.addEventListener('keydown', (e) => {
