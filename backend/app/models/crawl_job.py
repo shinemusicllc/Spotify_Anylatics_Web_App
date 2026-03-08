@@ -34,6 +34,11 @@ class CrawlJob(Base):
     # ── Result ──
     result: Mapped[dict | None] = mapped_column(JSONB, nullable=True)
 
+    # ── User ownership ──
+    user_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("users.id"), nullable=True, index=True
+    )
+
     # ── Timestamps ──
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
     started_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)

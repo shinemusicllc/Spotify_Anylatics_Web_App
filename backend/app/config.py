@@ -53,5 +53,10 @@ class Settings(BaseSettings):
     DEBUG: bool = False
     AUTO_INIT_DB: bool = True
 
+    # JWT / Auth
+    JWT_SECRET_KEY: str = "change-me-in-production-jwt"
+    JWT_ALGORITHM: str = "HS256"
+    JWT_EXPIRY_HOURS: int = 24
+
 
 settings = Settings()

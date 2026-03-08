@@ -20,6 +20,62 @@ const ALL_GROUP_ID = 'all';
 const ALL_GROUP_LABEL = 'All Links';
 const GROUP_SELECT_ALL = '__all__';
 
+// ===================================================================
+// AUTH
+// ===================================================================
+function getAuthToken() {
+    return localStorage.getItem('spoticheck_token');
+}
+function getAuthUser() {
+    try { return JSON.parse(localStorage.getItem('spoticheck_user')); } catch(e) { return null; }
+}
+function logout() {
+    localStorage.removeItem('spoticheck_token');
+    localStorage.removeItem('spoticheck_user');
+    window.location.href = '/login.html';
+}
+function requireAuth() {
+    if (!getAuthToken()) {
+        window.location.href = '/login.html';
+        return false;
+    }
+    return true;
+}
+function setupAuthUI() {
+    const user = getAuthUser();
+    if (user) {
+        const initials = (user.display_name || user.username || '??').slice(0, 2).toUpperCase();
+        const profileWrap = document.querySelector('.sidebar-profile-wrap');
+        if (profileWrap) {
+            profileWrap.innerHTML = '<div class="w-8 h-8 rounded-full flex-shrink-0 bg-gradient-to-br from-emerald-400 via-cyan-500 to-blue-700 text-white text-[11px] font-bold leading-none grid place-items-center overflow-hidden ring-1 ring-white/10">' + initials + '</div>' +
+                '<div class="sidebar-user-info overflow-hidden">' +
+                '<p class="text-sm font-semibold truncate">' + (user.display_name || user.username) + '</p>' +
+                '<p class="text-xs text-secondary-text truncate">' + (user.role === 'admin' ? 'Admin' : 'User') + '</p>' +
+                '</div>';
+        }
+    }
+    const sidebarProfile = document.querySelector('.sidebar-profile');
+    if (sidebarProfile && !document.getElementById('btn-logout')) {
+        const logoutBtn = document.createElement('button');
+        logoutBtn.id = 'btn-logout';
+        logoutBtn.className = 'w-full flex items-center gap-3 px-5 py-2 text-secondary-text hover:text-white transition-colors cursor-pointer';
+        logoutBtn.innerHTML = '<span class="material-icons-round text-sm">logout</span><span class="sidebar-label text-sm">Sign Out</span>';
+        logoutBtn.onclick = logout;
+        sidebarProfile.appendChild(logoutBtn);
+    }
+    if (user && user.role === 'admin') {
+        const groupPanel = document.getElementById('group-panel');
+        if (groupPanel && !document.getElementById('admin-badge')) {
+            const badge = document.createElement('div');
+            badge.id = 'admin-badge';
+            badge.className = 'px-5 py-2 border-b border-white/5';
+            badge.innerHTML = '<span class="inline-flex items-center gap-1.5 text-[11px] font-bold uppercase tracking-[0.12em] text-primary"><span class="material-icons-round text-sm">admin_panel_settings</span>Admin Mode</span>';
+            groupPanel.insertBefore(badge, groupPanel.firstChild);
+        }
+    }
+}
+
+
 // ═══════════════════════════════════════════════════════════════════
 // STATE
 // ═══════════════════════════════════════════════════════════════════
@@ -50,24 +106,32 @@ class SpotiCheckAPI {
 
     async _fetch(path, opts = {}) {
         try {
+            const token = getAuthToken();
+            const headers = { 'Content-Type': 'application/json', ...opts.headers };
+            if (token) {
+                headers['Authorization'] = `Bearer ${token}`;
+            }
             const res = await fetch(`${this.base}${path}`, {
-                headers: { 'Content-Type': 'application/json', ...opts.headers },
+                headers,
                 ...opts,
             });
+            if (res.status === 401) {
+                logout();
+                return;
+            }
             if (!res.ok) {
                 const err = await res.json().catch(() => ({}));
                 throw new Error(err.detail || `HTTP ${res.status}`);
             }
             return res.json();
         } catch (e) {
-            if (e.message.includes('Failed to fetch') || e.message.includes('NetworkError')) {
+            if (e.message?.includes('Failed to fetch') || e.message?.includes('NetworkError')) {
                 state.apiOnline = false;
                 updateApiStatus();
             }
             throw e;
         }
     }
-
     health()              { return this._fetch('/health'); }
     getItems(type = null) { return this._fetch(type ? `/items/${type}` : '/items'); }
     getItem(type, id)     { return this._fetch(`/items/${type}/${id}`); }
@@ -1633,6 +1697,9 @@ function initStickyHeader() {
 // ═══════════════════════════════════════════════════════════════════
 
 document.addEventListener('DOMContentLoaded', () => {
+    if (!requireAuth()) return;
+    setupAuthUI();
+
     state.customGroups = loadCustomGroups();
     syncGroupUI(true);
 

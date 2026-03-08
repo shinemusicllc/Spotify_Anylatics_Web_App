@@ -1,0 +1,352 @@
+<!DOCTYPE html>
+<html class="dark" lang="en">
+
+<head>
+    <meta charset="utf-8">
+    <meta content="width=device-width, initial-scale=1.0" name="viewport">
+    <title>SpotiCheck &mdash; Sign In</title>
+    <meta name="description" content="Sign in to SpotiCheck to manage your Spotify links.">
+    <link rel="icon" type="image/svg+xml" href="favicon.svg?v=1">
+    <link rel="shortcut icon" type="image/svg+xml" href="favicon.svg?v=1">
+    <script src="https://cdn.tailwindcss.com?plugins=forms,container-queries"></script>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=Inter+Tight:wght@600;700;800&family=Material+Symbols+Rounded:opsz,wght,FILL,GRAD@20..48,500,0..1,0&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="style.css?v=20260307-7">
+    <script id="tailwind-config">
+        tailwind.config = {
+            darkMode: "class",
+            theme: {
+                extend: {
+                    colors: {
+                        "primary": "#1db954",
+                        "background-light": "#f6f8f7",
+                        "background-dark": "#121212",
+                        "sidebar-dark": "#0A0A0A",
+                        "panel-dark": "#181818",
+                        "row-hover": "#282828",
+                        "secondary-text": "#B3B3B3"
+                    },
+                    fontFamily: {
+                        "display": ["Inter", "Inter Tight", "system-ui", "sans-serif"]
+                    },
+                    borderRadius: {
+                        "DEFAULT": "0.25rem",
+                        "lg": "0.5rem",
+                        "xl": "0.75rem",
+                        "full": "9999px"
+                    },
+                },
+            },
+        }
+    </script>
+    <style>
+        body {
+            font-family: "Inter", "Inter Tight", system-ui, sans-serif;
+            -webkit-font-smoothing: antialiased;
+            text-rendering: optimizeLegibility;
+            background:
+                radial-gradient(980px 520px at 52% -15%, rgba(255, 246, 228, 0.065), transparent 62%),
+                #0b0f14;
+            min-height: 100vh;
+        }
+        .material-icons-round {
+            font-family: "Material Symbols Rounded" !important;
+            font-weight: 500;
+            font-style: normal;
+            font-size: 20px;
+            line-height: 1;
+            display: inline-block;
+            white-space: nowrap;
+            direction: ltr;
+            letter-spacing: normal;
+            text-transform: none;
+            -webkit-font-feature-settings: "liga";
+            font-feature-settings: "liga";
+            -webkit-font-smoothing: antialiased;
+            font-variation-settings: "FILL" 0, "wght" 500, "GRAD" 0, "opsz" 24;
+        }
+        .auth-input {
+            width: 100%;
+            background: rgba(255, 255, 255, 0.06);
+            border: 1px solid rgba(255, 255, 255, 0.14);
+            border-radius: 14px;
+            padding: 14px 16px;
+            color: #f2f5fb;
+            font-size: 15px;
+            outline: none;
+            transition: border-color 200ms ease, background 200ms ease, box-shadow 200ms ease;
+        }
+        .auth-input:focus {
+            border-color: #1db954;
+            background: rgba(255, 255, 255, 0.09);
+            box-shadow: 0 0 0 3px rgba(29, 185, 84, 0.16);
+        }
+        .auth-input::placeholder {
+            color: #6b7280;
+        }
+        .auth-card {
+            background: #1a1d21;
+            border: 1px solid rgba(255, 255, 255, 0.1);
+            border-radius: 16px;
+        }
+        .tab-btn {
+            position: relative;
+            padding: 10px 24px;
+            font-size: 14px;
+            font-weight: 600;
+            color: #a8b1c0;
+            border-radius: 9999px;
+            transition: color 200ms ease, background 200ms ease;
+            cursor: pointer;
+            border: none;
+            background: transparent;
+        }
+        .tab-btn:hover {
+            color: #f2f5fb;
+        }
+        .tab-btn.active {
+            color: #f2f5fb;
+            background: rgba(255, 255, 255, 0.1);
+        }
+        .btn-submit {
+            width: 100%;
+            padding: 14px 24px;
+            border-radius: 9999px;
+            font-size: 15px;
+            font-weight: 700;
+            border: 1px solid rgba(255, 255, 255, 0.96);
+            background: #ffffff;
+            color: #0b0f14;
+            cursor: pointer;
+            transition: background 200ms ease, transform 100ms ease;
+        }
+        .btn-submit:hover {
+            background: #f1f4f8;
+        }
+        .btn-submit:active {
+            transform: scale(0.98);
+        }
+        .btn-submit:disabled {
+            opacity: 0.5;
+            cursor: not-allowed;
+        }
+        .error-msg {
+            color: #ef4444;
+            font-size: 13px;
+            font-weight: 500;
+            min-height: 20px;
+            text-align: center;
+        }
+        .form-label {
+            display: block;
+            font-size: 13px;
+            font-weight: 600;
+            color: #a8b1c0;
+            margin-bottom: 8px;
+        }
+    </style>
+</head>
+
+<body class="flex items-center justify-center min-h-screen p-4">
+    <div class="w-full max-w-md">
+        <!-- Logo -->
+        <div class="flex flex-col items-center mb-8">
+            <svg width="48" height="48" viewBox="0 0 34 34" fill="none" xmlns="http://www.w3.org/2000/svg" class="mb-4">
+                <circle cx="17" cy="17" r="17" fill="#1DB954"></circle>
+                <rect x="8" y="13" width="2.8" height="8" rx="1.4" fill="#000"></rect>
+                <rect x="12.5" y="9" width="2.8" height="16" rx="1.4" fill="#000"></rect>
+                <rect x="17" y="6" width="2.8" height="22" rx="1.4" fill="#000"></rect>
+                <rect x="21.5" y="11" width="2.8" height="12" rx="1.4" fill="#000"></rect>
+                <rect x="26" y="15" width="2.8" height="4" rx="1.4" fill="#000"></rect>
+            </svg>
+            <h1 class="text-2xl font-bold text-white tracking-tight" style="font-family: 'Inter Tight', 'Inter', system-ui, sans-serif; letter-spacing: -0.02em;">SpotiCheck</h1>
+            <p class="text-sm text-secondary-text mt-1">Link Management Dashboard</p>
+        </div>
+
+        <!-- Auth Card -->
+        <div class="auth-card p-8">
+            <!-- Tabs -->
+            <div class="flex items-center justify-center gap-2 mb-8 bg-white/[0.04] rounded-full p-1">
+                <button class="tab-btn active flex-1 text-center" data-tab="signin" id="tab-signin">Sign In</button>
+                <button class="tab-btn flex-1 text-center" data-tab="signup" id="tab-signup">Sign Up</button>
+            </div>
+
+            <!-- Sign In Form -->
+            <form id="form-signin" class="space-y-4" autocomplete="on">
+                <div>
+                    <label class="form-label" for="signin-username">Username or Email</label>
+                    <input id="signin-username" class="auth-input" type="text" placeholder="Enter your username or email" autocomplete="username" required>
+                </div>
+                <div>
+                    <label class="form-label" for="signin-password">Password</label>
+                    <input id="signin-password" class="auth-input" type="password" placeholder="Enter your password" autocomplete="current-password" required>
+                </div>
+                <div id="signin-error" class="error-msg"></div>
+                <button type="submit" class="btn-submit" id="btn-signin">Sign In</button>
+            </form>
+
+            <!-- Sign Up Form -->
+            <form id="form-signup" class="space-y-4" style="display:none" autocomplete="on">
+                <div>
+                    <label class="form-label" for="signup-username">Username</label>
+                    <input id="signup-username" class="auth-input" type="text" placeholder="Choose a username" autocomplete="username" required>
+                </div>
+                <div>
+                    <label class="form-label" for="signup-email">Email</label>
+                    <input id="signup-email" class="auth-input" type="email" placeholder="your@email.com" autocomplete="email" required>
+                </div>
+                <div>
+                    <label class="form-label" for="signup-displayname">Display Name <span class="text-secondary-text font-normal">(optional)</span></label>
+                    <input id="signup-displayname" class="auth-input" type="text" placeholder="How you want to be called" autocomplete="name">
+                </div>
+                <div>
+                    <label class="form-label" for="signup-password">Password</label>
+                    <input id="signup-password" class="auth-input" type="password" placeholder="Create a password" autocomplete="new-password" required>
+                </div>
+                <div>
+                    <label class="form-label" for="signup-confirm">Confirm Password</label>
+                    <input id="signup-confirm" class="auth-input" type="password" placeholder="Confirm your password" autocomplete="new-password" required>
+                </div>
+                <div id="signup-error" class="error-msg"></div>
+                <button type="submit" class="btn-submit" id="btn-signup">Create Account</button>
+            </form>
+        </div>
+
+        <p class="text-center text-xs text-secondary-text mt-6 opacity-60">SpotiCheck &mdash; Spotify Link Analytics</p>
+    </div>
+
+    <script>
+        const API_BASE = window.location.hostname === 'localhost'
+            ? 'http://localhost:8010/api'
+            : '/api';
+
+        // If already authenticated, redirect
+        (function checkAuth() {
+            const token = localStorage.getItem('spoticheck_token');
+            if (token) {
+                window.location.href = '/';
+            }
+        })();
+
+        // Tab switching
+        const tabSignin = document.getElementById('tab-signin');
+        const tabSignup = document.getElementById('tab-signup');
+        const formSignin = document.getElementById('form-signin');
+        const formSignup = document.getElementById('form-signup');
+
+        function switchTab(tab) {
+            if (tab === 'signin') {
+                tabSignin.classList.add('active');
+                tabSignup.classList.remove('active');
+                formSignin.style.display = '';
+                formSignup.style.display = 'none';
+                document.getElementById('signin-error').textContent = '';
+            } else {
+                tabSignup.classList.add('active');
+                tabSignin.classList.remove('active');
+                formSignup.style.display = '';
+                formSignin.style.display = 'none';
+                document.getElementById('signup-error').textContent = '';
+            }
+        }
+
+        tabSignin.addEventListener('click', function() { switchTab('signin'); });
+        tabSignup.addEventListener('click', function() { switchTab('signup'); });
+
+        // Sign In
+        formSignin.addEventListener('submit', async function(e) {
+            e.preventDefault();
+            var errEl = document.getElementById('signin-error');
+            errEl.textContent = '';
+            var btn = document.getElementById('btn-signin');
+            btn.disabled = true;
+            btn.textContent = 'Signing in...';
+
+            var username = document.getElementById('signin-username').value.trim();
+            var password = document.getElementById('signin-password').value;
+
+            try {
+                var res = await fetch(API_BASE + '/auth/login', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ username: username, password: password }),
+                });
+                var data = await res.json().catch(function() { return {}; });
+                if (!res.ok) {
+                    throw new Error(data.detail || ('Login failed (' + res.status + ')'));
+                }
+                localStorage.setItem('spoticheck_token', data.access_token || data.token);
+                localStorage.setItem('spoticheck_user', JSON.stringify(data.user || { username: username }));
+                window.location.href = '/';
+            } catch (err) {
+                errEl.textContent = err.message;
+            } finally {
+                btn.disabled = false;
+                btn.textContent = 'Sign In';
+            }
+        });
+
+        // Sign Up
+        formSignup.addEventListener('submit', async function(e) {
+            e.preventDefault();
+            var errEl = document.getElementById('signup-error');
+            errEl.textContent = '';
+            var btn = document.getElementById('btn-signup');
+
+            var username = document.getElementById('signup-username').value.trim();
+            var email = document.getElementById('signup-email').value.trim();
+            var display_name = document.getElementById('signup-displayname').value.trim();
+            var password = document.getElementById('signup-password').value;
+            var confirmPw = document.getElementById('signup-confirm').value;
+
+            if (password !== confirmPw) {
+                errEl.textContent = 'Passwords do not match.';
+                return;
+            }
+            if (password.length < 4) {
+                errEl.textContent = 'Password must be at least 4 characters.';
+                return;
+            }
+
+            btn.disabled = true;
+            btn.textContent = 'Creating account...';
+
+            try {
+                var body = { username: username, email: email, password: password };
+                if (display_name) body.display_name = display_name;
+
+                var res = await fetch(API_BASE + '/auth/register', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(body),
+                });
+                var data = await res.json().catch(function() { return {}; });
+                if (!res.ok) {
+                    throw new Error(data.detail || ('Registration failed (' + res.status + ')'));
+                }
+                // Auto-login after registration if token is returned
+                if (data.access_token || data.token) {
+                    localStorage.setItem('spoticheck_token', data.access_token || data.token);
+                    localStorage.setItem('spoticheck_user', JSON.stringify(data.user || { username: username }));
+                    window.location.href = '/';
+                } else {
+                    // Registration successful, switch to sign-in
+                    switchTab('signin');
+                    document.getElementById('signin-error').textContent = '';
+                    document.getElementById('signin-username').value = username;
+                    document.getElementById('signin-password').focus();
+                    // Show success via a temporary message
+                    var successEl = document.getElementById('signin-error');
+                    successEl.style.color = '#1db954';
+                    successEl.textContent = 'Account created! Please sign in.';
+                    setTimeout(function() { successEl.style.color = ''; }, 5000);
+                }
+            } catch (err) {
+                errEl.textContent = err.message;
+            } finally {
+                btn.disabled = false;
+                btn.textContent = 'Create Account';
+            }
+        });
+    </script>
+</body>
+</html>

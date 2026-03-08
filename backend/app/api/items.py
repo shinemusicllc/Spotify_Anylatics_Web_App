@@ -9,7 +9,9 @@ from app.models.item import Item
 from app.models.crawl_job import CrawlJob
 from app.models.metrics_snapshot import MetricsSnapshot
 from app.models.raw_response import RawResponse
+from app.models.user import User
 from app.schemas.item import ItemResponse, ItemListResponse
+from app.services.auth import get_current_user
 
 router = APIRouter()
 
@@ -41,7 +43,7 @@ def _item_to_response(item: Item) -> ItemResponse:
         album_count=item.album_count,
         duration=duration,
         release_date=item.release_date,
-        saves=item.followers,  # Playlist saves ≈ followers
+        saves=item.followers,  # Playlist saves ~ followers
         status=item.status,
         error_code=item.error_code,
         error_message=item.error_message,
@@ -59,9 +61,14 @@ async def list_items(
     limit: int = Query(100, le=500),
     offset: int = Query(0, ge=0),
     db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
 ):
     """List all items with optional filters."""
     query = select(Item).order_by(Item.updated_at.desc())
+
+    # Non-admin users only see their own items
+    if current_user.role != "admin":
+        query = query.where(Item.user_id == current_user.id)
 
     if type:
         query = query.where(Item.item_type == type)
@@ -91,6 +98,7 @@ async def get_item(
     item_type: str,
     spotify_id: str,
     db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
 ):
     """Get a specific item by type and Spotify ID."""
     result = await db.execute(
@@ -102,6 +110,11 @@ async def get_item(
     item = result.scalar_one_or_none()
     if not item:
         raise HTTPException(status_code=404, detail="Item not found")
+
+    # Ownership check
+    if current_user.role != "admin" and item.user_id != current_user.id:
+        raise HTTPException(status_code=403, detail="Not authorized to view this item")
+
     return _item_to_response(item)
 
 
@@ -110,6 +123,7 @@ async def delete_item(
     item_type: str,
     spotify_id: str,
     db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
 ):
     """Delete a single item by type + Spotify ID."""
     result = await db.execute(
@@ -121,6 +135,10 @@ async def delete_item(
     item = result.scalar_one_or_none()
     if not item:
         raise HTTPException(status_code=404, detail="Item not found")
+
+    # Ownership check
+    if current_user.role != "admin" and item.user_id != current_user.id:
+        raise HTTPException(status_code=403, detail="Not authorized to delete this item")
 
     await db.execute(delete(MetricsSnapshot).where(MetricsSnapshot.item_id == item.id))
     await db.execute(delete(CrawlJob).where(CrawlJob.item_id == item.id))
@@ -134,9 +152,15 @@ async def delete_item(
 async def clear_items(
     group: str | None = Query(None, description="Optional group to clear"),
     db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
 ):
     """Clear all items (or items in one group)."""
     selected_items = select(Item.id, Item.spotify_id)
+
+    # Non-admin users only clear their own items
+    if current_user.role != "admin":
+        selected_items = selected_items.where(Item.user_id == current_user.id)
+
     if group:
         selected_items = selected_items.where(Item.group == group)
 

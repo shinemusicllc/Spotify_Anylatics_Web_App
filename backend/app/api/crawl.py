@@ -9,6 +9,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.database import get_db
 from app.models.item import Item
 from app.models.crawl_job import CrawlJob
+from app.models.user import User
 from app.schemas.crawl import (
     CrawlRequest,
     CrawlBatchRequest,
@@ -17,6 +18,7 @@ from app.schemas.crawl import (
 )
 from app.utils.spotify_urls import parse_spotify_url
 from app.services.crawler import crawl_item_task
+from app.services.auth import get_current_user
 
 router = APIRouter()
 
@@ -25,6 +27,7 @@ router = APIRouter()
 async def crawl(
     req: CrawlRequest,
     db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
 ):
     """Start a crawl job for a single Spotify URL."""
     parsed = parse_spotify_url(req.url)
@@ -44,6 +47,7 @@ async def crawl(
             item_type=item_type,
             status="crawling",
             group=req.group,
+            user_id=current_user.id,
         )
         db.add(item)
         await db.flush()
@@ -54,6 +58,7 @@ async def crawl(
         spotify_url=req.url,
         item_type=item_type,
         status="pending",
+        user_id=current_user.id,
     )
     db.add(job)
     await db.flush()
@@ -73,6 +78,7 @@ async def crawl(
 async def crawl_batch(
     req: CrawlBatchRequest,
     db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
 ):
     """Start crawl jobs for multiple Spotify URLs."""
     job_ids = []
@@ -95,6 +101,7 @@ async def crawl_batch(
                 item_type=item_type,
                 status="crawling",
                 group=req.group,
+                user_id=current_user.id,
             )
             db.add(item)
             await db.flush()
@@ -104,6 +111,7 @@ async def crawl_batch(
             spotify_url=url,
             item_type=item_type,
             status="pending",
+            user_id=current_user.id,
         )
         db.add(job)
         await db.flush()
