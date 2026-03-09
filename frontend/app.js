@@ -2241,7 +2241,8 @@ async function _fetchAdminUsers() {
         headers: { 'Authorization': 'Bearer ' + token },
     });
     if (!res.ok) throw new Error('Failed to load users');
-    _adminUsersCache = await res.json();
+    const data = await res.json();
+    _adminUsersCache = Array.isArray(data) ? data : (data.users || []);
     return _adminUsersCache;
 }
 
@@ -2597,10 +2598,14 @@ document.addEventListener('DOMContentLoaded', () => {
                 }
                 hideSettings();
                 hideAdminUsers();
+                updateGroupHeader();
+                renderGroups();
+                loadData();
+            } else {
+                updateGroupHeader();
+                renderGroups();
+                renderList();
             }
-            updateGroupHeader();
-            renderGroups();
-            renderList();
         });
         groupList.addEventListener('dblclick', (e) => {
             const groupName = e.target.closest('[data-role="group-name"]');
@@ -2710,7 +2715,7 @@ document.addEventListener('DOMContentLoaded', () => {
         hideSettings();
         hideAdminUsers();
         updateGroupHeader();
-        renderList();
+        loadData();
     });
 
     // Users nav (admin)
