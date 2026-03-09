@@ -543,6 +543,13 @@ h3 {
 .list-title-link:hover,
 .list-owner-link:hover {
   color: #ffffff;
+  text-decoration: underline;
+  text-decoration-thickness: 1px;
+  text-underline-offset: 2px;
+}
+
+.list-asset-title .list-title-link:hover {
+  color: #f8fbff;
 }
 
 .list-title-link:focus-visible,

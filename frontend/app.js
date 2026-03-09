@@ -2865,7 +2865,7 @@ document.addEventListener('DOMContentLoaded', () => {
     const imagePreviewModal = document.getElementById('image-preview-modal');
     if (imagePreviewModal) {
         imagePreviewModal.addEventListener('click', (e) => {
-            if (e.target.classList.contains('modal-overlay') || e.target.closest('#image-preview-close')) {
+            if (!e.target.closest('#image-preview-img') || e.target.closest('#image-preview-close')) {
                 closeImagePreview();
             }
         });
