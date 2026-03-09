@@ -14,6 +14,8 @@ const CONFIG = {
     POPUP_WIDTH: 480,
     POPUP_HEIGHT: 720,
     SEARCH_DEBOUNCE: 300,
+    DRAG_SCROLL_EDGE: 72,
+    DRAG_SCROLL_MAX_SPEED: 22,
 };
 const GROUP_STORAGE_KEY = 'spoticheck_custom_groups_v1';
 const ROW_ORDER_STORAGE_KEY = 'spoticheck_row_order_v1';
@@ -140,6 +142,9 @@ const state = {
     dragOverGroupPlacement: 'before',
     suppressNextGroupClick: false,
     suppressNextRowClick: false,
+    dragScrollRaf: null,
+    dragScrollContainer: null,
+    dragScrollSpeed: 0,
 };
 
 // ═══════════════════════════════════════════════════════════════════
@@ -642,6 +647,64 @@ function syncGroupDragUi(container) {
         groupBtn.classList.toggle('group-drop-before', isDropTarget && state.dragOverGroupPlacement !== 'after');
         groupBtn.classList.toggle('group-drop-after', isDropTarget && state.dragOverGroupPlacement === 'after');
     });
+}
+
+function stopDragAutoScroll() {
+    if (state.dragScrollRaf) {
+        cancelAnimationFrame(state.dragScrollRaf);
+        state.dragScrollRaf = null;
+    }
+    state.dragScrollContainer = null;
+    state.dragScrollSpeed = 0;
+}
+
+function ensureDragAutoScroll() {
+    if (state.dragScrollRaf) return;
+    const tick = () => {
+        const container = state.dragScrollContainer;
+        const speed = state.dragScrollSpeed;
+        if (!container || !speed) {
+            state.dragScrollRaf = null;
+            return;
+        }
+        container.scrollTop += speed;
+        state.dragScrollRaf = requestAnimationFrame(tick);
+    };
+    state.dragScrollRaf = requestAnimationFrame(tick);
+}
+
+function updateDragAutoScroll(container, clientY) {
+    if (!container) {
+        stopDragAutoScroll();
+        return;
+    }
+
+    const rect = container.getBoundingClientRect();
+    const edge = CONFIG.DRAG_SCROLL_EDGE;
+    let speed = 0;
+
+    if (clientY < rect.top + edge) {
+        const ratio = Math.max(0, (rect.top + edge - clientY) / edge);
+        speed = -Math.ceil(CONFIG.DRAG_SCROLL_MAX_SPEED * ratio);
+    } else if (clientY > rect.bottom - edge) {
+        const ratio = Math.max(0, (clientY - (rect.bottom - edge)) / edge);
+        speed = Math.ceil(CONFIG.DRAG_SCROLL_MAX_SPEED * ratio);
+    }
+
+    const maxScrollTop = Math.max(0, container.scrollHeight - container.clientHeight);
+    if (speed < 0 && container.scrollTop <= 0) speed = 0;
+    if (speed > 0 && container.scrollTop >= maxScrollTop) speed = 0;
+
+    if (!speed) {
+        if (state.dragScrollContainer === container) {
+            stopDragAutoScroll();
+        }
+        return;
+    }
+
+    state.dragScrollContainer = container;
+    state.dragScrollSpeed = speed;
+    ensureDragAutoScroll();
 }
 
 function rebuildGroups() {
@@ -3048,7 +3111,9 @@ document.addEventListener('DOMContentLoaded', () => {
         });
         groupList.addEventListener('dragover', (e) => {
             const groupBtn = e.target.closest('[data-group]');
-            if (!groupBtn || !state.draggingGroupId) return;
+            if (!state.draggingGroupId) return;
+            updateDragAutoScroll(groupList, e.clientY);
+            if (!groupBtn) return;
             const targetGroupId = normalizeGroupName(groupBtn.getAttribute('data-group'));
             if (!targetGroupId) return;
             if (targetGroupId.toLowerCase() === ALL_GROUP_ID) return;
@@ -3064,6 +3129,7 @@ document.addEventListener('DOMContentLoaded', () => {
             const groupBtn = e.target.closest('[data-group]');
             if (!groupBtn || !state.draggingGroupId) return;
             e.preventDefault();
+            stopDragAutoScroll();
             const targetGroupId = normalizeGroupName(groupBtn.getAttribute('data-group'));
             const moved = moveCustomGroupBefore(state.draggingGroupId, targetGroupId, state.dragOverGroupPlacement);
             state.draggingGroupId = null;
@@ -3080,6 +3146,7 @@ document.addEventListener('DOMContentLoaded', () => {
         });
         groupList.addEventListener('dragend', () => {
             if (!state.draggingGroupId && !state.dragOverGroupId) return;
+            stopDragAutoScroll();
             state.draggingGroupId = null;
             state.dragOverGroupId = null;
             state.dragOverGroupPlacement = 'before';
@@ -3087,6 +3154,11 @@ document.addEventListener('DOMContentLoaded', () => {
             window.setTimeout(() => {
                 state.suppressNextGroupClick = false;
             }, 0);
+        });
+        groupList.addEventListener('dragleave', (e) => {
+            if (!state.draggingGroupId) return;
+            if (e.currentTarget.contains(e.relatedTarget)) return;
+            stopDragAutoScroll();
         });
     }
 
@@ -3103,6 +3175,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
     const listElForDelete = document.getElementById('link-list');
     if (listElForDelete) {
+        const listScrollWrap = document.querySelector('.list-wrap');
         listElForDelete.addEventListener('mousedown', (e) => {
             if (e.button !== 0) return;
             if (isInteractiveRowTarget(e.target)) return;
@@ -3172,7 +3245,9 @@ document.addEventListener('DOMContentLoaded', () => {
         });
         listElForDelete.addEventListener('dragover', (e) => {
             const row = e.target.closest('.custom-grid-row');
-            if (!row || !state.draggingRowKeys.length) return;
+            if (!state.draggingRowKeys.length) return;
+            updateDragAutoScroll(listScrollWrap, e.clientY);
+            if (!row) return;
             const targetKey = row.dataset.itemKey;
             if (!targetKey) return;
             e.preventDefault();
@@ -3187,6 +3262,7 @@ document.addEventListener('DOMContentLoaded', () => {
             const row = e.target.closest('.custom-grid-row');
             if (!row || !state.draggingRowKeys.length) return;
             e.preventDefault();
+            stopDragAutoScroll();
             const moved = moveItemsByKeys(state.draggingRowKeys, row.dataset.itemKey, state.dragOverRowPlacement);
             state.draggingRowKeys = [];
             state.dragOverRowKey = null;
@@ -3201,6 +3277,7 @@ document.addEventListener('DOMContentLoaded', () => {
         });
         listElForDelete.addEventListener('dragend', () => {
             if (!state.draggingRowKeys.length && !state.dragOverRowKey) return;
+            stopDragAutoScroll();
             state.draggingRowKeys = [];
             state.dragOverRowKey = null;
             state.dragOverRowPlacement = 'before';
@@ -3209,6 +3286,21 @@ document.addEventListener('DOMContentLoaded', () => {
                 state.suppressNextRowClick = false;
             }, 0);
         });
+        if (listScrollWrap) {
+            listScrollWrap.addEventListener('dragover', (e) => {
+                if (!state.draggingRowKeys.length) return;
+                e.preventDefault();
+                updateDragAutoScroll(listScrollWrap, e.clientY);
+            });
+            listScrollWrap.addEventListener('dragleave', (e) => {
+                if (!state.draggingRowKeys.length) return;
+                if (e.currentTarget.contains(e.relatedTarget)) return;
+                stopDragAutoScroll();
+            });
+            listScrollWrap.addEventListener('drop', () => {
+                stopDragAutoScroll();
+            });
+        }
     }
 
     const imagePreviewModal = document.getElementById('image-preview-modal');
