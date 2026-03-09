@@ -5,7 +5,7 @@ from pydantic import BaseModel
 
 class RegisterRequest(BaseModel):
     username: str
-    email: str
+    email: str | None = None
     password: str
     display_name: str | None = None
 
@@ -18,7 +18,7 @@ class LoginRequest(BaseModel):
 class UserResponse(BaseModel):
     id: str
     username: str
-    email: str
+    email: str | None = None
     display_name: str | None
     role: str
     is_active: bool = True
@@ -37,7 +37,6 @@ class AuthResponse(BaseModel):
 
 class UpdateProfileRequest(BaseModel):
     display_name: str | None = None
-    email: str | None = None
 
 
 class ChangePasswordRequest(BaseModel):
@@ -51,7 +50,6 @@ class UpdateAvatarRequest(BaseModel):
 
 class AdminUpdateUserRequest(BaseModel):
     display_name: str | None = None
-    email: str | None = None
     role: str | None = None
     is_active: bool | None = None
 
@@ -62,7 +60,7 @@ class AdminResetPasswordRequest(BaseModel):
 
 class AdminCreateUserRequest(BaseModel):
     username: str
-    email: str
+    email: str | None = None
     password: str
     display_name: str | None = None
     role: str = "user"

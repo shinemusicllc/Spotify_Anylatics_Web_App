@@ -32,13 +32,30 @@ from app.services.auth import (
 )
 
 router = APIRouter(prefix="/auth")
+_INTERNAL_EMAIL_DOMAIN = "users.spoticheck.local"
+
+
+def _build_internal_email(username: str) -> str:
+    return f"{username.lower()}@{_INTERNAL_EMAIL_DOMAIN}"
+
+
+def _resolve_email(username: str, email: str | None) -> str:
+    normalized = (email or "").strip().lower()
+    return normalized or _build_internal_email(username)
+
+
+def _public_email(email: str | None) -> str | None:
+    normalized = (email or "").strip().lower()
+    if not normalized or normalized.endswith("@" + _INTERNAL_EMAIL_DOMAIN):
+        return None
+    return email
 
 
 def _user_response(user: User) -> UserResponse:
     return UserResponse(
         id=str(user.id),
         username=user.username,
-        email=user.email,
+        email=_public_email(user.email),
         display_name=user.display_name,
         role=user.role,
         is_active=user.is_active,
@@ -59,19 +76,22 @@ async def register(req: RegisterRequest, db: AsyncSession = Depends(get_db)):
             detail="Public sign up is disabled",
         )
 
+    username = (req.username or "").strip()
+    resolved_email = _resolve_email(username, req.email)
+
     # Check duplicates
     existing = await db.execute(
-        select(User).where((User.username == req.username) | (User.email == req.email))
+        select(User).where((User.username == username) | (User.email == resolved_email))
     )
     if existing.scalar_one_or_none():
         raise HTTPException(
             status_code=status.HTTP_409_CONFLICT,
-            detail="Username or email already registered",
+            detail="Username already registered",
         )
 
     user = User(
-        username=req.username,
-        email=req.email,
+        username=username,
+        email=resolved_email,
         password_hash=hash_password(req.password),
         display_name=req.display_name,
         role="admin",
@@ -141,14 +161,12 @@ async def admin_create_user(
 ):
     """Admin only - create a new user account from the dashboard."""
     username = (req.username or "").strip()
-    email = (req.email or "").strip().lower()
+    email = _resolve_email(username, req.email)
     display_name = (req.display_name or "").strip() or None
     role = (req.role or "user").strip().lower()
 
     if not username:
         raise HTTPException(status_code=400, detail="Username is required")
-    if not email:
-        raise HTTPException(status_code=400, detail="Email is required")
     if len(req.password or "") < 4:
         raise HTTPException(
             status_code=400,
@@ -163,7 +181,7 @@ async def admin_create_user(
     if existing.scalar_one_or_none():
         raise HTTPException(
             status_code=status.HTTP_409_CONFLICT,
-            detail="Username or email already registered",
+            detail="Username already registered",
         )
 
     user = User(
@@ -190,17 +208,9 @@ async def update_profile(
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
-    """Update the current user's display name and/or email."""
+    """Update the current user's profile fields exposed in the dashboard."""
     if req.display_name is not None:
         current_user.display_name = req.display_name
-    if req.email is not None:
-        # Check email uniqueness
-        existing = await db.execute(
-            select(User).where(User.email == req.email, User.id != current_user.id)
-        )
-        if existing.scalar_one_or_none():
-            raise HTTPException(status_code=409, detail="Email already in use")
-        current_user.email = req.email
     await db.flush()
     return _user_response(current_user)
 
@@ -302,13 +312,6 @@ async def admin_update_user(
 
     if req.display_name is not None:
         user.display_name = req.display_name
-    if req.email is not None:
-        existing = await db.execute(
-            select(User).where(User.email == req.email, User.id != user.id)
-        )
-        if existing.scalar_one_or_none():
-            raise HTTPException(status_code=409, detail="Email already in use")
-        user.email = req.email
     if req.role is not None:
         if req.role not in ("admin", "user"):
             raise HTTPException(status_code=400, detail="Role must be 'admin' or 'user'")

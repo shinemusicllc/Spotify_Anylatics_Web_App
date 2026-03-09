@@ -1773,7 +1773,7 @@ async function setupAdminUserFilter() {
     var filterOptions = [{value: '', label: 'All Users'}];
     for (var fi = 0; fi < state.adminUserList.length; fi++) {
         var fu = state.adminUserList[fi];
-        filterOptions.push({value: fu.id || fu._id || '', label: fu.display_name || fu.username || fu.email || String(fu.id)});
+        filterOptions.push({value: fu.id || fu._id || '', label: fu.display_name || fu.username || String(fu.id)});
     }
     var filterDropdown = createCustomDropdown({
         id: 'admin-user-filter',
@@ -1995,7 +1995,6 @@ function loadSettingsData() {
 
     document.getElementById('settings-username').value = user.username || '';
     document.getElementById('settings-displayname').value = user.display_name || '';
-    document.getElementById('settings-email').value = user.email || '';
     document.getElementById('settings-role').textContent = user.role === 'admin' ? 'Admin' : 'User';
     document.getElementById('settings-created').textContent = user.created_at ? new Date(user.created_at).toLocaleDateString() : '-';
 
@@ -2019,7 +2018,6 @@ function updateSettingsAvatar(user) {
 
 async function handleSaveProfile() {
     const displayName = document.getElementById('settings-displayname').value.trim();
-    const email = document.getElementById('settings-email').value.trim();
     const statusEl = document.getElementById('settings-profile-status');
 
     try {
@@ -2027,7 +2025,7 @@ async function handleSaveProfile() {
         const res = await fetch(CONFIG.API_BASE + '/auth/me', {
             method: 'PATCH',
             headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + token },
-            body: JSON.stringify({ display_name: displayName || null, email: email || null }),
+            body: JSON.stringify({ display_name: displayName || null }),
         });
         const data = await res.json();
         if (!res.ok) throw new Error(data.detail || 'Failed to update profile');
@@ -2361,7 +2359,7 @@ function renderAdminUsers(users) {
                         statusBadge +
                         (isSelf ? '<span class="text-[11px] text-secondary-text">(you)</span>' : '') +
                     '</div>' +
-                    '<div class="text-sm text-secondary-text truncate">@' + u.username + ' &middot; ' + u.email + '</div>' +
+                    '<div class="text-sm text-secondary-text truncate">@' + u.username + '</div>' +
                     '<div class="text-xs text-secondary-text mt-1">Joined ' + created + ' &middot; Last login: ' + lastLogin + '</div>' +
                 '</div>' +
                 '<div class="flex items-center gap-2 flex-shrink-0">' +
@@ -2382,7 +2380,6 @@ function openAdminEditModal(userId) {
     document.getElementById('admin-edit-user-id').value = user.id;
     document.getElementById('admin-edit-username').value = user.username;
     document.getElementById('admin-edit-displayname').value = user.display_name || '';
-    document.getElementById('admin-edit-email').value = user.email || '';
     // Create or update role dropdown
     var roleWrap = document.getElementById('admin-edit-role-wrap');
     if (roleWrap) {
@@ -2407,7 +2404,6 @@ function openAdminEditModal(userId) {
 
 function openAdminCreateModal() {
     document.getElementById('admin-create-username').value = '';
-    document.getElementById('admin-create-email').value = '';
     document.getElementById('admin-create-displayname').value = '';
     document.getElementById('admin-create-password').value = '';
 
@@ -2448,7 +2444,6 @@ function closeAdminEditModal() {
 
 async function submitAdminCreateUser() {
     var username = document.getElementById('admin-create-username').value.trim();
-    var email = document.getElementById('admin-create-email').value.trim();
     var displayName = document.getElementById('admin-create-displayname').value.trim();
     var password = document.getElementById('admin-create-password').value;
     var roleDD = document.getElementById('admin-create-role-dropdown');
@@ -2458,8 +2453,8 @@ async function submitAdminCreateUser() {
     statusEl.style.display = 'none';
     statusEl.textContent = '';
 
-    if (!username || !email || !password) {
-        statusEl.textContent = 'Username, email, and password are required';
+    if (!username || !password) {
+        statusEl.textContent = 'Username and password are required';
         statusEl.style.display = '';
         statusEl.style.color = '#ef4444';
         return;
@@ -2472,7 +2467,6 @@ async function submitAdminCreateUser() {
             headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + token },
             body: JSON.stringify({
                 username: username,
-                email: email,
                 password: password,
                 display_name: displayName || null,
                 role: role || 'user',
@@ -2497,7 +2491,6 @@ async function submitAdminCreateUser() {
 async function saveAdminEditUser() {
     var userId = document.getElementById('admin-edit-user-id').value;
     var displayName = document.getElementById('admin-edit-displayname').value.trim();
-    var email = document.getElementById('admin-edit-email').value.trim();
     var roleDD = document.getElementById('admin-edit-role-dropdown');
     var role = roleDD ? roleDD.getAttribute('data-value') : 'user';
     var statusEl = document.getElementById('admin-edit-status');
@@ -2507,7 +2500,7 @@ async function saveAdminEditUser() {
         var res = await fetch(CONFIG.API_BASE + '/auth/users/' + userId, {
             method: 'PATCH',
             headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + token },
-            body: JSON.stringify({ display_name: displayName || null, email: email || null, role: role }),
+            body: JSON.stringify({ display_name: displayName || null, role: role }),
         });
         var data = await res.json();
         if (!res.ok) throw new Error(data.detail || 'Failed to update user');
