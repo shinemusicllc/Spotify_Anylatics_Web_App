@@ -140,6 +140,7 @@ const state = {
     dragOverGroupPlacement: 'before',
     suppressNextGroupClick: false,
     suppressNextRowClick: false,
+    rowPointerDown: null,
 };
 
 // ═══════════════════════════════════════════════════════════════════
@@ -1192,6 +1193,7 @@ function renderRow(item) {
     row.dataset.type = item.type;
     row.dataset.spotifyId = item.spotify_id;
     row.dataset.itemKey = key;
+    row.draggable = true;
 
     row.innerHTML = `
         <!-- Left: Asset Details -->
@@ -1240,9 +1242,6 @@ function renderRow(item) {
             <div class="meta-cell text-right row-action-cell">
                 <span class="list-checked-text text-secondary-text row-checked" data-checked-at="${escapeHtml(checkedAt)}">${timeAgo(checkedAt)}</span>
                 <div class="row-action-buttons">
-                    <button type="button" class="row-drag-handle" aria-label="Reorder row" draggable="true">
-                        <span class="material-icons-round">drag_indicator</span>
-                    </button>
                     <button type="button" class="row-refresh-btn" aria-label="Refresh row">
                         <span class="material-icons-round">refresh</span>
                     </button>
@@ -3105,6 +3104,45 @@ document.addEventListener('DOMContentLoaded', () => {
 
     const listElForDelete = document.getElementById('link-list');
     if (listElForDelete) {
+        listElForDelete.addEventListener('mousedown', (e) => {
+            if (e.button !== 0) return;
+            if (isInteractiveRowTarget(e.target)) return;
+            const row = e.target.closest('.custom-grid-row');
+            if (!row) return;
+            state.rowPointerDown = {
+                itemId: row.dataset.itemId,
+                type: row.dataset.type,
+                spotifyId: row.dataset.spotifyId,
+                x: e.clientX,
+                y: e.clientY,
+                shiftKey: e.shiftKey,
+                ctrlKey: e.ctrlKey,
+                metaKey: e.metaKey,
+            };
+        });
+        listElForDelete.addEventListener('mouseup', (e) => {
+            if (e.button !== 0) return;
+            const down = state.rowPointerDown;
+            state.rowPointerDown = null;
+            if (!down || state.draggingRowKeys.length) return;
+            if (isInteractiveRowTarget(e.target)) return;
+            const row = e.target.closest('.custom-grid-row');
+            if (!row) return;
+            const moved = Math.abs(e.clientX - down.x) > 5 || Math.abs(e.clientY - down.y) > 5;
+            if (moved) return;
+            if (String(row.dataset.itemId) !== String(down.itemId)) return;
+            const item = state.items.find((i) =>
+                String(i.id) === String(row.dataset.itemId)
+                || (i.type === row.dataset.type && i.spotify_id === row.dataset.spotifyId)
+            );
+            if (!item) return;
+            handleRowSelection(item, down);
+        });
+        listElForDelete.addEventListener('mouseleave', () => {
+            if (!state.draggingRowKeys.length) {
+                state.rowPointerDown = null;
+            }
+        });
         listElForDelete.addEventListener('click', (e) => {
             const btn = e.target.closest('.row-delete-btn');
             const refreshBtn = e.target.closest('.row-refresh-btn');
@@ -3125,17 +3163,6 @@ document.addEventListener('DOMContentLoaded', () => {
             const row = (btn || refreshBtn || e.target.closest('.custom-grid-row'));
             if (!row) return;
             if (!btn && !refreshBtn) {
-                if (state.suppressNextRowClick) {
-                    state.suppressNextRowClick = false;
-                    return;
-                }
-                if (isInteractiveRowTarget(e.target)) return;
-                const item = state.items.find((i) =>
-                    String(i.id) === String(row.dataset.itemId)
-                    || (i.type === row.dataset.type && i.spotify_id === row.dataset.spotifyId)
-                );
-                if (!item) return;
-                handleRowSelection(item, e);
                 return;
             }
             e.preventDefault();
@@ -3152,9 +3179,8 @@ document.addEventListener('DOMContentLoaded', () => {
             }
         });
         listElForDelete.addEventListener('dragstart', (e) => {
-            const dragHandle = e.target.closest('.row-drag-handle');
-            const row = dragHandle ? dragHandle.closest('.custom-grid-row') : null;
-            if (!row || !dragHandle) {
+            const row = e.target.closest('.custom-grid-row');
+            if (!row || isInteractiveRowTarget(e.target)) {
                 e.preventDefault();
                 return;
             }
@@ -3166,6 +3192,7 @@ document.addEventListener('DOMContentLoaded', () => {
             state.dragOverRowKey = draggedKey;
             state.dragOverRowPlacement = 'before';
             state.suppressNextRowClick = true;
+            state.rowPointerDown = null;
             if (e.dataTransfer) {
                 e.dataTransfer.effectAllowed = 'move';
                 e.dataTransfer.setData('text/plain', draggedKey);
@@ -3206,6 +3233,7 @@ document.addEventListener('DOMContentLoaded', () => {
             state.draggingRowKeys = [];
             state.dragOverRowKey = null;
             state.dragOverRowPlacement = 'before';
+            state.rowPointerDown = null;
             syncRowDragUi(listElForDelete);
             window.setTimeout(() => {
                 state.suppressNextRowClick = false;
