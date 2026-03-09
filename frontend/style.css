@@ -77,13 +77,23 @@ h3 {
 
 /* ── CSS Custom Properties (Design Tokens) ─────────────────────── */
 :root {
-  --left-col: 5fr;
-  --right-col: 7fr;
   --meta-gap: 18px;
-  --row-px: 2rem;
-  --owner-col: minmax(180px, 1.25fr);
-  --middle-col-min: 96px;
-  --checked-col: 130px;
+  --asset-col: 520px;
+  --owner-col: 220px;
+  --playlist-save-col: 120px;
+  --playlist-count-col: 120px;
+  --album-count-col: 110px;
+  --artist-followers-col: 120px;
+  --artist-listeners-col: 132px;
+  --track-views-col: 132px;
+  --checked-col: 132px;
+  --meta-grid-width: calc(
+    var(--owner-col) + var(--playlist-save-col) + var(--playlist-count-col) +
+      var(--album-count-col) + var(--artist-followers-col) +
+      var(--artist-listeners-col) + var(--track-views-col) +
+      var(--checked-col) + (7 * var(--meta-gap))
+  );
+  --table-min-width: calc(var(--asset-col) + var(--meta-grid-width) + 16px);
   --surface-0: #0e1116;
   --surface-1: #10151d;
   --surface-2: #131a24;
@@ -254,12 +264,13 @@ h3 {
 /* ── Grid Layout ───────────────────────────────────────────────── */
 .custom-grid-row {
   display: grid;
-  grid-template-columns: var(--left-col) var(--right-col);
+  grid-template-columns: var(--asset-col) minmax(var(--meta-grid-width), 1fr);
   gap: 16px;
   align-items: center;
   user-select: none;
   cursor: grab;
   position: relative;
+  min-width: var(--table-min-width);
 }
 
 .custom-grid-row.row-selected {
@@ -342,10 +353,13 @@ h3 {
 .meta-grid {
   display: grid;
   grid-template-columns:
-    var(--owner-col) repeat(6, minmax(var(--middle-col-min), 1fr))
+    var(--owner-col) var(--playlist-save-col) var(--playlist-count-col)
+    var(--album-count-col) var(--artist-followers-col)
+    var(--artist-listeners-col) var(--track-views-col)
     var(--checked-col);
   column-gap: var(--meta-gap);
   align-items: center;
+  min-width: var(--meta-grid-width);
 }
 
 .meta-cell {
@@ -426,12 +440,15 @@ h3 {
 
 .list-wrap {
   position: relative;
+  overflow-x: auto;
+  overflow-y: auto;
 }
 
 .list-shell {
   background: #111315;
   border: none;
   overflow: visible;
+  min-width: var(--table-min-width);
 }
 
 /* ── Playlist Hero ─────────────────────────────────────────────── */
@@ -538,12 +555,75 @@ h3 {
   letter-spacing: 0.03em;
   font-size: 12px;
   color: #9ea7b5;
+  cursor: default;
+  align-items: stretch;
 }
 
 .list-head .meta-grid > .meta-cell {
   padding-left: 16px;
   min-height: 16px;
   border-left: 1px solid rgba(255, 255, 255, 0.2);
+}
+
+.list-head .head-cell {
+  position: relative;
+  overflow: visible;
+  padding-right: 18px;
+  min-height: 46px;
+  display: flex;
+  align-items: center;
+}
+
+.head-cell-label {
+  display: block;
+  white-space: normal;
+  line-height: 1.25;
+  padding-right: 8px;
+}
+
+.column-resize-handle {
+  position: absolute;
+  top: -10px;
+  right: -12px;
+  width: 24px;
+  height: calc(100% + 20px);
+  padding: 0;
+  border: none;
+  background: transparent;
+  cursor: col-resize;
+  z-index: 5;
+}
+
+.column-resize-handle::before {
+  content: "";
+  position: absolute;
+  top: 10px;
+  bottom: 10px;
+  left: 50%;
+  width: 2px;
+  transform: translateX(-50%);
+  border-radius: 9999px;
+  background: rgba(255, 255, 255, 0.02);
+  transition:
+    background 140ms ease,
+    box-shadow 140ms ease;
+}
+
+.head-cell:hover .column-resize-handle::before,
+.column-resize-handle:focus-visible::before {
+  background: rgba(255, 255, 255, 0.16);
+}
+
+.column-resize-handle:hover::before,
+.column-resize-handle:active::before {
+  background: rgba(29, 185, 84, 0.9);
+  box-shadow: 0 0 10px rgba(29, 185, 84, 0.24);
+}
+
+.column-resizing,
+.column-resizing * {
+  cursor: col-resize !important;
+  user-select: none !important;
 }
 
 .list-head .meta-grid > .meta-cell.text-right {
@@ -641,6 +721,7 @@ h3 {
   font-weight: 700;
   line-height: 1.2;
   letter-spacing: 0;
+  color: #f2f5fb;
 }
 
 .list-title-link,
@@ -662,6 +743,26 @@ h3 {
 
 .list-asset-title .list-title-link:hover {
   color: #f8fbff;
+}
+
+.list-asset-title-muted {
+  color: rgba(255, 255, 255, 0.8);
+}
+
+.title-tone-track {
+  color: #38bdf8;
+}
+
+.title-tone-track .list-title-link:hover {
+  color: #7dd3fc;
+}
+
+.title-tone-album {
+  color: #c084fc;
+}
+
+.title-tone-album .list-title-link:hover {
+  color: #d8b4fe;
 }
 
 .list-title-link:focus-visible,
@@ -747,6 +848,17 @@ h3 {
   gap: 3px;
 }
 
+.list-owner-meta-updated-only {
+  min-height: 28px;
+  justify-content: center;
+}
+
+.list-owner-time-only {
+  font-size: 12px;
+  font-weight: 500;
+  color: #d6dde8;
+}
+
 .list-cover-trigger {
   display: inline-flex;
   padding: 0;
@@ -794,7 +906,7 @@ h3 {
   display: flex;
   align-items: flex-end;
   justify-content: flex-end;
-  min-width: 130px;
+  min-width: var(--checked-col);
   z-index: 6;
 }
 
@@ -1177,10 +1289,11 @@ h3 {
 
 .skeleton-row {
   display: grid;
-  grid-template-columns: var(--left-col) var(--right-col);
+  grid-template-columns: var(--asset-col) minmax(var(--meta-grid-width), 1fr);
   gap: 16px;
   padding: 12px 16px;
   align-items: center;
+  min-width: var(--table-min-width);
 }
 
 /* ── Empty State ───────────────────────────────────────────────── */
@@ -1259,9 +1372,14 @@ h3 {
 
 @media (max-width: 1024px) {
   .meta-grid {
-    grid-template-columns: var(--owner-col) repeat(4, minmax(90px, 1fr)) var(
-        --checked-col
-      );
+    grid-template-columns:
+      var(--owner-col) var(--playlist-save-col) var(--artist-followers-col)
+      var(--track-views-col) var(--checked-col);
+    min-width: calc(
+      var(--owner-col) + var(--playlist-save-col) +
+        var(--artist-followers-col) + var(--track-views-col) +
+        var(--checked-col) + (4 * var(--meta-gap))
+    );
   }
   .meta-grid > :nth-child(3),
   .meta-grid > :nth-child(4),

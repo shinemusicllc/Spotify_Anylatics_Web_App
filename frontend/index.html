@@ -159,16 +159,43 @@
                 <!-- Column Headers -->
                 <div class="list-head pt-0 pb-0">
                     <div class="list-columns-head custom-grid-row px-4 py-3 text-[13px] font-medium">
-                        <div class="meta-cell">Asset Details</div>
+                        <div class="meta-cell head-cell" data-col-key="asset">
+                            <span class="head-cell-label">Asset Details</span>
+                            <button type="button" class="column-resize-handle" data-col-key="asset" aria-label="Resize Asset Details column"></button>
+                        </div>
                         <div class="meta-grid w-full">
-                            <div class="meta-cell">Artist / Owner</div>
-                            <div class="meta-cell">Playlist (Lưu)</div>
-                            <div class="meta-cell">Playlist (Số lượng)</div>
-                            <div class="meta-cell">Album (Số bài)</div>
-                            <div class="meta-cell">Artist (Theo dõi)</div>
-                            <div class="meta-cell">Artist (Listener)</div>
-                            <div class="meta-cell">Tracks (Views)</div>
-                            <div class="meta-cell text-right">Checked</div>
+                            <div class="meta-cell head-cell" data-col-key="owner">
+                                <span class="head-cell-label">Owner / Updated</span>
+                                <button type="button" class="column-resize-handle" data-col-key="owner" aria-label="Resize Owner / Updated column"></button>
+                            </div>
+                            <div class="meta-cell head-cell" data-col-key="playlistSaves">
+                                <span class="head-cell-label">Playlist (Lưu)</span>
+                                <button type="button" class="column-resize-handle" data-col-key="playlistSaves" aria-label="Resize Playlist save column"></button>
+                            </div>
+                            <div class="meta-cell head-cell" data-col-key="playlistCount">
+                                <span class="head-cell-label">Playlist (Số lượng)</span>
+                                <button type="button" class="column-resize-handle" data-col-key="playlistCount" aria-label="Resize Playlist count column"></button>
+                            </div>
+                            <div class="meta-cell head-cell" data-col-key="albumCount">
+                                <span class="head-cell-label">Album (Số bài)</span>
+                                <button type="button" class="column-resize-handle" data-col-key="albumCount" aria-label="Resize Album track count column"></button>
+                            </div>
+                            <div class="meta-cell head-cell" data-col-key="artistFollowers">
+                                <span class="head-cell-label">Artist (Theo dõi)</span>
+                                <button type="button" class="column-resize-handle" data-col-key="artistFollowers" aria-label="Resize Artist followers column"></button>
+                            </div>
+                            <div class="meta-cell head-cell" data-col-key="artistListeners">
+                                <span class="head-cell-label">Artist (Listener)</span>
+                                <button type="button" class="column-resize-handle" data-col-key="artistListeners" aria-label="Resize Artist listeners column"></button>
+                            </div>
+                            <div class="meta-cell head-cell" data-col-key="trackViews">
+                                <span class="head-cell-label">Tracks (Views)</span>
+                                <button type="button" class="column-resize-handle" data-col-key="trackViews" aria-label="Resize Track views column"></button>
+                            </div>
+                            <div class="meta-cell text-right head-cell" data-col-key="checked">
+                                <span class="head-cell-label">Checked</span>
+                                <button type="button" class="column-resize-handle" data-col-key="checked" aria-label="Resize Checked column"></button>
+                            </div>
                         </div>
                     </div>
                 </div>

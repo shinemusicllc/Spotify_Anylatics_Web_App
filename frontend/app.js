@@ -19,9 +19,54 @@ const CONFIG = {
 };
 const GROUP_STORAGE_KEY = 'spoticheck_custom_groups_v1';
 const ROW_ORDER_STORAGE_KEY = 'spoticheck_row_order_v1';
+const COLUMN_WIDTH_STORAGE_KEY = 'spoticheck_column_widths_v1';
 const ALL_GROUP_ID = 'all';
 const ALL_GROUP_LABEL = 'All Links';
 const GROUP_SELECT_ALL = '__all__';
+const DEFAULT_COLUMN_WIDTHS = Object.freeze({
+    asset: 520,
+    owner: 220,
+    playlistSaves: 120,
+    playlistCount: 120,
+    albumCount: 110,
+    artistFollowers: 120,
+    artistListeners: 132,
+    trackViews: 132,
+    checked: 132,
+});
+const MIN_COLUMN_WIDTHS = Object.freeze({
+    asset: 340,
+    owner: 120,
+    playlistSaves: 96,
+    playlistCount: 96,
+    albumCount: 96,
+    artistFollowers: 96,
+    artistListeners: 96,
+    trackViews: 96,
+    checked: 108,
+});
+const MAX_COLUMN_WIDTHS = Object.freeze({
+    asset: 900,
+    owner: 360,
+    playlistSaves: 240,
+    playlistCount: 240,
+    albumCount: 240,
+    artistFollowers: 240,
+    artistListeners: 260,
+    trackViews: 260,
+    checked: 220,
+});
+const COLUMN_WIDTH_VAR_MAP = Object.freeze({
+    asset: '--asset-col',
+    owner: '--owner-col',
+    playlistSaves: '--playlist-save-col',
+    playlistCount: '--playlist-count-col',
+    albumCount: '--album-count-col',
+    artistFollowers: '--artist-followers-col',
+    artistListeners: '--artist-listeners-col',
+    trackViews: '--track-views-col',
+    checked: '--checked-col',
+});
 
 function getUserGroupStorageKey() {
     const user = getAuthUser();
@@ -33,6 +78,12 @@ function getUserRowOrderStorageKey() {
     const user = getAuthUser();
     const userId = user?.id || 'anonymous';
     return `${ROW_ORDER_STORAGE_KEY}_${userId}`;
+}
+
+function getUserColumnWidthStorageKey() {
+    const user = getAuthUser();
+    const userId = user?.id || 'anonymous';
+    return `${COLUMN_WIDTH_STORAGE_KEY}_${userId}`;
 }
 
 // ===================================================================
@@ -145,6 +196,7 @@ const state = {
     dragScrollRaf: null,
     dragScrollContainer: null,
     dragScrollSpeed: 0,
+    columnWidths: { ...DEFAULT_COLUMN_WIDTHS },
 };
 
 // ═══════════════════════════════════════════════════════════════════
@@ -413,6 +465,98 @@ function savePersistedRowOrder(keys) {
     } catch {
         // Ignore storage failures.
     }
+}
+
+function clampColumnWidth(key, value) {
+    const fallback = DEFAULT_COLUMN_WIDTHS[key] ?? 120;
+    const min = MIN_COLUMN_WIDTHS[key] ?? 72;
+    const max = MAX_COLUMN_WIDTHS[key] ?? 900;
+    const numeric = Number(value);
+    if (!Number.isFinite(numeric)) return fallback;
+    return Math.min(max, Math.max(min, Math.round(numeric)));
+}
+
+function loadPersistedColumnWidths() {
+    try {
+        const raw = localStorage.getItem(getUserColumnWidthStorageKey());
+        const parsed = raw ? JSON.parse(raw) : {};
+        const widths = { ...DEFAULT_COLUMN_WIDTHS };
+        Object.keys(DEFAULT_COLUMN_WIDTHS).forEach((key) => {
+            widths[key] = clampColumnWidth(key, parsed?.[key]);
+        });
+        return widths;
+    } catch {
+        return { ...DEFAULT_COLUMN_WIDTHS };
+    }
+}
+
+function savePersistedColumnWidths(widths) {
+    try {
+        localStorage.setItem(getUserColumnWidthStorageKey(), JSON.stringify(widths));
+    } catch {
+        // Ignore storage failures.
+    }
+}
+
+function applyColumnWidths(widths = state.columnWidths) {
+    const root = document.documentElement;
+    if (!root) return;
+    Object.entries(COLUMN_WIDTH_VAR_MAP).forEach(([key, cssVar]) => {
+        const width = clampColumnWidth(key, widths?.[key]);
+        root.style.setProperty(cssVar, `${width}px`);
+    });
+}
+
+function setColumnWidth(key, width, persist = false) {
+    if (!(key in DEFAULT_COLUMN_WIDTHS)) return;
+    state.columnWidths = {
+        ...state.columnWidths,
+        [key]: clampColumnWidth(key, width),
+    };
+    applyColumnWidths(state.columnWidths);
+    if (persist) {
+        savePersistedColumnWidths(state.columnWidths);
+    }
+}
+
+function getTitleToneClass(type) {
+    const map = {
+        track: 'title-tone-track',
+        album: 'title-tone-album',
+    };
+    return map[type] || '';
+}
+
+function renderOwnerUpdatedCell(item, ownerUrl, updatedAt) {
+    const safeUpdatedAt = escapeHtml(updatedAt || '-');
+    if (item.type !== 'playlist') {
+        return `
+            <div class="meta-cell">
+                <div class="list-owner-meta list-owner-meta-updated-only">
+                    <div class="list-owner-time list-owner-time-only">${safeUpdatedAt}</div>
+                </div>
+            </div>
+        `;
+    }
+
+    const ownerName = escapeHtml(item.owner_name || '-');
+    const ownerMarkup = item.owner_name
+        ? `<a class="list-owner-link" href="${ownerUrl}" target="_blank" rel="noopener noreferrer">${ownerName}</a>`
+        : ownerName;
+    const avatarLabel = escapeHtml((item.owner_name || 'PL').slice(0, 2).toUpperCase());
+    const ownerAvatar = item.owner_image
+        ? `<img alt="Owner" class="list-owner-avatar" src="${item.owner_image}">`
+        : `<div class="list-owner-avatar list-owner-fallback">${avatarLabel}</div>`;
+
+    return `
+        <div class="flex items-center gap-3 meta-cell">
+            ${ownerAvatar}
+            <div class="list-owner-meta">
+                <div class="list-owner-name">${ownerMarkup}</div>
+                <div class="list-owner-time text-secondary-text">${safeUpdatedAt}</div>
+            </div>
+        </div>
+    `;
 }
 
 function applyPersistedItemOrder(items) {
@@ -1320,15 +1464,12 @@ function renderRow(item) {
     const isDragging = state.draggingRowKeys.includes(key);
     const isDropTarget = state.dragOverRowKey === key && !isDragging;
 
-    // Owner / Artist display
-    const ownerHtml = item.owner_image
-        ? `<img alt="Owner" class="list-owner-avatar" src="${item.owner_image}">`
-        : `<div class="list-owner-avatar list-owner-fallback">${(item.owner_name || '?').slice(0, 2).toUpperCase()}</div>`;
-
     const isDropBefore = isDropTarget && state.dragOverRowPlacement !== 'after';
     const isDropAfter = isDropTarget && state.dragOverRowPlacement === 'after';
     const excel = getExcelColumnValues(item);
     const subtitle = getItemSubtitle(item);
+    const titleToneClass = isError ? 'list-asset-title-muted' : getTitleToneClass(item.type);
+    const ownerUpdatedCell = renderOwnerUpdatedCell(item, ownerUrl, updatedAt);
 
     const row = document.createElement('div');
     row.className = `custom-grid-row px-4 py-3 bg-white/5 rounded-lg border border-transparent hover:bg-row-hover hover:border-white/10 transition-all group ${isSelected ? 'row-selected' : ''} ${isDragging ? 'row-dragging' : ''} ${isDropTarget ? 'row-drop-target' : ''} ${isDropBefore ? 'row-drop-before' : ''} ${isDropAfter ? 'row-drop-after' : ''}`;
@@ -1346,7 +1487,7 @@ function renderRow(item) {
             </button>
             <div>
                 <span class="list-type-badge ${isError ? 'badge-error' : getBadgeClass(item.type)}">${item.type}</span>
-                <h3 class="list-asset-title ${isError ? 'text-white/80' : ''}">
+                <h3 class="list-asset-title ${titleToneClass}">
                     <a class="list-title-link" href="${spotifyUrl}" target="_blank" rel="noopener noreferrer">${escapeHtml(item.name || 'Unknown')}</a>
                 </h3>
                 <div class="list-asset-meta">
@@ -1365,15 +1506,7 @@ function renderRow(item) {
         </div>
         <!-- Right: Metadata -->
         <div class="meta-grid w-full">
-            <div class="flex items-center gap-3 meta-cell">
-                ${ownerHtml}
-                <div class="list-owner-meta">
-                    <div class="list-owner-name">
-                        <a class="list-owner-link" href="${ownerUrl}" target="_blank" rel="noopener noreferrer">${escapeHtml(item.owner_name || '-')}</a>
-                    </div>
-                    <div class="list-owner-time text-secondary-text">${updatedAt}</div>
-                </div>
-            </div>
+            ${ownerUpdatedCell}
             <div class="meta-cell">${renderMetricCell(excel.playlistSaves, excel.playlistSavesDelta, excel.deltaDays)}</div>
             <div class="meta-cell">${renderMetricCell(excel.playlistTrackCount, excel.playlistTrackCountDelta, excel.deltaDays)}</div>
             <div class="meta-cell">${renderMetricCell(excel.albumTrackCount, excel.albumTrackCountDelta, excel.deltaDays)}</div>
@@ -1401,6 +1534,51 @@ function renderRow(item) {
     `;
 
     return row;
+}
+
+function setupColumnResizers() {
+    const handles = document.querySelectorAll('.column-resize-handle[data-col-key]');
+    if (!handles.length) return;
+
+    handles.forEach((handle) => {
+        if (handle.dataset.bound === 'true') return;
+        handle.dataset.bound = 'true';
+
+        handle.addEventListener('dblclick', (event) => {
+            event.preventDefault();
+            event.stopPropagation();
+            const key = handle.dataset.colKey;
+            if (!key || !(key in DEFAULT_COLUMN_WIDTHS)) return;
+            setColumnWidth(key, DEFAULT_COLUMN_WIDTHS[key], true);
+        });
+
+        handle.addEventListener('pointerdown', (event) => {
+            const key = handle.dataset.colKey;
+            if (!key || !(key in DEFAULT_COLUMN_WIDTHS)) return;
+
+            event.preventDefault();
+            event.stopPropagation();
+
+            const startX = event.clientX;
+            const startWidth = clampColumnWidth(key, state.columnWidths[key]);
+            document.body.classList.add('column-resizing');
+
+            const onMove = (moveEvent) => {
+                const nextWidth = startWidth + (moveEvent.clientX - startX);
+                setColumnWidth(key, nextWidth);
+            };
+
+            const onUp = () => {
+                document.body.classList.remove('column-resizing');
+                window.removeEventListener('pointermove', onMove);
+                window.removeEventListener('pointerup', onUp);
+                savePersistedColumnWidths(state.columnWidths);
+            };
+
+            window.addEventListener('pointermove', onMove);
+            window.addEventListener('pointerup', onUp);
+        });
+    });
 }
 
 /** Escape HTML to prevent XSS */
@@ -3018,6 +3196,9 @@ window.hideAdminUsers = hideAdminUsers;
 document.addEventListener('DOMContentLoaded', () => {
     if (!requireAuth()) return;
     setupAuthUI();
+    state.columnWidths = loadPersistedColumnWidths();
+    applyColumnWidths(state.columnWidths);
+    setupColumnResizers();
 
     state.customGroups = loadCustomGroups();
     syncGroupUI(true);
