@@ -12,7 +12,8 @@
   padding: 0;
 }
 
-:root, html {
+:root,
+html {
   color-scheme: dark;
 }
 
@@ -171,12 +172,16 @@ h3 {
 
 .group-item-dragging {
   opacity: 1;
-  background: linear-gradient(180deg, rgba(255,255,255,0.14), rgba(255,255,255,0.07));
-  border-color: rgba(255,255,255,0.16);
+  background: linear-gradient(
+    180deg,
+    rgba(255, 255, 255, 0.14),
+    rgba(255, 255, 255, 0.07)
+  );
+  border-color: rgba(255, 255, 255, 0.16);
   box-shadow:
-    inset 0 0 0 1px rgba(255,255,255,0.05),
-    0 14px 28px rgba(0,0,0,0.28),
-    0 0 0 1px rgba(39,214,107,0.08);
+    inset 0 0 0 1px rgba(255, 255, 255, 0.05),
+    0 14px 28px rgba(0, 0, 0, 0.28),
+    0 0 0 1px rgba(39, 214, 107, 0.08);
   transform: translateY(-2px);
 }
 
@@ -270,7 +275,11 @@ h3 {
 
 .custom-grid-row.row-selected {
   background:
-    linear-gradient(180deg, rgba(255, 255, 255, 0.18), rgba(255, 255, 255, 0.12)),
+    linear-gradient(
+      180deg,
+      rgba(255, 255, 255, 0.18),
+      rgba(255, 255, 255, 0.12)
+    ),
     rgba(40, 40, 40, 0.98) !important;
   border-color: rgba(255, 255, 255, 0.16) !important;
   border-radius: 16px !important;
@@ -283,7 +292,11 @@ h3 {
 
 .custom-grid-row.row-selected:hover {
   background:
-    linear-gradient(180deg, rgba(255, 255, 255, 0.18), rgba(255, 255, 255, 0.12)),
+    linear-gradient(
+      180deg,
+      rgba(255, 255, 255, 0.18),
+      rgba(255, 255, 255, 0.12)
+    ),
     rgba(40, 40, 40, 0.98) !important;
   border-color: rgba(255, 255, 255, 0.18) !important;
   border-radius: 16px !important;
@@ -310,13 +323,17 @@ h3 {
 .custom-grid-row.row-dragging {
   opacity: 1;
   background:
-    linear-gradient(180deg, rgba(255, 255, 255, 0.12), rgba(255, 255, 255, 0.06)),
+    linear-gradient(
+      180deg,
+      rgba(255, 255, 255, 0.12),
+      rgba(255, 255, 255, 0.06)
+    ),
     rgba(20, 22, 24, 0.96) !important;
-  border-color: rgba(255,255,255,0.12) !important;
+  border-color: rgba(255, 255, 255, 0.12) !important;
   box-shadow:
-    inset 0 0 0 1px rgba(255,255,255,0.05),
-    0 12px 28px rgba(0,0,0,0.26),
-    0 0 0 1px rgba(39,214,107,0.06) !important;
+    inset 0 0 0 1px rgba(255, 255, 255, 0.05),
+    0 12px 28px rgba(0, 0, 0, 0.26),
+    0 0 0 1px rgba(39, 214, 107, 0.06) !important;
   transform: translateY(-2px);
 }
 
@@ -348,11 +365,11 @@ h3 {
   gap: 12px;
   padding: 11px 12px;
   border-radius: 16px;
-  border: 1px solid rgba(255,255,255,0.18);
+  border: 1px solid rgba(255, 255, 255, 0.18);
   background: rgba(11, 12, 14, 1);
   box-shadow:
-    0 16px 30px rgba(0,0,0,0.44),
-    0 0 0 1px rgba(39,214,107,0.10);
+    0 16px 30px rgba(0, 0, 0, 0.44),
+    0 0 0 1px rgba(39, 214, 107, 0.1);
   overflow: hidden;
 }
 
@@ -384,8 +401,12 @@ h3 {
 }
 
 .drag-preview-icon-wrap {
-  background: linear-gradient(135deg, rgba(39,214,107,0.22), rgba(16,185,129,0.12));
-  border: 1px solid rgba(39,214,107,0.22);
+  background: linear-gradient(
+    135deg,
+    rgba(39, 214, 107, 0.22),
+    rgba(16, 185, 129, 0.12)
+  );
+  border: 1px solid rgba(39, 214, 107, 0.22);
 }
 
 .drag-preview-icon {
@@ -404,7 +425,7 @@ h3 {
   width: fit-content;
   padding: 2px 7px;
   border-radius: 9999px;
-  background: rgba(39,214,107,0.20);
+  background: rgba(39, 214, 107, 0.2);
   color: #6ee7a2;
   font-size: 9px;
   font-weight: 800;
@@ -423,7 +444,7 @@ h3 {
 }
 
 .drag-preview-subtitle {
-  color: rgba(255,255,255,0.78);
+  color: rgba(255, 255, 255, 0.78);
   font-size: 11px;
   white-space: nowrap;
   overflow: hidden;
@@ -446,7 +467,7 @@ h3 {
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  box-shadow: 0 10px 20px rgba(39,214,107,0.24);
+  box-shadow: 0 10px 20px rgba(39, 214, 107, 0.24);
 }
 
 .custom-grid-row.row-drop-target {
@@ -466,13 +487,11 @@ h3 {
     inset 0 0 0 1px rgba(29, 185, 84, 0.34);
 }
 
-
 .meta-grid {
   display: grid;
-  grid-template-columns: var(--owner-col) repeat(
-      4,
-      minmax(var(--middle-col-min), 1fr)
-    ) var(--checked-col);
+  grid-template-columns:
+    var(--owner-col) repeat(4, minmax(var(--middle-col-min), 1fr))
+    var(--checked-col);
   column-gap: var(--meta-gap);
   align-items: center;
 }
@@ -773,7 +792,9 @@ h3 {
 .list-owner-link {
   color: inherit;
   text-decoration: none;
-  transition: color 140ms ease, opacity 140ms ease;
+  transition:
+    color 140ms ease,
+    opacity 140ms ease;
 }
 
 .list-title-link:hover,
@@ -801,7 +822,9 @@ h3 {
   margin-top: 0.125rem;
   font-size: 11px;
   line-height: 1.2;
-  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
+  font-family:
+    ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono",
+    "Courier New", monospace;
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -1009,7 +1032,9 @@ h3 {
   background: rgba(15, 18, 24, 0.92);
   color: #f2f5fb;
   cursor: pointer;
-  transition: background 140ms ease, border-color 140ms ease;
+  transition:
+    background 140ms ease,
+    border-color 140ms ease;
 }
 
 .image-preview-close:hover {
@@ -1286,6 +1311,120 @@ h3 {
   }
 }
 
+/* ── Row Selection ─────────────────────────────────────────────── */
+.custom-grid-row.row-selected {
+  background: rgba(29, 185, 84, 0.06) !important;
+  outline-color: rgba(29, 185, 84, 0.28) !important;
+}
+
+.custom-grid-row.row-selected:hover {
+  background: rgba(29, 185, 84, 0.1) !important;
+}
+
+/* ── Drag & Drop — Row Ghost Effect ────────────────────────────── */
+
+/* Row đang được kéo: mờ nhạt + nhẹ scale — kiểu "ghost" */
+.custom-grid-row.row-dragging {
+  opacity: 0.25 !important;
+  transform: scale(0.98);
+  transition:
+    opacity 180ms ease,
+    transform 180ms ease !important;
+  pointer-events: none;
+  filter: grayscale(60%);
+  box-shadow: none !important;
+  outline-color: transparent !important;
+}
+
+/* Drop target — highlight vùng thả */
+.custom-grid-row.row-drop-target {
+  background: rgba(29, 185, 84, 0.04) !important;
+  transition: background 100ms ease !important;
+}
+
+/* Drop indicator line — trước row */
+.custom-grid-row.row-drop-before {
+  box-shadow: inset 0 2px 0 0 #1db954 !important;
+}
+
+/* Drop indicator line — sau row */
+.custom-grid-row.row-drop-after {
+  box-shadow: inset 0 -2px 0 0 #1db954 !important;
+}
+
+/* ── Drag & Drop — Group Window Effect ─────────────────────────── */
+
+/* Group đang được kéo: ghost + shrink */
+.group-item.group-item-dragging {
+  opacity: 0.2 !important;
+  transform: scale(0.95);
+  transition:
+    opacity 180ms ease,
+    transform 180ms ease;
+  filter: grayscale(50%);
+}
+
+/* Group drop target */
+.group-item.group-item-drop-target {
+  background: rgba(29, 185, 84, 0.08) !important;
+  border-radius: 8px;
+  transition: background 100ms ease;
+}
+
+/* Group drop indicator — trước */
+.group-item.group-drop-before {
+  box-shadow: inset 0 2px 0 0 #1db954;
+}
+
+/* Group drop indicator — sau */
+.group-item.group-drop-after {
+  box-shadow: inset 0 -2px 0 0 #1db954;
+}
+
+/* ── Global drag active state ─────────────────────────────────── */
+
+/* Khi đang drag, cursor toàn page = grabbing */
+body.is-dragging {
+  cursor: grabbing !important;
+}
+
+body.is-dragging * {
+  cursor: grabbing !important;
+  user-select: none !important;
+  -webkit-user-select: none !important;
+}
+
+/* Row drag handle (6-dot icon) */
+.custom-grid-row .row-drag-handle {
+  opacity: 0;
+  cursor: grab;
+  color: rgba(255, 255, 255, 0.3);
+  transition:
+    opacity 140ms ease,
+    color 140ms ease;
+  flex-shrink: 0;
+  font-size: 16px;
+  padding: 4px;
+}
+
+.custom-grid-row:hover .row-drag-handle,
+.custom-grid-row.row-selected .row-drag-handle {
+  opacity: 1;
+}
+
+.custom-grid-row .row-drag-handle:hover {
+  color: rgba(255, 255, 255, 0.65);
+}
+
+/* Group drag: draggable group buttons get grab cursor */
+.group-item[draggable="true"] {
+  cursor: grab;
+}
+
+.group-item[draggable="true"]:active {
+  cursor: grabbing;
+}
+
 /* ── Responsive ────────────────────────────────────────────────── */
 @media (max-width: 1280px) {
   .playlist-hero h2 {
@@ -1336,7 +1475,10 @@ h3 {
   -webkit-text-fill-color: #f2f5fb !important;
   font-size: 14px;
   outline: none;
-  transition: border-color 200ms ease, background 200ms ease, box-shadow 200ms ease;
+  transition:
+    border-color 200ms ease,
+    background 200ms ease,
+    box-shadow 200ms ease;
 }
 .settings-input:focus {
   border-color: #1db954 !important;
@@ -1363,7 +1505,6 @@ h3 {
   caret-color: #f2f5fb;
 }
 
-
 /* ── Global Dark Select / Dropdown ───────────────────────────── */
 select,
 select.settings-input,
@@ -1383,7 +1524,10 @@ select.modal-input-group,
   font-size: 14px;
   cursor: pointer;
   outline: none;
-  transition: border-color 200ms ease, background 200ms ease, box-shadow 200ms ease;
+  transition:
+    border-color 200ms ease,
+    background 200ms ease,
+    box-shadow 200ms ease;
   background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='8' fill='none'%3E%3Cpath d='M1 1.5l5 5 5-5' stroke='%239aa4b2' stroke-width='1.5' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E");
   background-repeat: no-repeat;
   background-position: right 14px center;
@@ -1472,7 +1616,6 @@ select option,
   color: #f2f5fb !important;
 }
 
-
 /* ── Custom Dropdown (replaces native <select>) ──────────────── */
 .custom-dropdown {
   position: relative;
@@ -1492,7 +1635,10 @@ select option,
   font-size: 13px;
   cursor: pointer;
   outline: none;
-  transition: border-color 200ms ease, background 200ms ease, box-shadow 200ms ease;
+  transition:
+    border-color 200ms ease,
+    background 200ms ease,
+    box-shadow 200ms ease;
   user-select: none;
 }
 
@@ -1561,7 +1707,9 @@ select option,
   font-size: 13px;
   color: #b3b3b3;
   cursor: pointer;
-  transition: background 120ms ease, color 120ms ease;
+  transition:
+    background 120ms ease,
+    color 120ms ease;
 }
 
 .custom-dropdown-option:hover {

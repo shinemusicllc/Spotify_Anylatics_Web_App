@@ -1398,8 +1398,11 @@ function renderRow(item) {
         ? `<img alt="Owner" class="list-owner-avatar" src="${item.owner_image}">`
         : `<div class="list-owner-avatar list-owner-fallback">${(item.owner_name || '?').slice(0, 2).toUpperCase()}</div>`;
 
+    const isDropBefore = isDropTarget && state.dragOverRowPlacement !== 'after';
+    const isDropAfter = isDropTarget && state.dragOverRowPlacement === 'after';
+
     const row = document.createElement('div');
-    row.className = `custom-grid-row px-4 py-3 bg-white/5 rounded-lg border border-transparent hover:bg-row-hover hover:border-white/10 transition-all group ${isSelected ? 'row-selected' : ''} ${isDragging ? 'row-dragging' : ''} ${isDropTarget ? 'row-drop-target' : ''}`;
+    row.className = `custom-grid-row px-4 py-3 bg-white/5 rounded-lg border border-transparent hover:bg-row-hover hover:border-white/10 transition-all group ${isSelected ? 'row-selected' : ''} ${isDragging ? 'row-dragging' : ''} ${isDropTarget ? 'row-drop-target' : ''} ${isDropBefore ? 'row-drop-before' : ''} ${isDropAfter ? 'row-drop-after' : ''}`;
     row.dataset.itemId = item.id;
     row.dataset.type = item.type;
     row.dataset.spotifyId = item.spotify_id;
@@ -3252,6 +3255,7 @@ document.addEventListener('DOMContentLoaded', () => {
             state.dragOverGroupId = groupId;
             state.dragOverGroupPlacement = 'before';
             state.suppressNextGroupClick = true;
+            document.body.classList.add('is-dragging');
             if (e.dataTransfer) {
                 e.dataTransfer.effectAllowed = 'move';
                 e.dataTransfer.setData('text/plain', groupId);
@@ -3281,6 +3285,7 @@ document.addEventListener('DOMContentLoaded', () => {
             e.preventDefault();
             stopDragAutoScroll();
             destroyDragPreview();
+            document.body.classList.remove('is-dragging');
             const targetGroupId = normalizeGroupName(groupBtn.getAttribute('data-group'));
             const moved = moveCustomGroupBefore(state.draggingGroupId, targetGroupId, state.dragOverGroupPlacement);
             state.draggingGroupId = null;
@@ -3296,6 +3301,7 @@ document.addEventListener('DOMContentLoaded', () => {
             }, 0);
         });
         groupList.addEventListener('dragend', () => {
+            document.body.classList.remove('is-dragging');
             if (!state.draggingGroupId && !state.dragOverGroupId) return;
             stopDragAutoScroll();
             destroyDragPreview();
@@ -3397,6 +3403,7 @@ document.addEventListener('DOMContentLoaded', () => {
             state.dragOverRowKey = draggedKey;
             state.dragOverRowPlacement = 'before';
             state.suppressNextRowClick = true;
+            document.body.classList.add('is-dragging');
             if (e.dataTransfer) {
                 e.dataTransfer.effectAllowed = 'move';
                 e.dataTransfer.setData('text/plain', draggedKey);
@@ -3425,6 +3432,7 @@ document.addEventListener('DOMContentLoaded', () => {
             e.preventDefault();
             stopDragAutoScroll();
             destroyDragPreview();
+            document.body.classList.remove('is-dragging');
             const moved = moveItemsByKeys(state.draggingRowKeys, row.dataset.itemKey, state.dragOverRowPlacement);
             state.draggingRowKeys = [];
             state.dragOverRowKey = null;
@@ -3438,6 +3446,7 @@ document.addEventListener('DOMContentLoaded', () => {
             }, 0);
         });
         listElForDelete.addEventListener('dragend', () => {
+            document.body.classList.remove('is-dragging');
             if (!state.draggingRowKeys.length && !state.dragOverRowKey) return;
             stopDragAutoScroll();
             destroyDragPreview();
