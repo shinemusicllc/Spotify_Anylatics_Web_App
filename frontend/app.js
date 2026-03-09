@@ -3181,6 +3181,14 @@ document.addEventListener('DOMContentLoaded', () => {
             if (isInteractiveRowTarget(e.target)) return;
             const row = e.target.closest('.custom-grid-row');
             if (!row) return;
+            const rowKey = row.dataset.itemKey;
+            const keepMultiSelection =
+                !e.shiftKey
+                && !e.ctrlKey
+                && !e.metaKey
+                && state.selectedItemKeys.size > 1
+                && state.selectedItemKeys.has(rowKey);
+            if (keepMultiSelection) return;
             const item = state.items.find((i) =>
                 String(i.id) === String(row.dataset.itemId)
                 || (i.type === row.dataset.type && i.spotify_id === row.dataset.spotifyId)
