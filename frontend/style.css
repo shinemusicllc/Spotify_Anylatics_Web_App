@@ -161,6 +161,21 @@ h3 {
 
 .group-item {
   position: relative;
+  cursor: pointer;
+  user-select: none;
+}
+
+.group-item[draggable="true"] {
+  cursor: grab;
+}
+
+.group-item-dragging {
+  opacity: 0.52;
+}
+
+.group-item-drop-target {
+  border: 1px solid rgba(29, 185, 84, 0.45);
+  box-shadow: inset 0 0 0 1px rgba(29, 185, 84, 0.24);
 }
 
 .group-item-actions {
@@ -229,6 +244,26 @@ h3 {
   grid-template-columns: var(--left-col) var(--right-col);
   gap: 16px;
   align-items: center;
+  user-select: none;
+}
+
+.custom-grid-row[draggable="true"] {
+  cursor: grab;
+}
+
+.custom-grid-row.row-selected {
+  background: rgba(255, 255, 255, 0.08);
+  border-color: rgba(29, 185, 84, 0.28);
+  box-shadow: inset 0 0 0 1px rgba(29, 185, 84, 0.16);
+}
+
+.custom-grid-row.row-dragging {
+  opacity: 0.52;
+}
+
+.custom-grid-row.row-drop-target {
+  border-color: rgba(29, 185, 84, 0.52);
+  box-shadow: inset 0 0 0 1px rgba(29, 185, 84, 0.28);
 }
 
 .meta-grid {

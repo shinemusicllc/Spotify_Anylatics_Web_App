@@ -16,6 +16,7 @@ const CONFIG = {
     SEARCH_DEBOUNCE: 300,
 };
 const GROUP_STORAGE_KEY = 'spoticheck_custom_groups_v1';
+const ROW_ORDER_STORAGE_KEY = 'spoticheck_row_order_v1';
 const ALL_GROUP_ID = 'all';
 const ALL_GROUP_LABEL = 'All Links';
 const GROUP_SELECT_ALL = '__all__';
@@ -24,6 +25,12 @@ function getUserGroupStorageKey() {
     const user = getAuthUser();
     const userId = user?.id || 'anonymous';
     return `spoticheck_custom_groups_v1_${userId}`;
+}
+
+function getUserRowOrderStorageKey() {
+    const user = getAuthUser();
+    const userId = user?.id || 'anonymous';
+    return `${ROW_ORDER_STORAGE_KEY}_${userId}`;
 }
 
 // ===================================================================
@@ -123,6 +130,14 @@ const state = {
     adminUserList: [],
     adminUsersCacheTs: 0,
     adminUsersPromise: null,
+    selectedItemKeys: new Set(),
+    selectionAnchorKey: null,
+    draggingRowKeys: [],
+    dragOverRowKey: null,
+    draggingGroupId: null,
+    dragOverGroupId: null,
+    suppressNextGroupClick: false,
+    suppressNextRowClick: false,
 };
 
 // ═══════════════════════════════════════════════════════════════════
@@ -300,6 +315,52 @@ function itemKey(item) {
     return `${item?.type || ''}:${item?.spotify_id || ''}`;
 }
 
+function loadPersistedRowOrder() {
+    try {
+        const raw = localStorage.getItem(getUserRowOrderStorageKey());
+        const parsed = raw ? JSON.parse(raw) : [];
+        return Array.isArray(parsed) ? parsed.map(String).filter(Boolean) : [];
+    } catch {
+        return [];
+    }
+}
+
+function savePersistedRowOrder(keys) {
+    try {
+        localStorage.setItem(getUserRowOrderStorageKey(), JSON.stringify(Array.isArray(keys) ? keys : []));
+    } catch {
+        // Ignore storage failures.
+    }
+}
+
+function applyPersistedItemOrder(items) {
+    const list = Array.isArray(items) ? items.slice() : [];
+    const order = loadPersistedRowOrder();
+    if (!order.length) return list;
+
+    const indexByKey = new Map(order.map((key, idx) => [key, idx]));
+    return list.sort((a, b) => {
+        const aIdx = indexByKey.has(itemKey(a)) ? indexByKey.get(itemKey(a)) : Number.MAX_SAFE_INTEGER;
+        const bIdx = indexByKey.has(itemKey(b)) ? indexByKey.get(itemKey(b)) : Number.MAX_SAFE_INTEGER;
+        if (aIdx !== bIdx) return aIdx - bIdx;
+        return 0;
+    });
+}
+
+function persistCurrentItemOrder() {
+    savePersistedRowOrder(state.items.map((item) => itemKey(item)));
+}
+
+function syncSelectedItemsWithState() {
+    const existing = new Set(state.items.map((item) => itemKey(item)));
+    state.selectedItemKeys = new Set(
+        Array.from(state.selectedItemKeys).filter((key) => existing.has(key))
+    );
+    if (state.selectionAnchorKey && !existing.has(state.selectionAnchorKey)) {
+        state.selectionAnchorKey = null;
+    }
+}
+
 function mergeItemsKeepOrder(existingItems, incomingItems) {
     const existing = Array.isArray(existingItems) ? existingItems : [];
     const incoming = Array.isArray(incomingItems) ? incomingItems : [];
@@ -449,12 +510,140 @@ function updateGroupHeader() {
     if (pageTitle) pageTitle.textContent = name;
 }
 
+function clearRowSelection() {
+    state.selectedItemKeys = new Set();
+    state.selectionAnchorKey = null;
+}
+
+function getVisibleItems() {
+    let items = state.items;
+
+    if (state.activeGroup !== ALL_GROUP_ID) {
+        items = items.filter((i) => i.group === state.activeGroup);
+    }
+
+    if (state.searchQuery) {
+        const q = state.searchQuery.toLowerCase();
+        items = items.filter((i) =>
+            (i.name || '').toLowerCase().includes(q) ||
+            (i.owner_name || '').toLowerCase().includes(q) ||
+            (i.spotify_id || '').toLowerCase().includes(q) ||
+            (i.type || '').toLowerCase().includes(q)
+        );
+    }
+
+    return items;
+}
+
+function isInteractiveRowTarget(target) {
+    return Boolean(target?.closest('a, button, input, textarea, select, label, [role="button"]'));
+}
+
+function handleRowSelection(item, event) {
+    if (!item) return;
+    const key = itemKey(item);
+    const visibleKeys = state.filteredItems.map((it) => itemKey(it));
+
+    if (event.shiftKey && state.selectionAnchorKey && visibleKeys.includes(state.selectionAnchorKey)) {
+        const start = visibleKeys.indexOf(state.selectionAnchorKey);
+        const end = visibleKeys.indexOf(key);
+        if (start !== -1 && end !== -1) {
+            const [from, to] = start < end ? [start, end] : [end, start];
+            state.selectedItemKeys = new Set(visibleKeys.slice(from, to + 1));
+            renderList({ preserveScroll: true });
+            return;
+        }
+    }
+
+    if (event.ctrlKey || event.metaKey) {
+        const next = new Set(state.selectedItemKeys);
+        if (next.has(key)) next.delete(key);
+        else next.add(key);
+        state.selectedItemKeys = next;
+        state.selectionAnchorKey = key;
+        renderList({ preserveScroll: true });
+        return;
+    }
+
+    state.selectedItemKeys = new Set([key]);
+    state.selectionAnchorKey = key;
+    renderList({ preserveScroll: true });
+}
+
+function moveItemsByKeys(draggedKeys, targetKey) {
+    const draggedSet = new Set((draggedKeys || []).filter(Boolean));
+    if (!draggedSet.size || !targetKey || draggedSet.has(targetKey)) return false;
+
+    const draggedItems = state.items.filter((item) => draggedSet.has(itemKey(item)));
+    if (!draggedItems.length) return false;
+
+    const remaining = state.items.filter((item) => !draggedSet.has(itemKey(item)));
+    const targetIndex = remaining.findIndex((item) => itemKey(item) === targetKey);
+    if (targetIndex === -1) return false;
+
+    remaining.splice(targetIndex, 0, ...draggedItems);
+    state.items = remaining;
+    persistCurrentItemOrder();
+    return true;
+}
+
+function moveCustomGroupBefore(draggedGroupId, targetGroupId) {
+    const dragged = normalizeGroupName(draggedGroupId);
+    const target = normalizeGroupName(targetGroupId);
+    if (!dragged || !target || dragged === target) return false;
+    if (dragged.toLowerCase() === ALL_GROUP_ID || target.toLowerCase() === ALL_GROUP_ID) return false;
+
+    const current = Array.from(new Set((state.customGroups || []).map(normalizeGroupName).filter(Boolean)));
+    const next = current.slice();
+
+    if (!next.some((name) => name.toLowerCase() === dragged.toLowerCase())) {
+        next.push(dragged);
+    }
+    if (!next.some((name) => name.toLowerCase() === target.toLowerCase())) {
+        next.push(target);
+    }
+
+    const draggedIndex = next.findIndex((name) => name.toLowerCase() === dragged.toLowerCase());
+    const [draggedName] = next.splice(draggedIndex, 1);
+    const targetIndex = next.findIndex((name) => name.toLowerCase() === target.toLowerCase());
+    if (targetIndex === -1) return false;
+    next.splice(targetIndex, 0, draggedName);
+
+    state.customGroups = next;
+    saveCustomGroups();
+    return true;
+}
+
+function syncRowDragUi(container) {
+    const host = container || document.getElementById('link-list');
+    if (!host) return;
+    host.querySelectorAll('.custom-grid-row').forEach((row) => {
+        const key = row.dataset.itemKey;
+        row.classList.toggle('row-dragging', state.draggingRowKeys.includes(key));
+        row.classList.toggle('row-drop-target', Boolean(state.dragOverRowKey && state.dragOverRowKey === key && !state.draggingRowKeys.includes(key)));
+    });
+}
+
+function syncGroupDragUi(container) {
+    const host = container || document.getElementById('group-list');
+    if (!host) return;
+    host.querySelectorAll('.group-item[data-group]').forEach((groupBtn) => {
+        const groupId = normalizeGroupName(groupBtn.getAttribute('data-group'));
+        groupBtn.classList.toggle('group-item-dragging', Boolean(groupId && state.draggingGroupId === groupId));
+        groupBtn.classList.toggle('group-item-drop-target', Boolean(groupId && state.dragOverGroupId === groupId && state.draggingGroupId !== groupId));
+    });
+}
+
 function rebuildGroups() {
     const counts = new Map();
+    const encountered = [];
     for (const item of state.items) {
         const group = normalizeGroupName(item.group);
         if (!group) continue;
         if (group.toLowerCase() === ALL_GROUP_ID) continue;
+        if (!counts.has(group)) {
+            encountered.push(group);
+        }
         counts.set(group, (counts.get(group) || 0) + 1);
     }
 
@@ -470,18 +659,14 @@ function rebuildGroups() {
         namedGroups.push(name);
     };
 
-    // Show groups that already contain links first.
-    Array.from(counts.keys())
-        .sort((a, b) => a.localeCompare(b, 'vi'))
-        .forEach(pushUnique);
-
-    // Then append custom empty/user groups; newly created group stays at the bottom.
+    // Follow user-defined order first.
     (state.customGroups || []).forEach((rawName) => {
         const normalized = normalizeGroupName(rawName);
-        if (!normalized) return;
-        if (counts.has(normalized)) return;
         pushUnique(normalized);
     });
+
+    // Then append any groups discovered from data but not explicitly ordered yet.
+    encountered.forEach(pushUnique);
 
     // Keep currently-selected group visible even if empty.
     if (state.activeGroup !== ALL_GROUP_ID) {
@@ -516,12 +701,18 @@ function renderGroups() {
     const groupButtons = groups.map((g) => {
         const isActive = g.id === state.activeGroup;
         const canDelete = g.id !== ALL_GROUP_ID;
+        const isDragging = state.draggingGroupId === g.id;
+        const isDropTarget = state.dragOverGroupId === g.id && !isDragging;
         const isRenaming = Boolean(
             state.renamingGroupId
             && state.renamingGroupId.toLowerCase() === g.id.toLowerCase()
         );
         return `
-            <button class="group-item ${canDelete ? 'group-item-has-delete' : ''} w-full flex items-center justify-between px-3 py-3 rounded-lg transition-colors ${isActive ? 'bg-primary/10 text-white' : 'text-secondary-text hover:text-white hover:bg-white/5'}" data-group="${escapeHtml(g.id)}">
+            <button
+                class="group-item ${canDelete ? 'group-item-has-delete' : ''} ${isDragging ? 'group-item-dragging' : ''} ${isDropTarget ? 'group-item-drop-target' : ''} w-full flex items-center justify-between px-3 py-3 rounded-lg transition-colors ${isActive ? 'bg-primary/10 text-white' : 'text-secondary-text hover:text-white hover:bg-white/5'}"
+                data-group="${escapeHtml(g.id)}"
+                draggable="${canDelete ? 'true' : 'false'}"
+            >
                 <div class="flex items-center gap-3 min-w-0">
                     <span class="material-icons-round ${isActive ? 'text-primary' : 'text-secondary-text'} text-sm">folder</span>
                     ${isRenaming
@@ -975,6 +1166,10 @@ function renderRow(item) {
     const coverUrl = item.image || `https://picsum.photos/seed/${item.spotify_id}/128/128`;
     const checkedAt = item.last_checked || item.created_at || '';
     const updatedAt = formatUpdatedAt(checkedAt);
+    const key = itemKey(item);
+    const isSelected = state.selectedItemKeys.has(key);
+    const isDragging = state.draggingRowKeys.includes(key);
+    const isDropTarget = state.dragOverRowKey === key && !isDragging;
 
     // Owner / Artist display
     const ownerHtml = item.owner_image
@@ -982,10 +1177,12 @@ function renderRow(item) {
         : `<div class="list-owner-avatar list-owner-fallback">${(item.owner_name || '?').slice(0, 2).toUpperCase()}</div>`;
 
     const row = document.createElement('div');
-    row.className = 'custom-grid-row px-4 py-3 bg-white/5 rounded-lg border border-transparent hover:bg-row-hover hover:border-white/10 transition-all group';
+    row.className = `custom-grid-row px-4 py-3 bg-white/5 rounded-lg border border-transparent hover:bg-row-hover hover:border-white/10 transition-all group ${isSelected ? 'row-selected' : ''} ${isDragging ? 'row-dragging' : ''} ${isDropTarget ? 'row-drop-target' : ''}`;
     row.dataset.itemId = item.id;
     row.dataset.type = item.type;
     row.dataset.spotifyId = item.spotify_id;
+    row.dataset.itemKey = key;
+    row.draggable = true;
 
     row.innerHTML = `
         <!-- Left: Asset Details -->
@@ -1073,26 +1270,9 @@ function renderList(opts = {}) {
         });
     };
     syncGroupUI();
+    syncSelectedItemsWithState();
 
-    // Filter items
-    let items = state.items;
-
-    // Group filter
-    if (state.activeGroup !== ALL_GROUP_ID) {
-        items = items.filter(i => i.group === state.activeGroup);
-    }
-
-    // Search filter
-    if (state.searchQuery) {
-        const q = state.searchQuery.toLowerCase();
-        items = items.filter(i =>
-            (i.name || '').toLowerCase().includes(q) ||
-            (i.owner_name || '').toLowerCase().includes(q) ||
-            (i.spotify_id || '').toLowerCase().includes(q) ||
-            (i.type || '').toLowerCase().includes(q)
-        );
-    }
-
+    const items = getVisibleItems();
     state.filteredItems = items;
 
     // Clear previous rows (keep skeleton & empty state)
@@ -1210,7 +1390,12 @@ function closeImagePreview() {
 async function handleDeleteItem(item) {
     if (!item) return;
     const label = item.name || `${item.type}:${item.spotify_id}`;
+    state.selectedItemKeys.delete(itemKey(item));
+    if (state.selectionAnchorKey === itemKey(item)) {
+        state.selectionAnchorKey = null;
+    }
     state.items = state.items.filter((i) => i.id !== item.id);
+    persistCurrentItemOrder();
     state.pendingJobs.delete(item.id);
     for (const [jobId, itemId] of state.pendingJobToItem.entries()) {
         if (itemId === item.id || jobId === item.id) {
@@ -1286,6 +1471,8 @@ async function clearList() {
 
     state.items = [];
     state.filteredItems = [];
+    clearRowSelection();
+    savePersistedRowOrder([]);
     state.pendingJobs.clear();
     state.pendingJobToItem.clear();
     stopPolling();
@@ -1302,9 +1489,12 @@ async function clearList() {
 }
 
 async function refreshAllItems() {
-    const targetItems = state.activeGroup === ALL_GROUP_ID
-        ? state.items
-        : state.items.filter((i) => i.group === state.activeGroup);
+    const selectedVisibleItems = state.filteredItems.filter((item) => state.selectedItemKeys.has(itemKey(item)));
+    const targetItems = selectedVisibleItems.length > 0
+        ? selectedVisibleItems
+        : (state.activeGroup === ALL_GROUP_ID
+            ? state.items
+            : state.items.filter((i) => i.group === state.activeGroup));
 
     if (targetItems.length === 0) {
         showToast('No links to refresh', 'info');
@@ -1345,7 +1535,8 @@ async function refreshAllItems() {
         };
         startPolling();
         renderList({ preserveScroll: true });
-        showToast(`Refresh started for ${result.count || urls.length} links`, 'success');
+        const scopeLabel = selectedVisibleItems.length > 0 ? 'selected links' : 'links';
+        showToast(`Refresh started for ${result.count || urls.length} ${scopeLabel}`, 'success');
     } catch (e) {
         state.batchRefresh = null;
         await loadData({ preserveScroll: true });
@@ -1438,6 +1629,7 @@ async function submitSingle() {
             };
             state.items.unshift(newItem);
             state.pendingJobToItem.set(jobId, newItem.id);
+            persistCurrentItemOrder();
         }
 
         state.pendingJobs.add(jobId);
@@ -1506,6 +1698,7 @@ async function submitBatch() {
                 };
                 state.items.unshift(newItem);
                 state.pendingJobToItem.set(jobId, newItem.id);
+                persistCurrentItemOrder();
             }
 
             state.pendingJobs.add(jobId);
@@ -1812,6 +2005,7 @@ async function setupAdminUserFilter() {
         selected: '',
         onChange: function(val) {
             state.adminFilterUserId = val || null;
+            clearRowSelection();
             var pageTitle = document.getElementById('page-title');
             var breadcrumb = document.getElementById('breadcrumb-group');
             if (val) {
@@ -1870,7 +2064,9 @@ async function loadData(opts = {}) {
         const data = await api.getItems(params);
         if (!data) return;
         const incoming = data.items || data || [];
-        state.items = mergeItemsKeepOrder(state.items, incoming);
+        state.items = applyPersistedItemOrder(mergeItemsKeepOrder(state.items, incoming));
+        persistCurrentItemOrder();
+        syncSelectedItemsWithState();
         syncGroupUI(true);
         if (skeleton) skeleton.style.display = 'none';
         renderList({ preserveScroll });
@@ -1880,8 +2076,10 @@ async function loadData(opts = {}) {
         if (getAuthToken()) {
             state.items = [];
         } else {
-            state.items = getDemoData();
+            state.items = applyPersistedItemOrder(getDemoData());
         }
+        persistCurrentItemOrder();
+        syncSelectedItemsWithState();
         syncGroupUI(true);
         renderList({ preserveScroll });
     }
@@ -2753,6 +2951,10 @@ document.addEventListener('DOMContentLoaded', () => {
             }
             if (e.target.closest('[data-role="rename-group-input"]')) return;
             if (!groupBtn) return;
+            if (state.suppressNextGroupClick) {
+                state.suppressNextGroupClick = false;
+                return;
+            }
             if (state.renamingGroupId) return;
             const groupId = normalizeGroupName(groupBtn.getAttribute('data-group')) || ALL_GROUP_ID;
             const currentGroupId = normalizeGroupName(state.activeGroup) || ALL_GROUP_ID;
@@ -2762,6 +2964,7 @@ document.addEventListener('DOMContentLoaded', () => {
             }
             state.activeGroup = groupId;
             state.isCreatingGroup = false;
+            clearRowSelection();
             // If currently on Settings or Users tab, navigate back to Link Checker
             if (state.currentView !== 'linkchecker') {
                 switchToView('linkchecker');
@@ -2812,6 +3015,62 @@ document.addEventListener('DOMContentLoaded', () => {
             }
             handleRenameGroup(renameInput.getAttribute('data-group-id'), renameInput.value, { onBlur: true });
         });
+        groupList.addEventListener('dragstart', (e) => {
+            const groupBtn = e.target.closest('[data-group][draggable="true"]');
+            if (!groupBtn || e.target.closest('[data-action="delete-group"], [data-role="rename-group-input"]')) {
+                e.preventDefault();
+                return;
+            }
+            const groupId = normalizeGroupName(groupBtn.getAttribute('data-group'));
+            if (!groupId || groupId.toLowerCase() === ALL_GROUP_ID) {
+                e.preventDefault();
+                return;
+            }
+            state.draggingGroupId = groupId;
+            state.dragOverGroupId = groupId;
+            state.suppressNextGroupClick = true;
+            if (e.dataTransfer) {
+                e.dataTransfer.effectAllowed = 'move';
+                e.dataTransfer.setData('text/plain', groupId);
+            }
+            syncGroupDragUi(groupList);
+        });
+        groupList.addEventListener('dragover', (e) => {
+            const groupBtn = e.target.closest('[data-group]');
+            if (!groupBtn || !state.draggingGroupId) return;
+            const targetGroupId = normalizeGroupName(groupBtn.getAttribute('data-group'));
+            if (!targetGroupId || targetGroupId === state.dragOverGroupId) return;
+            if (targetGroupId.toLowerCase() === ALL_GROUP_ID) return;
+            e.preventDefault();
+            state.dragOverGroupId = targetGroupId;
+            syncGroupDragUi(groupList);
+        });
+        groupList.addEventListener('drop', (e) => {
+            const groupBtn = e.target.closest('[data-group]');
+            if (!groupBtn || !state.draggingGroupId) return;
+            e.preventDefault();
+            const targetGroupId = normalizeGroupName(groupBtn.getAttribute('data-group'));
+            const moved = moveCustomGroupBefore(state.draggingGroupId, targetGroupId);
+            state.draggingGroupId = null;
+            state.dragOverGroupId = null;
+            rebuildGroups();
+            renderGroups();
+            if (moved) {
+                showToast('Group order updated', 'success');
+            }
+            window.setTimeout(() => {
+                state.suppressNextGroupClick = false;
+            }, 0);
+        });
+        groupList.addEventListener('dragend', () => {
+            if (!state.draggingGroupId && !state.dragOverGroupId) return;
+            state.draggingGroupId = null;
+            state.dragOverGroupId = null;
+            syncGroupDragUi(groupList);
+            window.setTimeout(() => {
+                state.suppressNextGroupClick = false;
+            }, 0);
+        });
     }
 
     // Refresh/Clear fallback binding (skip when inline onclick exists)
@@ -2844,11 +3103,24 @@ document.addEventListener('DOMContentLoaded', () => {
                 openImagePreview(previewBtn.getAttribute('data-image-url'));
                 return;
             }
-            if (!btn && !refreshBtn) return;
+            const row = (btn || refreshBtn || e.target.closest('.custom-grid-row'));
+            if (!row) return;
+            if (!btn && !refreshBtn) {
+                if (state.suppressNextRowClick) {
+                    state.suppressNextRowClick = false;
+                    return;
+                }
+                if (isInteractiveRowTarget(e.target)) return;
+                const item = state.items.find((i) =>
+                    String(i.id) === String(row.dataset.itemId)
+                    || (i.type === row.dataset.type && i.spotify_id === row.dataset.spotifyId)
+                );
+                if (!item) return;
+                handleRowSelection(item, e);
+                return;
+            }
             e.preventDefault();
             e.stopPropagation();
-            const row = (btn || refreshBtn).closest('.custom-grid-row');
-            if (!row) return;
             const item = state.items.find((i) =>
                 String(i.id) === String(row.dataset.itemId)
                 || (i.type === row.dataset.type && i.spotify_id === row.dataset.spotifyId)
@@ -2859,6 +3131,58 @@ document.addEventListener('DOMContentLoaded', () => {
             } else if (refreshBtn) {
                 handleRefreshItem(item);
             }
+        });
+        listElForDelete.addEventListener('dragstart', (e) => {
+            const row = e.target.closest('.custom-grid-row');
+            if (!row || isInteractiveRowTarget(e.target)) {
+                e.preventDefault();
+                return;
+            }
+            const draggedKey = row.dataset.itemKey;
+            const selectedKeys = state.selectedItemKeys.has(draggedKey)
+                ? state.filteredItems.map((item) => itemKey(item)).filter((key) => state.selectedItemKeys.has(key))
+                : [draggedKey];
+            state.draggingRowKeys = selectedKeys;
+            state.dragOverRowKey = draggedKey;
+            state.suppressNextRowClick = true;
+            if (e.dataTransfer) {
+                e.dataTransfer.effectAllowed = 'move';
+                e.dataTransfer.setData('text/plain', draggedKey);
+            }
+            syncRowDragUi(listElForDelete);
+        });
+        listElForDelete.addEventListener('dragover', (e) => {
+            const row = e.target.closest('.custom-grid-row');
+            if (!row || !state.draggingRowKeys.length) return;
+            const targetKey = row.dataset.itemKey;
+            if (!targetKey || targetKey === state.dragOverRowKey) return;
+            e.preventDefault();
+            state.dragOverRowKey = targetKey;
+            syncRowDragUi(listElForDelete);
+        });
+        listElForDelete.addEventListener('drop', (e) => {
+            const row = e.target.closest('.custom-grid-row');
+            if (!row || !state.draggingRowKeys.length) return;
+            e.preventDefault();
+            const moved = moveItemsByKeys(state.draggingRowKeys, row.dataset.itemKey);
+            state.draggingRowKeys = [];
+            state.dragOverRowKey = null;
+            renderList({ preserveScroll: true });
+            if (moved) {
+                showToast('Row order updated', 'success');
+            }
+            window.setTimeout(() => {
+                state.suppressNextRowClick = false;
+            }, 0);
+        });
+        listElForDelete.addEventListener('dragend', () => {
+            if (!state.draggingRowKeys.length && !state.dragOverRowKey) return;
+            state.draggingRowKeys = [];
+            state.dragOverRowKey = null;
+            syncRowDragUi(listElForDelete);
+            window.setTimeout(() => {
+                state.suppressNextRowClick = false;
+            }, 0);
         });
     }
 
