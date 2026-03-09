@@ -170,13 +170,14 @@ h3 {
 }
 
 .group-item-dragging {
-  opacity: 0.94;
+  opacity: 1;
   background: linear-gradient(180deg, rgba(255,255,255,0.14), rgba(255,255,255,0.07));
   border-color: rgba(255,255,255,0.16);
   box-shadow:
     inset 0 0 0 1px rgba(255,255,255,0.05),
     0 14px 28px rgba(0,0,0,0.28),
     0 0 0 1px rgba(39,214,107,0.08);
+  transform: translateY(-2px);
 }
 
 .group-item-drop-target {
@@ -307,7 +308,7 @@ h3 {
 }
 
 .custom-grid-row.row-dragging {
-  opacity: 0.92;
+  opacity: 1;
   background:
     linear-gradient(180deg, rgba(255, 255, 255, 0.12), rgba(255, 255, 255, 0.06)),
     rgba(20, 22, 24, 0.96) !important;
@@ -316,6 +317,7 @@ h3 {
     inset 0 0 0 1px rgba(255,255,255,0.05),
     0 12px 28px rgba(0,0,0,0.26),
     0 0 0 1px rgba(39,214,107,0.06) !important;
+  transform: translateY(-2px);
 }
 
 .drag-preview-root {

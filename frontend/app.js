@@ -710,93 +710,150 @@ function updateDragAutoScroll(container, clientY) {
 }
 
 function destroyDragPreview() {
-    if (state.dragPreviewEl?.parentNode) {
-        state.dragPreviewEl.parentNode.removeChild(state.dragPreviewEl);
-    }
+    // Canvas drag images do not live in DOM, keep as no-op for existing hooks.
     state.dragPreviewEl = null;
 }
 
-function mountDragPreview(previewEl) {
-    destroyDragPreview();
-    previewEl.classList.add('drag-preview-root');
-    previewEl.setAttribute('aria-hidden', 'true');
-    document.body.appendChild(previewEl);
-    state.dragPreviewEl = previewEl;
-    return previewEl;
+function createDragCanvas(width, height) {
+    const dpr = Math.max(1, window.devicePixelRatio || 1);
+    const canvas = document.createElement('canvas');
+    canvas.width = Math.floor(width * dpr);
+    canvas.height = Math.floor(height * dpr);
+    const ctx = canvas.getContext('2d');
+    ctx.scale(dpr, dpr);
+    return { canvas, ctx };
 }
 
-function createDragPreviewCard({ image, icon, title, subtitle, badge, offset = 0 }) {
-    const card = document.createElement('div');
-    card.className = 'drag-preview-card';
-    card.style.transform = `translate(${offset * 8}px, ${offset * 7}px) scale(${1 - offset * 0.03})`;
-    card.style.zIndex = String(30 - offset);
-    card.innerHTML = `
-        <div class="drag-preview-cover-wrap">
-            ${image
-                ? `<img src="${escapeHtml(image)}" alt="" class="drag-preview-cover">`
-                : `<div class="drag-preview-icon-wrap"><span class="material-icons-round drag-preview-icon">${escapeHtml(icon || 'folder')}</span></div>`}
-        </div>
-        <div class="drag-preview-text">
-            ${badge ? `<div class="drag-preview-badge">${escapeHtml(badge)}</div>` : ''}
-            <div class="drag-preview-title">${escapeHtml(title || 'Untitled')}</div>
-            ${subtitle ? `<div class="drag-preview-subtitle">${escapeHtml(subtitle)}</div>` : ''}
-        </div>
-    `;
-    return card;
+function drawRoundedRect(ctx, x, y, w, h, r, fill, stroke) {
+    ctx.beginPath();
+    ctx.moveTo(x + r, y);
+    ctx.arcTo(x + w, y, x + w, y + h, r);
+    ctx.arcTo(x + w, y + h, x, y + h, r);
+    ctx.arcTo(x, y + h, x, y, r);
+    ctx.arcTo(x, y, x + w, y, r);
+    ctx.closePath();
+    if (fill) {
+        ctx.fillStyle = fill;
+        ctx.fill();
+    }
+    if (stroke) {
+        ctx.strokeStyle = stroke;
+        ctx.lineWidth = 1;
+        ctx.stroke();
+    }
+}
+
+function ellipsize(text, maxLen) {
+    const raw = String(text || '').trim();
+    if (raw.length <= maxLen) return raw;
+    return `${raw.slice(0, Math.max(0, maxLen - 1))}…`;
+}
+
+function drawDragCard(ctx, opts) {
+    const {
+        x, y, w, h, title, subtitle, badge, stackOffset = 0, accent = '#27d66b',
+    } = opts;
+    const shadowY = 10 + stackOffset * 2;
+    ctx.save();
+    ctx.shadowColor = 'rgba(0,0,0,0.45)';
+    ctx.shadowBlur = 18;
+    ctx.shadowOffsetY = shadowY;
+    drawRoundedRect(ctx, x, y, w, h, 14, 'rgba(12,13,16,0.98)', 'rgba(255,255,255,0.16)');
+    ctx.restore();
+
+    drawRoundedRect(ctx, x + 8, y + 8, 4, h - 16, 2, accent, null);
+    drawRoundedRect(ctx, x + 18, y + 18, 36, 36, 9, 'rgba(30,32,36,1)', 'rgba(255,255,255,0.12)');
+    ctx.fillStyle = '#27d66b';
+    ctx.font = '700 12px Inter, sans-serif';
+    if (badge) ctx.fillText(String(badge).slice(0, 8), x + 65, y + 26);
+
+    ctx.fillStyle = '#ffffff';
+    ctx.font = '700 16px Inter, sans-serif';
+    ctx.fillText(ellipsize(title || 'Untitled', 34), x + 65, y + 47);
+    if (subtitle) {
+        ctx.fillStyle = 'rgba(255,255,255,0.75)';
+        ctx.font = '500 12px Inter, sans-serif';
+        ctx.fillText(ellipsize(subtitle, 44), x + 65, y + 64);
+    }
+}
+
+function drawCountBubble(ctx, x, y, count) {
+    drawRoundedRect(ctx, x, y, 32, 24, 12, '#27d66b', null);
+    ctx.fillStyle = '#031108';
+    ctx.font = '800 12px Inter, sans-serif';
+    ctx.fillText(String(count), x + 10, y + 16);
+}
+
+function buildRowDragCanvas(draggedItems) {
+    const isMulti = draggedItems.length > 1;
+    const width = 340;
+    const height = 88;
+    const { canvas, ctx } = createDragCanvas(width, height);
+    ctx.clearRect(0, 0, width, height);
+
+    if (isMulti) {
+        drawDragCard(ctx, {
+            x: 16, y: 12, w: 292, h: 68, title: draggedItems[0]?.name || 'Item',
+            subtitle: draggedItems[0]?.owner_name || '', badge: draggedItems[0]?.type || '',
+            stackOffset: 2, accent: '#1db954',
+        });
+        drawDragCard(ctx, {
+            x: 10, y: 8, w: 292, h: 68, title: draggedItems[1]?.name || 'Item',
+            subtitle: draggedItems[1]?.owner_name || '', badge: draggedItems[1]?.type || '',
+            stackOffset: 1, accent: '#1db954',
+        });
+    }
+    const topItem = draggedItems[0];
+    drawDragCard(ctx, {
+        x: 4, y: 4, w: 292, h: 68, title: topItem?.name || 'Item',
+        subtitle: topItem?.owner_name || topItem?.spotify_id || '',
+        badge: topItem?.type ? String(topItem.type).toUpperCase() : '',
+        stackOffset: 0, accent: '#27d66b',
+    });
+    if (isMulti) {
+        drawCountBubble(ctx, 272, -2, draggedItems.length);
+    }
+    return canvas;
+}
+
+function buildGroupDragCanvas(group) {
+    const width = 268;
+    const height = 94;
+    const { canvas, ctx } = createDragCanvas(width, height);
+    ctx.clearRect(0, 0, width, height);
+
+    // Windows-like stacked files/folder feel.
+    drawRoundedRect(ctx, 26, 20, 196, 56, 12, 'rgba(14,15,18,0.95)', 'rgba(255,255,255,0.12)');
+    drawRoundedRect(ctx, 18, 12, 196, 56, 12, 'rgba(14,15,18,0.97)', 'rgba(255,255,255,0.14)');
+    drawRoundedRect(ctx, 10, 4, 196, 56, 12, 'rgba(12,13,16,1)', 'rgba(255,255,255,0.18)');
+    drawRoundedRect(ctx, 22, 18, 30, 26, 6, 'rgba(39,214,107,0.18)', 'rgba(39,214,107,0.35)');
+    ctx.fillStyle = '#27d66b';
+    ctx.font = '700 12px Inter, sans-serif';
+    ctx.fillText('GROUP', 62, 23);
+    ctx.fillStyle = '#ffffff';
+    ctx.font = '700 15px Inter, sans-serif';
+    ctx.fillText(ellipsize(group.name || 'Group', 24), 62, 42);
+    ctx.fillStyle = 'rgba(255,255,255,0.74)';
+    ctx.font = '500 12px Inter, sans-serif';
+    ctx.fillText(`${group.count || 0} links`, 62, 57);
+    drawCountBubble(ctx, 180, 0, Math.max(1, Number(group.count) || 1));
+    return canvas;
 }
 
 function setRowDragPreview(event, draggedKeys) {
     if (!event.dataTransfer || !draggedKeys?.length) return;
     const draggedItems = state.filteredItems.filter((item) => draggedKeys.includes(itemKey(item)));
     if (!draggedItems.length) return;
-
-    const preview = document.createElement('div');
-    const isMulti = draggedItems.length > 1;
-    preview.className = `drag-preview drag-preview-rows ${isMulti ? 'drag-preview-multi' : ''}`;
-    preview.style.width = isMulti ? '292px' : '268px';
-    preview.style.minHeight = isMulti ? '78px' : '70px';
-
-    const cards = draggedItems.slice(0, 3);
-    cards.reverse().forEach((item, index) => {
-        preview.appendChild(createDragPreviewCard({
-            image: item.image,
-            title: item.name || 'Unknown',
-            subtitle: item.owner_name || item.spotify_id || '',
-            badge: item.type ? String(item.type).toUpperCase() : '',
-            offset: index,
-        }));
-    });
-
-    if (draggedItems.length > 1) {
-        const count = document.createElement('div');
-        count.className = 'drag-preview-count';
-        count.textContent = `${draggedItems.length}`;
-        preview.appendChild(count);
-    }
-
-    mountDragPreview(preview);
-    event.dataTransfer.setDragImage(preview, 40, 24);
+    const canvas = buildRowDragCanvas(draggedItems);
+    event.dataTransfer.setDragImage(canvas, 36, 20);
 }
 
 function setGroupDragPreview(event, groupId) {
     if (!event.dataTransfer || !groupId) return;
     const group = state.groups.find((g) => normalizeGroupName(g.id) === normalizeGroupName(groupId));
     if (!group) return;
-
-    const preview = document.createElement('div');
-    preview.className = 'drag-preview drag-preview-group';
-    preview.style.width = '232px';
-    preview.style.minHeight = '66px';
-    preview.appendChild(createDragPreviewCard({
-        icon: 'folder',
-        title: group.name,
-        subtitle: `${group.count || 0} links`,
-        badge: 'GROUP',
-        offset: 0,
-    }));
-
-    mountDragPreview(preview);
-    event.dataTransfer.setDragImage(preview, 26, 18);
+    const canvas = buildGroupDragCanvas(group);
+    event.dataTransfer.setDragImage(canvas, 24, 16);
 }
 
 function rebuildGroups() {
