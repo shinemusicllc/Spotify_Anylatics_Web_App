@@ -710,13 +710,22 @@ function updateDragAutoScroll(container, clientY) {
 }
 
 function destroyDragPreview() {
-    // Canvas drag images do not live in DOM, keep as no-op for existing hooks.
+    if (state.dragPreviewEl?.parentNode) {
+        state.dragPreviewEl.parentNode.removeChild(state.dragPreviewEl);
+    }
     state.dragPreviewEl = null;
 }
 
 function createDragCanvas(width, height) {
     const dpr = Math.max(1, window.devicePixelRatio || 1);
     const canvas = document.createElement('canvas');
+    destroyDragPreview();
+    canvas.className = 'drag-preview-root';
+    canvas.setAttribute('aria-hidden', 'true');
+    canvas.style.width = `${width}px`;
+    canvas.style.height = `${height}px`;
+    document.body.appendChild(canvas);
+    state.dragPreviewEl = canvas;
     canvas.width = Math.floor(width * dpr);
     canvas.height = Math.floor(height * dpr);
     const ctx = canvas.getContext('2d');
@@ -785,58 +794,43 @@ function drawCountBubble(ctx, x, y, count) {
 }
 
 function buildRowDragCanvas(draggedItems) {
-    const isMulti = draggedItems.length > 1;
-    const width = 340;
-    const height = 88;
+    const width = 318;
+    const height = 78;
     const { canvas, ctx } = createDragCanvas(width, height);
     ctx.clearRect(0, 0, width, height);
-
-    if (isMulti) {
-        drawDragCard(ctx, {
-            x: 16, y: 12, w: 292, h: 68, title: draggedItems[0]?.name || 'Item',
-            subtitle: draggedItems[0]?.owner_name || '', badge: draggedItems[0]?.type || '',
-            stackOffset: 2, accent: '#1db954',
-        });
-        drawDragCard(ctx, {
-            x: 10, y: 8, w: 292, h: 68, title: draggedItems[1]?.name || 'Item',
-            subtitle: draggedItems[1]?.owner_name || '', badge: draggedItems[1]?.type || '',
-            stackOffset: 1, accent: '#1db954',
-        });
-    }
+    ctx.globalAlpha = 0.84;
     const topItem = draggedItems[0];
     drawDragCard(ctx, {
-        x: 4, y: 4, w: 292, h: 68, title: topItem?.name || 'Item',
+        x: 6, y: 5, w: 292, h: 62, title: topItem?.name || 'Item',
         subtitle: topItem?.owner_name || topItem?.spotify_id || '',
         badge: topItem?.type ? String(topItem.type).toUpperCase() : '',
         stackOffset: 0, accent: '#27d66b',
     });
-    if (isMulti) {
-        drawCountBubble(ctx, 272, -2, draggedItems.length);
-    }
+    ctx.globalAlpha = 1;
     return canvas;
 }
 
 function buildGroupDragCanvas(group) {
-    const width = 268;
-    const height = 94;
+    const width = 252;
+    const height = 88;
     const { canvas, ctx } = createDragCanvas(width, height);
     ctx.clearRect(0, 0, width, height);
 
     // Windows-like stacked files/folder feel.
-    drawRoundedRect(ctx, 26, 20, 196, 56, 12, 'rgba(14,15,18,0.95)', 'rgba(255,255,255,0.12)');
-    drawRoundedRect(ctx, 18, 12, 196, 56, 12, 'rgba(14,15,18,0.97)', 'rgba(255,255,255,0.14)');
-    drawRoundedRect(ctx, 10, 4, 196, 56, 12, 'rgba(12,13,16,1)', 'rgba(255,255,255,0.18)');
-    drawRoundedRect(ctx, 22, 18, 30, 26, 6, 'rgba(39,214,107,0.18)', 'rgba(39,214,107,0.35)');
+    drawRoundedRect(ctx, 24, 18, 184, 54, 11, 'rgba(14,15,18,0.84)', 'rgba(255,255,255,0.10)');
+    drawRoundedRect(ctx, 16, 10, 184, 54, 11, 'rgba(14,15,18,0.92)', 'rgba(255,255,255,0.13)');
+    drawRoundedRect(ctx, 8, 2, 184, 54, 11, 'rgba(12,13,16,0.98)', 'rgba(255,255,255,0.16)');
+    drawRoundedRect(ctx, 18, 14, 28, 22, 6, 'rgba(39,214,107,0.16)', 'rgba(39,214,107,0.28)');
     ctx.fillStyle = '#27d66b';
-    ctx.font = '700 12px Inter, sans-serif';
-    ctx.fillText('GROUP', 62, 23);
+    ctx.font = '700 11px Inter, sans-serif';
+    ctx.fillText('GROUP', 54, 22);
     ctx.fillStyle = '#ffffff';
-    ctx.font = '700 15px Inter, sans-serif';
-    ctx.fillText(ellipsize(group.name || 'Group', 24), 62, 42);
+    ctx.font = '700 14px Inter, sans-serif';
+    ctx.fillText(ellipsize(group.name || 'Group', 22), 54, 40);
     ctx.fillStyle = 'rgba(255,255,255,0.74)';
-    ctx.font = '500 12px Inter, sans-serif';
-    ctx.fillText(`${group.count || 0} links`, 62, 57);
-    drawCountBubble(ctx, 180, 0, Math.max(1, Number(group.count) || 1));
+    ctx.font = '500 11px Inter, sans-serif';
+    ctx.fillText(`${group.count || 0} links`, 54, 54);
+    drawCountBubble(ctx, 162, 0, Math.max(1, Number(group.count) || 1));
     return canvas;
 }
 
