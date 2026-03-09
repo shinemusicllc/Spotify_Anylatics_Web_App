@@ -268,7 +268,6 @@ h3 {
   border-color: rgba(39, 214, 107, 0.56) !important;
   border-radius: 14px !important;
   box-shadow:
-    inset 3px 0 0 0 rgba(39, 214, 107, 0.98),
     inset 0 0 0 1px rgba(39, 214, 107, 0.28),
     0 14px 32px rgba(0, 0, 0, 0.24),
     0 0 0 1px rgba(255, 255, 255, 0.05) !important;
@@ -282,11 +281,23 @@ h3 {
   border-color: rgba(39, 214, 107, 0.58) !important;
   border-radius: 14px !important;
   box-shadow:
-    inset 3px 0 0 0 rgba(39, 214, 107, 0.98),
     inset 0 0 0 1px rgba(39, 214, 107, 0.3),
     0 16px 34px rgba(0, 0, 0, 0.26),
     0 0 0 1px rgba(255, 255, 255, 0.06) !important;
   overflow: hidden;
+}
+
+.custom-grid-row.row-selected::before {
+  content: "";
+  position: absolute;
+  left: 0;
+  top: 4px;
+  bottom: 4px;
+  width: 3px;
+  border-radius: 9999px;
+  background: rgba(39, 214, 107, 0.98);
+  box-shadow: 0 0 12px rgba(39, 214, 107, 0.22);
+  pointer-events: none;
 }
 
 .custom-grid-row.row-dragging {
