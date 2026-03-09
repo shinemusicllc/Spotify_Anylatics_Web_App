@@ -275,16 +275,16 @@
                     <div class="space-y-4">
                         <div>
                             <label class="block text-[13px] font-semibold text-secondary-text mb-2">Username</label>
-                            <input id="settings-username" type="text" class="settings-input" disabled style="opacity:0.5;cursor:not-allowed">
+                            <input id="settings-username" type="text" class="settings-input" disabled autocomplete="off" style="opacity:0.5;cursor:not-allowed">
                             <p class="text-xs text-secondary-text mt-1">Username cannot be changed</p>
                         </div>
                         <div>
                             <label class="block text-[13px] font-semibold text-secondary-text mb-2">Display Name</label>
-                            <input id="settings-displayname" type="text" class="settings-input" placeholder="Your display name">
+                            <input id="settings-displayname" type="text" class="settings-input" placeholder="Your display name" autocomplete="off" data-lpignore="true" data-1p-ignore="true">
                         </div>
                         <div>
                             <label class="block text-[13px] font-semibold text-secondary-text mb-2">Email</label>
-                            <input id="settings-email" type="email" class="settings-input" placeholder="your@email.com">
+                            <input id="settings-email" type="email" class="settings-input" placeholder="your@email.com" autocomplete="off" data-lpignore="true" data-1p-ignore="true">
                         </div>
                         <div class="pt-2">
                             <button id="settings-save-profile" class="btn-accent inline-flex items-center gap-2 px-6 py-2.5 rounded-full text-sm font-bold cursor-pointer">
@@ -302,15 +302,15 @@
                     <div class="space-y-4">
                         <div>
                             <label class="block text-[13px] font-semibold text-secondary-text mb-2">Current Password</label>
-                            <input id="settings-current-pw" type="password" class="settings-input" placeholder="Enter current password">
+                            <input id="settings-current-pw" type="password" class="settings-input" placeholder="Enter current password" autocomplete="off" data-lpignore="true" data-1p-ignore="true">
                         </div>
                         <div>
                             <label class="block text-[13px] font-semibold text-secondary-text mb-2">New Password</label>
-                            <input id="settings-new-pw" type="password" class="settings-input" placeholder="Enter new password">
+                            <input id="settings-new-pw" type="password" class="settings-input" placeholder="Enter new password" autocomplete="new-password" data-lpignore="true" data-1p-ignore="true">
                         </div>
                         <div>
                             <label class="block text-[13px] font-semibold text-secondary-text mb-2">Confirm New Password</label>
-                            <input id="settings-confirm-pw" type="password" class="settings-input" placeholder="Confirm new password">
+                            <input id="settings-confirm-pw" type="password" class="settings-input" placeholder="Confirm new password" autocomplete="new-password" data-lpignore="true" data-1p-ignore="true">
                         </div>
                         <div class="pt-2">
                             <button id="settings-change-pw" class="btn-ghost inline-flex items-center gap-2 px-6 py-2.5 rounded-full border border-white/20 text-sm font-bold cursor-pointer">
@@ -425,15 +425,15 @@
                 <div class="space-y-4">
                     <div>
                         <label class="block text-[13px] font-semibold text-secondary-text mb-2">Username</label>
-                        <input id="admin-edit-username" type="text" class="settings-input" disabled style="opacity:0.5;cursor:not-allowed">
+                        <input id="admin-edit-username" type="text" class="settings-input" disabled autocomplete="off" style="opacity:0.5;cursor:not-allowed">
                     </div>
                     <div>
                         <label class="block text-[13px] font-semibold text-secondary-text mb-2">Display Name</label>
-                        <input id="admin-edit-displayname" type="text" class="settings-input" placeholder="Display name">
+                        <input id="admin-edit-displayname" type="text" class="settings-input" placeholder="Display name" autocomplete="off" data-lpignore="true" data-1p-ignore="true">
                     </div>
                     <div>
                         <label class="block text-[13px] font-semibold text-secondary-text mb-2">Email</label>
-                        <input id="admin-edit-email" type="email" class="settings-input" placeholder="Email">
+                        <input id="admin-edit-email" type="email" class="settings-input" placeholder="Email" autocomplete="off" data-lpignore="true" data-1p-ignore="true">
                     </div>
                     <div>
                         <label class="block text-[13px] font-semibold text-secondary-text mb-2">Role</label>
@@ -462,7 +462,7 @@
                 <div class="space-y-4">
                     <div>
                         <label class="block text-[13px] font-semibold text-secondary-text mb-2">New Password</label>
-                        <input id="admin-pw-new" type="text" class="settings-input" placeholder="Enter new password">
+                        <input id="admin-pw-new" type="password" class="settings-input" placeholder="Enter new password" autocomplete="new-password" data-lpignore="true" data-1p-ignore="true">
                     </div>
                     <div class="pt-2 flex gap-3">
                         <button onclick="closeAdminPwModal()" class="flex-1 btn-ghost px-4 py-3 rounded-xl border border-white/20 text-sm font-bold cursor-pointer">Cancel</button>
@@ -473,6 +473,6 @@
             </div>
         </div>
 
-    <script src="app.js?v=20260309-12"></script>
+    <script src="app.js?v=20260309-13"></script>
 </body>
 </html>

@@ -96,6 +96,7 @@ function setupAuthUI() {
             const settingsNav = document.getElementById('nav-settings');
             if (settingsNav) nav.insertBefore(usersLink, settingsNav);
         }
+        prefetchAdminUsers();
     }
 }
 
@@ -120,6 +121,8 @@ const state = {
     apiOnline: false,
     adminFilterUserId: null,
     adminUserList: [],
+    adminUsersCacheTs: 0,
+    adminUsersPromise: null,
 };
 
 // ═══════════════════════════════════════════════════════════════════
@@ -1760,6 +1763,8 @@ async function setupAdminUserFilter() {
         if (!res.ok) return;
         const users = await res.json();
         state.adminUserList = Array.isArray(users) ? users : (users.users || []);
+        _adminUsersCache = state.adminUserList.slice();
+        state.adminUsersCacheTs = Date.now();
     } catch {
         return;
     }
@@ -1965,7 +1970,10 @@ function switchToView(view) {
         setElementDisplay(listWrap, null);
         if (breadcrumbParent) breadcrumbParent.textContent = 'Link Checker';
         updateGroupHeader();
-        loadData();
+        if (state.items.length > 0) {
+            renderList({ preserveScroll: true });
+        }
+        loadData({ preserveScroll: true });
     } else if (view === 'settings') {
         setElementDisplay(settingsPanel, 'block');
         if (breadcrumbParent) breadcrumbParent.textContent = 'Account';
@@ -1977,7 +1985,7 @@ function switchToView(view) {
         if (breadcrumbParent) breadcrumbParent.textContent = 'Admin';
         if (breadcrumb) breadcrumb.textContent = 'Users';
         if (pageTitle) pageTitle.textContent = 'User Management';
-        loadAdminUsers();
+        loadAdminUsers({ force: true });
     }
 }
 
@@ -2253,20 +2261,62 @@ document.addEventListener('click', function() {
 
 let _adminUsersCache = [];
 
-async function _fetchAdminUsers() {
-    const token = getAuthToken();
-    const res = await fetch(CONFIG.API_BASE + '/auth/users', {
-        headers: { 'Authorization': 'Bearer ' + token },
-    });
-    if (!res.ok) throw new Error('Failed to load users');
-    const data = await res.json();
-    _adminUsersCache = Array.isArray(data) ? data : (data.users || []);
-    return _adminUsersCache;
+function renderAdminUsersLoading() {
+    var container = document.getElementById('admin-users-list');
+    var countEl = document.getElementById('admin-users-count');
+    if (!container) return;
+    if (countEl) countEl.textContent = 'Loading...';
+    container.innerHTML = '<div class="p-5 rounded-xl border border-white/10 text-sm text-secondary-text" style="background:#1a1d21">Loading users...</div>';
 }
 
-async function loadAdminUsers() {
+function prefetchAdminUsers() {
+    var user = getAuthUser();
+    if (!user || user.role !== 'admin') return;
+    _fetchAdminUsers({ preferCache: true }).catch(function() {});
+}
+
+async function _fetchAdminUsers(opts) {
+    opts = opts || {};
+    var now = Date.now();
+    var hasCache = Array.isArray(_adminUsersCache) && _adminUsersCache.length > 0;
+    var cacheFresh = hasCache && (now - state.adminUsersCacheTs) < 60_000;
+    if (opts.preferCache && cacheFresh) {
+        return _adminUsersCache;
+    }
+    if (state.adminUsersPromise) {
+        return state.adminUsersPromise;
+    }
+
+    const token = getAuthToken();
+    state.adminUsersPromise = fetch(CONFIG.API_BASE + '/auth/users', {
+        headers: { 'Authorization': 'Bearer ' + token },
+    })
+    .then(async function(res) {
+        if (!res.ok) throw new Error('Failed to load users');
+        const data = await res.json();
+        _adminUsersCache = Array.isArray(data) ? data : (data.users || []);
+        state.adminUserList = _adminUsersCache.slice();
+        state.adminUsersCacheTs = Date.now();
+        return _adminUsersCache;
+    })
+    .finally(function() {
+        state.adminUsersPromise = null;
+    });
+
+    return state.adminUsersPromise;
+}
+
+async function loadAdminUsers(opts) {
+    opts = opts || {};
     try {
-        const users = await _fetchAdminUsers();
+        var force = Boolean(opts.force);
+        var hasCache = Array.isArray(_adminUsersCache) && _adminUsersCache.length > 0;
+        if (hasCache && !force) {
+            renderAdminUsers(_adminUsersCache);
+        } else {
+            renderAdminUsersLoading();
+        }
+        const users = await _fetchAdminUsers({ preferCache: !force });
         renderAdminUsers(users);
     } catch (err) {
         showToast(err.message, 'error');
@@ -2390,7 +2440,7 @@ async function saveAdminEditUser() {
 
         showToast('User updated!', 'success');
         closeAdminEditModal();
-        loadAdminUsers();
+        loadAdminUsers({ force: true });
     } catch (err) {
         statusEl.textContent = err.message;
         statusEl.style.display = '';
@@ -2469,7 +2519,7 @@ async function adminToggleActive(userId, username, isCurrentlyActive) {
             if (!res.ok) throw new Error(data.detail || 'Failed');
         }
         showToast('User ' + action + 'd!', 'success');
-        loadAdminUsers();
+        loadAdminUsers({ force: true });
     } catch (err) {
         showToast(err.message, 'error');
     }
@@ -2489,7 +2539,7 @@ async function adminDeleteUser(userId, username) {
         var data = await res.json();
         if (!res.ok) throw new Error(data.detail || 'Failed to delete user');
         showToast('User ' + username + ' deleted permanently', 'success');
-        loadAdminUsers();
+        loadAdminUsers({ force: true });
     } catch (err) {
         showToast(err.message, 'error');
     }
