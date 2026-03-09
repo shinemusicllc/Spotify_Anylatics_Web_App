@@ -171,18 +171,7 @@ h3 {
 }
 
 .group-item-dragging {
-  opacity: 1;
-  background: linear-gradient(
-    180deg,
-    rgba(255, 255, 255, 0.14),
-    rgba(255, 255, 255, 0.07)
-  );
-  border-color: rgba(255, 255, 255, 0.16);
-  box-shadow:
-    inset 0 0 0 1px rgba(255, 255, 255, 0.05),
-    0 14px 28px rgba(0, 0, 0, 0.28),
-    0 0 0 1px rgba(39, 214, 107, 0.08);
-  transform: translateY(-2px);
+  opacity: 0.52;
 }
 
 .group-item-drop-target {
@@ -321,29 +310,8 @@ h3 {
 }
 
 .custom-grid-row.row-dragging {
-  opacity: 1;
-  background:
-    linear-gradient(
-      180deg,
-      rgba(255, 255, 255, 0.12),
-      rgba(255, 255, 255, 0.06)
-    ),
-    rgba(20, 22, 24, 0.96) !important;
-  border-color: rgba(255, 255, 255, 0.12) !important;
-  box-shadow:
-    inset 0 0 0 1px rgba(255, 255, 255, 0.05),
-    0 12px 28px rgba(0, 0, 0, 0.26),
-    0 0 0 1px rgba(39, 214, 107, 0.06) !important;
-  transform: translateY(-2px);
-}
-
-.drag-preview-root {
-  position: fixed;
-  top: -2000px;
-  left: -2000px;
-  pointer-events: none;
-  z-index: -1;
-  opacity: 0;
+  opacity: 0.88;
+  background: rgba(17, 48, 29, 0.56);
 }
 
 .custom-grid-row.row-drop-target {
@@ -1185,50 +1153,6 @@ h3 {
     opacity: 1;
     transform: translateY(0);
   }
-}
-
-/* ── Global drag active state ─────────────────────────────────── */
-
-/* Khi đang drag, cursor toàn page = grabbing */
-body.is-dragging {
-  cursor: grabbing !important;
-}
-
-body.is-dragging * {
-  cursor: grabbing !important;
-  user-select: none !important;
-  -webkit-user-select: none !important;
-}
-
-/* Row drag handle (6-dot icon) */
-.custom-grid-row .row-drag-handle {
-  opacity: 0;
-  cursor: grab;
-  color: rgba(255, 255, 255, 0.3);
-  transition:
-    opacity 140ms ease,
-    color 140ms ease;
-  flex-shrink: 0;
-  font-size: 16px;
-  padding: 4px;
-}
-
-.custom-grid-row:hover .row-drag-handle,
-.custom-grid-row.row-selected .row-drag-handle {
-  opacity: 1;
-}
-
-.custom-grid-row .row-drag-handle:hover {
-  color: rgba(255, 255, 255, 0.65);
-}
-
-/* Group drag: draggable group buttons get grab cursor */
-.group-item[draggable="true"] {
-  cursor: grab;
-}
-
-.group-item[draggable="true"]:active {
-  cursor: grabbing;
 }
 
 /* ── Responsive ────────────────────────────────────────────────── */

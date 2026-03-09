@@ -145,7 +145,6 @@ const state = {
     dragScrollRaf: null,
     dragScrollContainer: null,
     dragScrollSpeed: 0,
-    dragPreviewEl: null,
 };
 
 // ═══════════════════════════════════════════════════════════════════
@@ -707,147 +706,6 @@ function updateDragAutoScroll(container, clientY) {
     state.dragScrollContainer = container;
     state.dragScrollSpeed = speed;
     ensureDragAutoScroll();
-}
-
-function destroyDragPreview() {
-    if (state.dragPreviewEl?.parentNode) {
-        state.dragPreviewEl.parentNode.removeChild(state.dragPreviewEl);
-    }
-    state.dragPreviewEl = null;
-}
-
-function createDragCanvas(width, height) {
-    const dpr = Math.max(1, window.devicePixelRatio || 1);
-    const canvas = document.createElement('canvas');
-    destroyDragPreview();
-    canvas.className = 'drag-preview-root';
-    canvas.setAttribute('aria-hidden', 'true');
-    canvas.style.width = `${width}px`;
-    canvas.style.height = `${height}px`;
-    document.body.appendChild(canvas);
-    state.dragPreviewEl = canvas;
-    canvas.width = Math.floor(width * dpr);
-    canvas.height = Math.floor(height * dpr);
-    const ctx = canvas.getContext('2d');
-    ctx.scale(dpr, dpr);
-    return { canvas, ctx };
-}
-
-function drawRoundedRect(ctx, x, y, w, h, r, fill, stroke) {
-    ctx.beginPath();
-    ctx.moveTo(x + r, y);
-    ctx.arcTo(x + w, y, x + w, y + h, r);
-    ctx.arcTo(x + w, y + h, x, y + h, r);
-    ctx.arcTo(x, y + h, x, y, r);
-    ctx.arcTo(x, y, x + w, y, r);
-    ctx.closePath();
-    if (fill) {
-        ctx.fillStyle = fill;
-        ctx.fill();
-    }
-    if (stroke) {
-        ctx.strokeStyle = stroke;
-        ctx.lineWidth = 1;
-        ctx.stroke();
-    }
-}
-
-function ellipsize(text, maxLen) {
-    const raw = String(text || '').trim();
-    if (raw.length <= maxLen) return raw;
-    return `${raw.slice(0, Math.max(0, maxLen - 1))}…`;
-}
-
-function drawDragCard(ctx, opts) {
-    const {
-        x, y, w, h, title, subtitle, badge, stackOffset = 0, accent = '#27d66b',
-    } = opts;
-    const shadowY = 10 + stackOffset * 2;
-    ctx.save();
-    ctx.shadowColor = 'rgba(0,0,0,0.45)';
-    ctx.shadowBlur = 18;
-    ctx.shadowOffsetY = shadowY;
-    drawRoundedRect(ctx, x, y, w, h, 14, 'rgba(12,13,16,0.98)', 'rgba(255,255,255,0.16)');
-    ctx.restore();
-
-    drawRoundedRect(ctx, x + 8, y + 8, 4, h - 16, 2, accent, null);
-    drawRoundedRect(ctx, x + 18, y + 18, 36, 36, 9, 'rgba(30,32,36,1)', 'rgba(255,255,255,0.12)');
-    ctx.fillStyle = '#27d66b';
-    ctx.font = '700 12px Inter, sans-serif';
-    if (badge) ctx.fillText(String(badge).slice(0, 8), x + 65, y + 26);
-
-    ctx.fillStyle = '#ffffff';
-    ctx.font = '700 16px Inter, sans-serif';
-    ctx.fillText(ellipsize(title || 'Untitled', 34), x + 65, y + 47);
-    if (subtitle) {
-        ctx.fillStyle = 'rgba(255,255,255,0.75)';
-        ctx.font = '500 12px Inter, sans-serif';
-        ctx.fillText(ellipsize(subtitle, 44), x + 65, y + 64);
-    }
-}
-
-function drawCountBubble(ctx, x, y, count) {
-    drawRoundedRect(ctx, x, y, 32, 24, 12, '#27d66b', null);
-    ctx.fillStyle = '#031108';
-    ctx.font = '800 12px Inter, sans-serif';
-    ctx.fillText(String(count), x + 10, y + 16);
-}
-
-function buildRowDragCanvas(draggedItems) {
-    const width = 318;
-    const height = 78;
-    const { canvas, ctx } = createDragCanvas(width, height);
-    ctx.clearRect(0, 0, width, height);
-    ctx.globalAlpha = 0.84;
-    const topItem = draggedItems[0];
-    drawDragCard(ctx, {
-        x: 6, y: 5, w: 292, h: 62, title: topItem?.name || 'Item',
-        subtitle: topItem?.owner_name || topItem?.spotify_id || '',
-        badge: topItem?.type ? String(topItem.type).toUpperCase() : '',
-        stackOffset: 0, accent: '#27d66b',
-    });
-    ctx.globalAlpha = 1;
-    return canvas;
-}
-
-function buildGroupDragCanvas(group) {
-    const width = 252;
-    const height = 88;
-    const { canvas, ctx } = createDragCanvas(width, height);
-    ctx.clearRect(0, 0, width, height);
-
-    // Windows-like stacked files/folder feel.
-    drawRoundedRect(ctx, 24, 18, 184, 54, 11, 'rgba(14,15,18,0.84)', 'rgba(255,255,255,0.10)');
-    drawRoundedRect(ctx, 16, 10, 184, 54, 11, 'rgba(14,15,18,0.92)', 'rgba(255,255,255,0.13)');
-    drawRoundedRect(ctx, 8, 2, 184, 54, 11, 'rgba(12,13,16,0.98)', 'rgba(255,255,255,0.16)');
-    drawRoundedRect(ctx, 18, 14, 28, 22, 6, 'rgba(39,214,107,0.16)', 'rgba(39,214,107,0.28)');
-    ctx.fillStyle = '#27d66b';
-    ctx.font = '700 11px Inter, sans-serif';
-    ctx.fillText('GROUP', 54, 22);
-    ctx.fillStyle = '#ffffff';
-    ctx.font = '700 14px Inter, sans-serif';
-    ctx.fillText(ellipsize(group.name || 'Group', 22), 54, 40);
-    ctx.fillStyle = 'rgba(255,255,255,0.74)';
-    ctx.font = '500 11px Inter, sans-serif';
-    ctx.fillText(`${group.count || 0} links`, 54, 54);
-    drawCountBubble(ctx, 162, 0, Math.max(1, Number(group.count) || 1));
-    return canvas;
-}
-
-function setRowDragPreview(event, draggedKeys) {
-    if (!event.dataTransfer || !draggedKeys?.length) return;
-    const draggedItems = state.filteredItems.filter((item) => draggedKeys.includes(itemKey(item)));
-    if (!draggedItems.length) return;
-    const canvas = buildRowDragCanvas(draggedItems);
-    event.dataTransfer.setDragImage(canvas, 36, 20);
-}
-
-function setGroupDragPreview(event, groupId) {
-    if (!event.dataTransfer || !groupId) return;
-    const group = state.groups.find((g) => normalizeGroupName(g.id) === normalizeGroupName(groupId));
-    if (!group) return;
-    const canvas = buildGroupDragCanvas(group);
-    event.dataTransfer.setDragImage(canvas, 24, 16);
 }
 
 function rebuildGroups() {
@@ -3249,11 +3107,9 @@ document.addEventListener('DOMContentLoaded', () => {
             state.dragOverGroupId = groupId;
             state.dragOverGroupPlacement = 'before';
             state.suppressNextGroupClick = true;
-            document.body.classList.add('is-dragging');
             if (e.dataTransfer) {
                 e.dataTransfer.effectAllowed = 'move';
                 e.dataTransfer.setData('text/plain', groupId);
-                setGroupDragPreview(e, groupId);
             }
             syncGroupDragUi(groupList);
         });
@@ -3278,8 +3134,6 @@ document.addEventListener('DOMContentLoaded', () => {
             if (!groupBtn || !state.draggingGroupId) return;
             e.preventDefault();
             stopDragAutoScroll();
-            destroyDragPreview();
-            document.body.classList.remove('is-dragging');
             const targetGroupId = normalizeGroupName(groupBtn.getAttribute('data-group'));
             const moved = moveCustomGroupBefore(state.draggingGroupId, targetGroupId, state.dragOverGroupPlacement);
             state.draggingGroupId = null;
@@ -3295,10 +3149,8 @@ document.addEventListener('DOMContentLoaded', () => {
             }, 0);
         });
         groupList.addEventListener('dragend', () => {
-            document.body.classList.remove('is-dragging');
             if (!state.draggingGroupId && !state.dragOverGroupId) return;
             stopDragAutoScroll();
-            destroyDragPreview();
             state.draggingGroupId = null;
             state.dragOverGroupId = null;
             state.dragOverGroupPlacement = 'before';
@@ -3397,11 +3249,9 @@ document.addEventListener('DOMContentLoaded', () => {
             state.dragOverRowKey = draggedKey;
             state.dragOverRowPlacement = 'before';
             state.suppressNextRowClick = true;
-            document.body.classList.add('is-dragging');
             if (e.dataTransfer) {
                 e.dataTransfer.effectAllowed = 'move';
                 e.dataTransfer.setData('text/plain', draggedKey);
-                setRowDragPreview(e, selectedKeys);
             }
             syncRowDragUi(listElForDelete);
         });
@@ -3425,8 +3275,6 @@ document.addEventListener('DOMContentLoaded', () => {
             if (!row || !state.draggingRowKeys.length) return;
             e.preventDefault();
             stopDragAutoScroll();
-            destroyDragPreview();
-            document.body.classList.remove('is-dragging');
             const moved = moveItemsByKeys(state.draggingRowKeys, row.dataset.itemKey, state.dragOverRowPlacement);
             state.draggingRowKeys = [];
             state.dragOverRowKey = null;
@@ -3440,10 +3288,8 @@ document.addEventListener('DOMContentLoaded', () => {
             }, 0);
         });
         listElForDelete.addEventListener('dragend', () => {
-            document.body.classList.remove('is-dragging');
             if (!state.draggingRowKeys.length && !state.dragOverRowKey) return;
             stopDragAutoScroll();
-            destroyDragPreview();
             state.draggingRowKeys = [];
             state.dragOverRowKey = null;
             state.dragOverRowPlacement = 'before';
@@ -3465,16 +3311,9 @@ document.addEventListener('DOMContentLoaded', () => {
             });
             listScrollWrap.addEventListener('drop', () => {
                 stopDragAutoScroll();
-                destroyDragPreview();
             });
         }
     }
-
-    // Safety cleanup: avoid stale ghost if drag finishes outside expected targets.
-    document.addEventListener('dragend', destroyDragPreview, true);
-    document.addEventListener('drop', destroyDragPreview, true);
-    window.addEventListener('blur', destroyDragPreview);
-    window.addEventListener('mouseup', () => window.setTimeout(destroyDragPreview, 0));
 
     const imagePreviewModal = document.getElementById('image-preview-modal');
     if (imagePreviewModal) {
