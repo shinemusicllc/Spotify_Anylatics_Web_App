@@ -719,6 +719,7 @@ function destroyDragPreview() {
 function mountDragPreview(previewEl) {
     destroyDragPreview();
     previewEl.classList.add('drag-preview-root');
+    previewEl.setAttribute('aria-hidden', 'true');
     document.body.appendChild(previewEl);
     state.dragPreviewEl = previewEl;
     return previewEl;
@@ -750,7 +751,10 @@ function setRowDragPreview(event, draggedKeys) {
     if (!draggedItems.length) return;
 
     const preview = document.createElement('div');
-    preview.className = `drag-preview drag-preview-rows ${draggedItems.length > 1 ? 'drag-preview-multi' : ''}`;
+    const isMulti = draggedItems.length > 1;
+    preview.className = `drag-preview drag-preview-rows ${isMulti ? 'drag-preview-multi' : ''}`;
+    preview.style.width = isMulti ? '292px' : '268px';
+    preview.style.minHeight = isMulti ? '78px' : '70px';
 
     const cards = draggedItems.slice(0, 3);
     cards.reverse().forEach((item, index) => {
@@ -781,6 +785,8 @@ function setGroupDragPreview(event, groupId) {
 
     const preview = document.createElement('div');
     preview.className = 'drag-preview drag-preview-group';
+    preview.style.width = '232px';
+    preview.style.minHeight = '66px';
     preview.appendChild(createDragPreviewCard({
         icon: 'folder',
         title: group.name,
@@ -3403,6 +3409,12 @@ document.addEventListener('DOMContentLoaded', () => {
             });
         }
     }
+
+    // Safety cleanup: avoid stale ghost if drag finishes outside expected targets.
+    document.addEventListener('dragend', destroyDragPreview, true);
+    document.addEventListener('drop', destroyDragPreview, true);
+    window.addEventListener('blur', destroyDragPreview);
+    window.addEventListener('mouseup', () => window.setTimeout(destroyDragPreview, 0));
 
     const imagePreviewModal = document.getElementById('image-preview-modal');
     if (imagePreviewModal) {

@@ -170,13 +170,13 @@ h3 {
 }
 
 .group-item-dragging {
-  opacity: 0.82;
-  background: linear-gradient(180deg, rgba(255,255,255,0.10), rgba(255,255,255,0.05));
-  border-color: rgba(255,255,255,0.12);
+  opacity: 0.94;
+  background: linear-gradient(180deg, rgba(255,255,255,0.14), rgba(255,255,255,0.07));
+  border-color: rgba(255,255,255,0.16);
   box-shadow:
-    inset 0 0 0 1px rgba(255,255,255,0.03),
-    0 12px 24px rgba(0,0,0,0.22),
-    0 0 0 1px rgba(39,214,107,0.06);
+    inset 0 0 0 1px rgba(255,255,255,0.05),
+    0 14px 28px rgba(0,0,0,0.28),
+    0 0 0 1px rgba(39,214,107,0.08);
 }
 
 .group-item-drop-target {
@@ -307,15 +307,15 @@ h3 {
 }
 
 .custom-grid-row.row-dragging {
-  opacity: 0.78;
+  opacity: 0.92;
   background:
-    linear-gradient(180deg, rgba(255, 255, 255, 0.08), rgba(255, 255, 255, 0.04)),
-    rgba(22, 24, 26, 0.92) !important;
-  border-color: rgba(255,255,255,0.08) !important;
+    linear-gradient(180deg, rgba(255, 255, 255, 0.12), rgba(255, 255, 255, 0.06)),
+    rgba(20, 22, 24, 0.96) !important;
+  border-color: rgba(255,255,255,0.12) !important;
   box-shadow:
-    inset 0 0 0 1px rgba(255,255,255,0.03),
-    0 10px 22px rgba(0,0,0,0.20),
-    0 0 0 1px rgba(39,214,107,0.05) !important;
+    inset 0 0 0 1px rgba(255,255,255,0.05),
+    0 12px 28px rgba(0,0,0,0.26),
+    0 0 0 1px rgba(39,214,107,0.06) !important;
 }
 
 .drag-preview-root {
@@ -328,14 +328,14 @@ h3 {
 
 .drag-preview {
   position: relative;
-  width: 336px;
+  width: 292px;
   min-height: 78px;
   pointer-events: none;
 }
 
 .drag-preview-group {
-  width: 256px;
-  min-height: 70px;
+  width: 232px;
+  min-height: 66px;
 }
 
 .drag-preview-card {
@@ -344,22 +344,22 @@ h3 {
   display: flex;
   align-items: center;
   gap: 12px;
-  padding: 12px 14px;
+  padding: 11px 12px;
   border-radius: 16px;
-  border: 1px solid rgba(255,255,255,0.16);
-  background: rgba(17, 19, 21, 0.98);
+  border: 1px solid rgba(255,255,255,0.18);
+  background: rgba(11, 12, 14, 1);
   box-shadow:
-    0 18px 34px rgba(0,0,0,0.40),
-    0 0 0 1px rgba(39,214,107,0.08);
+    0 16px 30px rgba(0,0,0,0.44),
+    0 0 0 1px rgba(39,214,107,0.10);
   overflow: hidden;
 }
 
 .drag-preview-multi .drag-preview-card:first-child {
-  opacity: 0.94;
+  opacity: 1;
 }
 
 .drag-preview-multi .drag-preview-card:nth-child(2) {
-  opacity: 0.97;
+  opacity: 1;
 }
 
 .drag-preview-cover-wrap {
@@ -368,9 +368,9 @@ h3 {
 
 .drag-preview-cover,
 .drag-preview-icon-wrap {
-  width: 44px;
-  height: 44px;
-  border-radius: 12px;
+  width: 40px;
+  height: 40px;
+  border-radius: 10px;
   display: flex;
   align-items: center;
   justify-content: center;
@@ -388,7 +388,7 @@ h3 {
 
 .drag-preview-icon {
   color: #27d66b;
-  font-size: 24px;
+  font-size: 22px;
 }
 
 .drag-preview-text {
@@ -402,40 +402,40 @@ h3 {
   width: fit-content;
   padding: 2px 7px;
   border-radius: 9999px;
-  background: rgba(39,214,107,0.14);
+  background: rgba(39,214,107,0.20);
   color: #6ee7a2;
-  font-size: 10px;
+  font-size: 9px;
   font-weight: 800;
   letter-spacing: 0.08em;
 }
 
 .drag-preview-title {
   color: #fff;
-  font-size: 16px;
+  font-size: 14px;
   font-weight: 700;
   line-height: 1.2;
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
-  max-width: 230px;
+  max-width: 200px;
 }
 
 .drag-preview-subtitle {
-  color: rgba(255,255,255,0.72);
-  font-size: 12px;
+  color: rgba(255,255,255,0.78);
+  font-size: 11px;
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
-  max-width: 220px;
+  max-width: 190px;
 }
 
 .drag-preview-count {
   position: absolute;
-  right: 10px;
-  top: -8px;
-  min-width: 26px;
-  height: 26px;
-  padding: 0 8px;
+  right: 8px;
+  top: -7px;
+  min-width: 24px;
+  height: 24px;
+  padding: 0 7px;
   border-radius: 9999px;
   background: #27d66b;
   color: #031108;
