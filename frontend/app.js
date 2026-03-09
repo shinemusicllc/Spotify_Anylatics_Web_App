@@ -140,7 +140,6 @@ const state = {
     dragOverGroupPlacement: 'before',
     suppressNextGroupClick: false,
     suppressNextRowClick: false,
-    rowPointerDown: null,
 };
 
 // ═══════════════════════════════════════════════════════════════════
@@ -3109,39 +3108,12 @@ document.addEventListener('DOMContentLoaded', () => {
             if (isInteractiveRowTarget(e.target)) return;
             const row = e.target.closest('.custom-grid-row');
             if (!row) return;
-            state.rowPointerDown = {
-                itemId: row.dataset.itemId,
-                type: row.dataset.type,
-                spotifyId: row.dataset.spotifyId,
-                x: e.clientX,
-                y: e.clientY,
-                shiftKey: e.shiftKey,
-                ctrlKey: e.ctrlKey,
-                metaKey: e.metaKey,
-            };
-        });
-        listElForDelete.addEventListener('mouseup', (e) => {
-            if (e.button !== 0) return;
-            const down = state.rowPointerDown;
-            state.rowPointerDown = null;
-            if (!down || state.draggingRowKeys.length) return;
-            if (isInteractiveRowTarget(e.target)) return;
-            const row = e.target.closest('.custom-grid-row');
-            if (!row) return;
-            const moved = Math.abs(e.clientX - down.x) > 5 || Math.abs(e.clientY - down.y) > 5;
-            if (moved) return;
-            if (String(row.dataset.itemId) !== String(down.itemId)) return;
             const item = state.items.find((i) =>
                 String(i.id) === String(row.dataset.itemId)
                 || (i.type === row.dataset.type && i.spotify_id === row.dataset.spotifyId)
             );
             if (!item) return;
-            handleRowSelection(item, down);
-        });
-        listElForDelete.addEventListener('mouseleave', () => {
-            if (!state.draggingRowKeys.length) {
-                state.rowPointerDown = null;
-            }
+            handleRowSelection(item, e);
         });
         listElForDelete.addEventListener('click', (e) => {
             const btn = e.target.closest('.row-delete-btn');
@@ -3192,7 +3164,6 @@ document.addEventListener('DOMContentLoaded', () => {
             state.dragOverRowKey = draggedKey;
             state.dragOverRowPlacement = 'before';
             state.suppressNextRowClick = true;
-            state.rowPointerDown = null;
             if (e.dataTransfer) {
                 e.dataTransfer.effectAllowed = 'move';
                 e.dataTransfer.setData('text/plain', draggedKey);
@@ -3233,7 +3204,6 @@ document.addEventListener('DOMContentLoaded', () => {
             state.draggingRowKeys = [];
             state.dragOverRowKey = null;
             state.dragOverRowPlacement = 'before';
-            state.rowPointerDown = null;
             syncRowDragUi(listElForDelete);
             window.setTimeout(() => {
                 state.suppressNextRowClick = false;

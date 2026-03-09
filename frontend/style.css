@@ -268,6 +268,14 @@ h3 {
     0 0 0 1px rgba(29, 185, 84, 0.14);
 }
 
+.custom-grid-row.row-selected:hover {
+  background: rgba(17, 48, 29, 0.52) !important;
+  border-color: rgba(29, 185, 84, 0.58) !important;
+  box-shadow:
+    inset 0 0 0 1px rgba(29, 185, 84, 0.34),
+    0 0 0 1px rgba(29, 185, 84, 0.14);
+}
+
 .custom-grid-row.row-dragging {
   opacity: 0.88;
   background: rgba(17, 48, 29, 0.56);
