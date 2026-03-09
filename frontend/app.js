@@ -1903,41 +1903,80 @@ function initStickyHeader() {
 
 
 // ===================================================================
-// SETTINGS
+// VIEW MANAGEMENT — single source of truth for panel switching
 // ===================================================================
 
-function showSettings() {
-    document.querySelector('.list-wrap').style.display = 'none';
-    const adminPanel = document.getElementById('admin-users-panel');
-    if (adminPanel) adminPanel.style.display = 'none';
-    const settingsPanel = document.getElementById('settings-panel');
-    if (settingsPanel) settingsPanel.style.display = '';
+state.currentView = 'linkchecker'; // 'linkchecker' | 'settings' | 'users'
 
-    const breadcrumb = document.getElementById('breadcrumb-group');
-    const pageTitle = document.getElementById('page-title');
-    if (breadcrumb) { breadcrumb.textContent = 'Settings'; breadcrumb.previousElementSibling && (breadcrumb.previousElementSibling.previousElementSibling.textContent = 'Account'); }
-    if (pageTitle) pageTitle.textContent = 'Account Settings';
+function switchToView(view) {
+    var listWrap = document.querySelector('.list-wrap');
+    var settingsPanel = document.getElementById('settings-panel');
+    var adminPanel = document.getElementById('admin-users-panel');
+    var btnRefresh = document.getElementById('btn-refresh');
+    var btnAddLink = document.getElementById('btn-add-link');
+    var searchWrap = document.getElementById('search-input') ? document.getElementById('search-input').parentElement : null;
+    var breadcrumb = document.getElementById('breadcrumb-group');
+    var pageTitle = document.getElementById('page-title');
+    // Find the breadcrumb parent label (e.g. "Link Checker" > "All Links")
+    var breadcrumbParent = breadcrumb && breadcrumb.previousElementSibling
+        ? breadcrumb.previousElementSibling.previousElementSibling
+        : null;
 
-    document.getElementById('btn-refresh')?.style && (document.getElementById('btn-refresh').style.display = 'none');
-    document.getElementById('btn-add-link')?.style && (document.getElementById('btn-add-link').style.display = 'none');
-    document.getElementById('search-input')?.parentElement && (document.getElementById('search-input').parentElement.style.display = 'none');
-
-    loadSettingsData();
-}
-
-function hideSettings() {
-    const settingsPanel = document.getElementById('settings-panel');
+    // 1) Hide ALL panels
+    if (listWrap) listWrap.style.display = 'none';
     if (settingsPanel) settingsPanel.style.display = 'none';
-    const adminPanel = document.getElementById('admin-users-panel');
     if (adminPanel) adminPanel.style.display = 'none';
-    document.querySelector('.list-wrap').style.display = '';
 
-    document.getElementById('btn-refresh')?.style && (document.getElementById('btn-refresh').style.display = '');
-    document.getElementById('btn-add-link')?.style && (document.getElementById('btn-add-link').style.display = '');
-    document.getElementById('search-input')?.parentElement && (document.getElementById('search-input').parentElement.style.display = '');
+    // 2) Update sidebar nav active state
+    var navMap = { linkchecker: 'nav-links', settings: 'nav-settings', users: 'nav-users' };
+    document.querySelectorAll('#sidebar nav a').forEach(function(a) {
+        a.classList.remove('text-white', 'bg-white/10');
+        a.classList.add('text-secondary-text');
+        var icon = a.querySelector('.material-icons-round');
+        if (icon) icon.classList.remove('text-primary');
+    });
+    var activeNav = document.getElementById(navMap[view]);
+    if (activeNav) {
+        activeNav.classList.add('text-white', 'bg-white/10');
+        activeNav.classList.remove('text-secondary-text');
+        var icon = activeNav.querySelector('.material-icons-round');
+        if (icon) icon.classList.add('text-primary');
+    }
 
-    updateGroupHeader();
+    // 3) Show/hide toolbar (only for linkchecker)
+    var showToolbar = (view === 'linkchecker');
+    if (btnRefresh) btnRefresh.style.display = showToolbar ? '' : 'none';
+    if (btnAddLink) btnAddLink.style.display = showToolbar ? '' : 'none';
+    if (searchWrap) searchWrap.style.display = showToolbar ? '' : 'none';
+
+    // 4) Show the correct panel and load its data
+    state.currentView = view;
+
+    if (view === 'linkchecker') {
+        if (listWrap) listWrap.style.display = '';
+        if (breadcrumbParent) breadcrumbParent.textContent = 'Link Checker';
+        updateGroupHeader();
+        loadData();
+    } else if (view === 'settings') {
+        if (settingsPanel) settingsPanel.style.display = 'block';
+        if (breadcrumbParent) breadcrumbParent.textContent = 'Account';
+        if (breadcrumb) breadcrumb.textContent = 'Settings';
+        if (pageTitle) pageTitle.textContent = 'Account Settings';
+        loadSettingsData();
+    } else if (view === 'users') {
+        if (adminPanel) adminPanel.style.display = 'block';
+        if (breadcrumbParent) breadcrumbParent.textContent = 'Admin';
+        if (breadcrumb) breadcrumb.textContent = 'Users';
+        if (pageTitle) pageTitle.textContent = 'User Management';
+        loadAdminUsers();
+    }
 }
+
+// Legacy wrappers for backward compatibility
+function showSettings() { switchToView('settings'); }
+function hideSettings() { /* no-op, use switchToView instead */ }
+function showAdminUsers() { switchToView('users'); }
+function hideAdminUsers() { /* no-op, use switchToView instead */ }
 
 function loadSettingsData() {
     const user = getAuthUser();
@@ -2583,24 +2622,8 @@ document.addEventListener('DOMContentLoaded', () => {
             state.activeGroup = groupId;
             state.isCreatingGroup = false;
             // If currently on Settings or Users tab, navigate back to Link Checker
-            const listWrap = document.querySelector('.list-wrap');
-            if (listWrap && listWrap.style.display === 'none') {
-                document.querySelectorAll('#sidebar nav a').forEach(a => {
-                    a.classList.remove('text-white', 'bg-white/10');
-                    a.classList.add('text-secondary-text');
-                    a.querySelector('.material-icons-round')?.classList.remove('text-primary');
-                });
-                const navLinks = document.getElementById('nav-links');
-                if (navLinks) {
-                    navLinks.classList.add('text-white', 'bg-white/10');
-                    navLinks.classList.remove('text-secondary-text');
-                    navLinks.querySelector('.material-icons-round')?.classList.add('text-primary');
-                }
-                hideSettings();
-                hideAdminUsers();
-                updateGroupHeader();
-                renderGroups();
-                loadData();
+            if (state.currentView !== 'linkchecker') {
+                switchToView('linkchecker');
             } else {
                 updateGroupHeader();
                 renderGroups();
@@ -2688,34 +2711,12 @@ document.addEventListener('DOMContentLoaded', () => {
     // Settings nav
     document.getElementById('nav-settings').addEventListener('click', (e) => {
         e.preventDefault();
-        document.querySelectorAll('#sidebar nav a').forEach(a => {
-            a.classList.remove('text-white', 'bg-white/10');
-            a.classList.add('text-secondary-text');
-            a.querySelector('.material-icons-round')?.classList.remove('text-primary');
-        });
-        const navSettings = document.getElementById('nav-settings');
-        navSettings.classList.add('text-white', 'bg-white/10');
-        navSettings.classList.remove('text-secondary-text');
-        navSettings.querySelector('.material-icons-round')?.classList.add('text-primary');
-        hideAdminUsers();
-        showSettings();
+        switchToView('settings');
     });
 
     document.getElementById('nav-links').addEventListener('click', (e) => {
         e.preventDefault();
-        document.querySelectorAll('#sidebar nav a').forEach(a => {
-            a.classList.remove('text-white', 'bg-white/10');
-            a.classList.add('text-secondary-text');
-            a.querySelector('.material-icons-round')?.classList.remove('text-primary');
-        });
-        const navLinks = document.getElementById('nav-links');
-        navLinks.classList.add('text-white', 'bg-white/10');
-        navLinks.classList.remove('text-secondary-text');
-        navLinks.querySelector('.material-icons-round')?.classList.add('text-primary');
-        hideSettings();
-        hideAdminUsers();
-        updateGroupHeader();
-        loadData();
+        switchToView('linkchecker');
     });
 
     // Users nav (admin)
@@ -2723,18 +2724,7 @@ document.addEventListener('DOMContentLoaded', () => {
     if (navUsersEl) {
         navUsersEl.addEventListener('click', function(e) {
             e.preventDefault();
-            document.querySelectorAll('#sidebar nav a').forEach(function(a) {
-                a.classList.remove('text-white', 'bg-white/10');
-                a.classList.add('text-secondary-text');
-                var icon = a.querySelector('.material-icons-round');
-                if (icon) icon.classList.remove('text-primary');
-            });
-            navUsersEl.classList.add('text-white', 'bg-white/10');
-            navUsersEl.classList.remove('text-secondary-text');
-            var icon = navUsersEl.querySelector('.material-icons-round');
-            if (icon) icon.classList.add('text-primary');
-            hideSettings();
-            showAdminUsers();
+            switchToView('users');
         });
     }
 
