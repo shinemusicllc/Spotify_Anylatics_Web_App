@@ -2581,6 +2581,23 @@ document.addEventListener('DOMContentLoaded', () => {
             }
             state.activeGroup = groupId;
             state.isCreatingGroup = false;
+            // If currently on Settings or Users tab, navigate back to Link Checker
+            const listWrap = document.querySelector('.list-wrap');
+            if (listWrap && listWrap.style.display === 'none') {
+                document.querySelectorAll('#sidebar nav a').forEach(a => {
+                    a.classList.remove('text-white', 'bg-white/10');
+                    a.classList.add('text-secondary-text');
+                    a.querySelector('.material-icons-round')?.classList.remove('text-primary');
+                });
+                const navLinks = document.getElementById('nav-links');
+                if (navLinks) {
+                    navLinks.classList.add('text-white', 'bg-white/10');
+                    navLinks.classList.remove('text-secondary-text');
+                    navLinks.querySelector('.material-icons-round')?.classList.add('text-primary');
+                }
+                hideSettings();
+                hideAdminUsers();
+            }
             updateGroupHeader();
             renderGroups();
             renderList();
@@ -2693,6 +2710,7 @@ document.addEventListener('DOMContentLoaded', () => {
         hideSettings();
         hideAdminUsers();
         updateGroupHeader();
+        renderList();
     });
 
     // Users nav (admin)
