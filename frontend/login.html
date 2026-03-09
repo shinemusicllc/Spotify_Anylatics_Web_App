@@ -4,8 +4,8 @@
 <head>
     <meta charset="utf-8">
     <meta content="width=device-width, initial-scale=1.0" name="viewport">
-    <title>SpotiCheck &mdash; Sign In</title>
-    <meta name="description" content="Sign in to SpotiCheck to manage your Spotify links.">
+    <title>SpotiCheck &mdash; Admin Sign In</title>
+    <meta name="description" content="Sign in to SpotiCheck to manage your Spotify links and users.">
     <link rel="icon" type="image/svg+xml" href="favicon.svg?v=1">
     <link rel="shortcut icon" type="image/svg+xml" href="favicon.svg?v=1">
     <script src="https://cdn.tailwindcss.com?plugins=forms,container-queries"></script>
@@ -99,25 +99,6 @@
             border: 1px solid rgba(255, 255, 255, 0.1);
             border-radius: 16px;
         }
-        .tab-btn {
-            position: relative;
-            padding: 10px 24px;
-            font-size: 14px;
-            font-weight: 600;
-            color: #a8b1c0;
-            border-radius: 9999px;
-            transition: color 200ms ease, background 200ms ease;
-            cursor: pointer;
-            border: none;
-            background: transparent;
-        }
-        .tab-btn:hover {
-            color: #f2f5fb;
-        }
-        .tab-btn.active {
-            color: #f2f5fb;
-            background: rgba(255, 255, 255, 0.1);
-        }
         .btn-submit {
             width: 100%;
             padding: 14px 24px;
@@ -175,10 +156,10 @@
 
         <!-- Auth Card -->
         <div class="auth-card p-8">
-            <!-- Tabs -->
-            <div class="flex items-center justify-center gap-2 mb-8 bg-white/[0.04] rounded-full p-1">
-                <button class="tab-btn active flex-1 text-center" data-tab="signin" id="tab-signin">Sign In</button>
-                <button class="tab-btn flex-1 text-center" data-tab="signup" id="tab-signup">Sign Up</button>
+            <div class="mb-8">
+                <p class="text-[11px] font-bold uppercase tracking-[0.18em] text-primary mb-3">Secure Access</p>
+                <h2 class="text-2xl font-bold text-white" style="font-family:'Inter Tight','Inter',system-ui,sans-serif; letter-spacing:-0.02em;">Sign in to continue</h2>
+                <p class="text-sm text-secondary-text mt-2">User accounts are created by an admin inside the dashboard.</p>
             </div>
 
             <!-- Sign In Form -->
@@ -193,32 +174,6 @@
                 </div>
                 <div id="signin-error" class="error-msg"></div>
                 <button type="submit" class="btn-submit" id="btn-signin">Sign In</button>
-            </form>
-
-            <!-- Sign Up Form -->
-            <form id="form-signup" class="space-y-4" style="display:none" autocomplete="on">
-                <div>
-                    <label class="form-label" for="signup-username">Username</label>
-                    <input id="signup-username" class="auth-input" type="text" placeholder="Choose a username" autocomplete="username" required>
-                </div>
-                <div>
-                    <label class="form-label" for="signup-email">Email</label>
-                    <input id="signup-email" class="auth-input" type="email" placeholder="your@email.com" autocomplete="email" required>
-                </div>
-                <div>
-                    <label class="form-label" for="signup-displayname">Display Name <span class="text-secondary-text font-normal">(optional)</span></label>
-                    <input id="signup-displayname" class="auth-input" type="text" placeholder="How you want to be called" autocomplete="name">
-                </div>
-                <div>
-                    <label class="form-label" for="signup-password">Password</label>
-                    <input id="signup-password" class="auth-input" type="password" placeholder="Create a password" autocomplete="new-password" required>
-                </div>
-                <div>
-                    <label class="form-label" for="signup-confirm">Confirm Password</label>
-                    <input id="signup-confirm" class="auth-input" type="password" placeholder="Confirm your password" autocomplete="new-password" required>
-                </div>
-                <div id="signup-error" class="error-msg"></div>
-                <button type="submit" class="btn-submit" id="btn-signup">Create Account</button>
             </form>
         </div>
 
@@ -238,30 +193,7 @@
             }
         })();
 
-        // Tab switching
-        const tabSignin = document.getElementById('tab-signin');
-        const tabSignup = document.getElementById('tab-signup');
         const formSignin = document.getElementById('form-signin');
-        const formSignup = document.getElementById('form-signup');
-
-        function switchTab(tab) {
-            if (tab === 'signin') {
-                tabSignin.classList.add('active');
-                tabSignup.classList.remove('active');
-                formSignin.style.display = '';
-                formSignup.style.display = 'none';
-                document.getElementById('signin-error').textContent = '';
-            } else {
-                tabSignup.classList.add('active');
-                tabSignin.classList.remove('active');
-                formSignup.style.display = '';
-                formSignin.style.display = 'none';
-                document.getElementById('signup-error').textContent = '';
-            }
-        }
-
-        tabSignin.addEventListener('click', function() { switchTab('signin'); });
-        tabSignup.addEventListener('click', function() { switchTab('signup'); });
 
         // Sign In
         formSignin.addEventListener('submit', async function(e) {
@@ -293,69 +225,6 @@
             } finally {
                 btn.disabled = false;
                 btn.textContent = 'Sign In';
-            }
-        });
-
-        // Sign Up
-        formSignup.addEventListener('submit', async function(e) {
-            e.preventDefault();
-            var errEl = document.getElementById('signup-error');
-            errEl.textContent = '';
-            var btn = document.getElementById('btn-signup');
-
-            var username = document.getElementById('signup-username').value.trim();
-            var email = document.getElementById('signup-email').value.trim();
-            var display_name = document.getElementById('signup-displayname').value.trim();
-            var password = document.getElementById('signup-password').value;
-            var confirmPw = document.getElementById('signup-confirm').value;
-
-            if (password !== confirmPw) {
-                errEl.textContent = 'Passwords do not match.';
-                return;
-            }
-            if (password.length < 4) {
-                errEl.textContent = 'Password must be at least 4 characters.';
-                return;
-            }
-
-            btn.disabled = true;
-            btn.textContent = 'Creating account...';
-
-            try {
-                var body = { username: username, email: email, password: password };
-                if (display_name) body.display_name = display_name;
-
-                var res = await fetch(API_BASE + '/auth/register', {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify(body),
-                });
-                var data = await res.json().catch(function() { return {}; });
-                if (!res.ok) {
-                    throw new Error(data.detail || ('Registration failed (' + res.status + ')'));
-                }
-                // Auto-login after registration if token is returned
-                if (data.access_token || data.token) {
-                    localStorage.setItem('spoticheck_token', data.access_token || data.token);
-                    localStorage.setItem('spoticheck_user', JSON.stringify(data.user || { username: username }));
-                    window.location.href = '/';
-                } else {
-                    // Registration successful, switch to sign-in
-                    switchTab('signin');
-                    document.getElementById('signin-error').textContent = '';
-                    document.getElementById('signin-username').value = username;
-                    document.getElementById('signin-password').focus();
-                    // Show success via a temporary message
-                    var successEl = document.getElementById('signin-error');
-                    successEl.style.color = '#1db954';
-                    successEl.textContent = 'Account created! Please sign in.';
-                    setTimeout(function() { successEl.style.color = ''; }, 5000);
-                }
-            } catch (err) {
-                errEl.textContent = err.message;
-            } finally {
-                btn.disabled = false;
-                btn.textContent = 'Create Account';
             }
         });
     </script>

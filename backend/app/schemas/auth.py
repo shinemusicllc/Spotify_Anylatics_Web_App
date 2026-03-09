@@ -58,3 +58,11 @@ class AdminUpdateUserRequest(BaseModel):
 
 class AdminResetPasswordRequest(BaseModel):
     new_password: str
+
+
+class AdminCreateUserRequest(BaseModel):
+    username: str
+    email: str
+    password: str
+    display_name: str | None = None
+    role: str = "user"

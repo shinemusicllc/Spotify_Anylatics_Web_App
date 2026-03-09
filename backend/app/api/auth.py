@@ -21,6 +21,7 @@ from app.schemas.auth import (
     UpdateAvatarRequest,
     AdminUpdateUserRequest,
     AdminResetPasswordRequest,
+    AdminCreateUserRequest,
 )
 from app.services.auth import (
     hash_password,
@@ -49,7 +50,15 @@ def _user_response(user: User) -> UserResponse:
 
 @router.post("/register", response_model=AuthResponse, status_code=201)
 async def register(req: RegisterRequest, db: AsyncSession = Depends(get_db)):
-    """Create a new user account. First user auto-becomes admin."""
+    """Create the bootstrap account. Public sign-up is disabled after first user."""
+    count_result = await db.execute(select(func.count()).select_from(User))
+    user_count = count_result.scalar() or 0
+    if user_count > 0:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Public sign up is disabled",
+        )
+
     # Check duplicates
     existing = await db.execute(
         select(User).where((User.username == req.username) | (User.email == req.email))
@@ -60,17 +69,12 @@ async def register(req: RegisterRequest, db: AsyncSession = Depends(get_db)):
             detail="Username or email already registered",
         )
 
-    # First user becomes admin
-    count_result = await db.execute(select(func.count()).select_from(User))
-    user_count = count_result.scalar() or 0
-    role = "admin" if user_count == 0 else "user"
-
     user = User(
         username=req.username,
         email=req.email,
         password_hash=hash_password(req.password),
         display_name=req.display_name,
-        role=role,
+        role="admin",
     )
     db.add(user)
     await db.flush()
@@ -127,6 +131,52 @@ async def list_users(
     result = await db.execute(select(User).order_by(User.created_at))
     users = result.scalars().all()
     return [_user_response(u) for u in users]
+
+
+@router.post("/users", response_model=UserResponse, status_code=201)
+async def admin_create_user(
+    req: AdminCreateUserRequest,
+    admin: User = Depends(get_admin_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Admin only - create a new user account from the dashboard."""
+    username = (req.username or "").strip()
+    email = (req.email or "").strip().lower()
+    display_name = (req.display_name or "").strip() or None
+    role = (req.role or "user").strip().lower()
+
+    if not username:
+        raise HTTPException(status_code=400, detail="Username is required")
+    if not email:
+        raise HTTPException(status_code=400, detail="Email is required")
+    if len(req.password or "") < 4:
+        raise HTTPException(
+            status_code=400,
+            detail="Password must be at least 4 characters",
+        )
+    if role not in ("admin", "user"):
+        raise HTTPException(status_code=400, detail="Role must be 'admin' or 'user'")
+
+    existing = await db.execute(
+        select(User).where((User.username == username) | (User.email == email))
+    )
+    if existing.scalar_one_or_none():
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="Username or email already registered",
+        )
+
+    user = User(
+        username=username,
+        email=email,
+        password_hash=hash_password(req.password),
+        display_name=display_name,
+        role=role,
+        is_active=True,
+    )
+    db.add(user)
+    await db.flush()
+    return _user_response(user)
 
 
 # ---------------------------------------------------------------------------

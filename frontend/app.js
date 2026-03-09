@@ -1753,18 +1753,8 @@ async function setupAdminUserFilter() {
     if (!user || user.role !== 'admin') return;
 
     try {
-        const token = getAuthToken();
-        const res = await fetch(`${CONFIG.API_BASE}/auth/users`, {
-            headers: {
-                'Content-Type': 'application/json',
-                'Authorization': `Bearer ${token}`,
-            },
-        });
-        if (!res.ok) return;
-        const users = await res.json();
-        state.adminUserList = Array.isArray(users) ? users : (users.users || []);
-        _adminUsersCache = state.adminUserList.slice();
-        state.adminUsersCacheTs = Date.now();
+        const users = await _fetchAdminUsers({ preferCache: true });
+        state.adminUserList = Array.isArray(users) ? users.slice() : [];
     } catch {
         return;
     }
@@ -2415,9 +2405,93 @@ function openAdminEditModal(userId) {
     if (modal) modal.classList.add('open');
 }
 
+function openAdminCreateModal() {
+    document.getElementById('admin-create-username').value = '';
+    document.getElementById('admin-create-email').value = '';
+    document.getElementById('admin-create-displayname').value = '';
+    document.getElementById('admin-create-password').value = '';
+
+    var roleWrap = document.getElementById('admin-create-role-wrap');
+    if (roleWrap) {
+        var existingRoleDD = document.getElementById('admin-create-role-dropdown');
+        if (existingRoleDD) {
+            updateCustomDropdownOptions('admin-create-role-dropdown', [{value:'user',label:'User'},{value:'admin',label:'Admin'}], 'user');
+        } else {
+            var roleDD = createCustomDropdown({
+                id: 'admin-create-role',
+                cssClass: 'dropdown-modal',
+                options: [{value:'user',label:'User'},{value:'admin',label:'Admin'}],
+                selected: 'user'
+            });
+            roleWrap.innerHTML = '';
+            roleWrap.appendChild(roleDD);
+        }
+    }
+
+    var statusEl = document.getElementById('admin-create-status');
+    statusEl.style.display = 'none';
+    statusEl.textContent = '';
+
+    var modal = document.getElementById('admin-create-modal');
+    if (modal) modal.classList.add('open');
+}
+
+function closeAdminCreateModal() {
+    var modal = document.getElementById('admin-create-modal');
+    if (modal) modal.classList.remove('open');
+}
+
 function closeAdminEditModal() {
     var modal = document.getElementById('admin-edit-modal');
     if (modal) modal.classList.remove('open');
+}
+
+async function submitAdminCreateUser() {
+    var username = document.getElementById('admin-create-username').value.trim();
+    var email = document.getElementById('admin-create-email').value.trim();
+    var displayName = document.getElementById('admin-create-displayname').value.trim();
+    var password = document.getElementById('admin-create-password').value;
+    var roleDD = document.getElementById('admin-create-role-dropdown');
+    var role = roleDD ? roleDD.getAttribute('data-value') : 'user';
+    var statusEl = document.getElementById('admin-create-status');
+
+    statusEl.style.display = 'none';
+    statusEl.textContent = '';
+
+    if (!username || !email || !password) {
+        statusEl.textContent = 'Username, email, and password are required';
+        statusEl.style.display = '';
+        statusEl.style.color = '#ef4444';
+        return;
+    }
+
+    try {
+        var token = getAuthToken();
+        var res = await fetch(CONFIG.API_BASE + '/auth/users', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + token },
+            body: JSON.stringify({
+                username: username,
+                email: email,
+                password: password,
+                display_name: displayName || null,
+                role: role || 'user',
+            }),
+        });
+        var data = await res.json().catch(function() { return {}; });
+        if (!res.ok) throw new Error(data.detail || 'Failed to create user');
+
+        showToast('User ' + username + ' created', 'success');
+        closeAdminCreateModal();
+        await loadAdminUsers({ force: true });
+        var filterWrap = document.getElementById('admin-user-filter-wrap');
+        if (filterWrap) filterWrap.remove();
+        await setupAdminUserFilter();
+    } catch (err) {
+        statusEl.textContent = err.message;
+        statusEl.style.display = '';
+        statusEl.style.color = '#ef4444';
+    }
 }
 
 async function saveAdminEditUser() {
@@ -2440,7 +2514,10 @@ async function saveAdminEditUser() {
 
         showToast('User updated!', 'success');
         closeAdminEditModal();
-        loadAdminUsers({ force: true });
+        await loadAdminUsers({ force: true });
+        var filterWrap = document.getElementById('admin-user-filter-wrap');
+        if (filterWrap) filterWrap.remove();
+        await setupAdminUserFilter();
     } catch (err) {
         statusEl.textContent = err.message;
         statusEl.style.display = '';
@@ -2502,24 +2579,15 @@ async function adminToggleActive(userId, username, isCurrentlyActive) {
 
     try {
         var token = getAuthToken();
-        if (isCurrentlyActive) {
-            var res = await fetch(CONFIG.API_BASE + '/auth/users/' + userId, {
-                method: 'DELETE',
-                headers: { 'Authorization': 'Bearer ' + token },
-            });
-            var data = await res.json();
-            if (!res.ok) throw new Error(data.detail || 'Failed');
-        } else {
-            var res = await fetch(CONFIG.API_BASE + '/auth/users/' + userId, {
-                method: 'PATCH',
-                headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + token },
-                body: JSON.stringify({ is_active: true }),
-            });
-            var data = await res.json();
-            if (!res.ok) throw new Error(data.detail || 'Failed');
-        }
+        var res = await fetch(CONFIG.API_BASE + '/auth/users/' + userId, {
+            method: 'PATCH',
+            headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + token },
+            body: JSON.stringify({ is_active: !isCurrentlyActive }),
+        });
+        var data = await res.json();
+        if (!res.ok) throw new Error(data.detail || 'Failed');
         showToast('User ' + action + 'd!', 'success');
-        loadAdminUsers({ force: true });
+        await loadAdminUsers({ force: true });
     } catch (err) {
         showToast(err.message, 'error');
     }
@@ -2539,7 +2607,10 @@ async function adminDeleteUser(userId, username) {
         var data = await res.json();
         if (!res.ok) throw new Error(data.detail || 'Failed to delete user');
         showToast('User ' + username + ' deleted permanently', 'success');
-        loadAdminUsers({ force: true });
+        await loadAdminUsers({ force: true });
+        var filterWrap = document.getElementById('admin-user-filter-wrap');
+        if (filterWrap) filterWrap.remove();
+        await setupAdminUserFilter();
     } catch (err) {
         showToast(err.message, 'error');
     }
@@ -2547,7 +2618,10 @@ async function adminDeleteUser(userId, username) {
 
 // Expose to window for inline onclick handlers
 window.openAdminEditModal = openAdminEditModal;
+window.openAdminCreateModal = openAdminCreateModal;
+window.closeAdminCreateModal = closeAdminCreateModal;
 window.closeAdminEditModal = closeAdminEditModal;
+window.submitAdminCreateUser = submitAdminCreateUser;
 window.saveAdminEditUser = saveAdminEditUser;
 window.openAdminPwModal = openAdminPwModal;
 window.closeAdminPwModal = closeAdminPwModal;
@@ -2577,6 +2651,16 @@ document.addEventListener('DOMContentLoaded', () => {
     document.getElementById('add-link-modal').addEventListener('click', (e) => {
         if (e.target.classList.contains('modal-overlay')) closeModal();
     });
+    ['admin-edit-modal', 'admin-pw-modal', 'admin-create-modal'].forEach((modalId) => {
+        const modalEl = document.getElementById(modalId);
+        if (!modalEl) return;
+        modalEl.addEventListener('click', (e) => {
+            if (!e.target.classList.contains('modal-overlay')) return;
+            if (modalId === 'admin-edit-modal') closeAdminEditModal();
+            if (modalId === 'admin-pw-modal') closeAdminPwModal();
+            if (modalId === 'admin-create-modal') closeAdminCreateModal();
+        });
+    });
 
     // Batch toggle
     document.getElementById('modal-batch-toggle').addEventListener('click', () => {
@@ -2588,6 +2672,10 @@ document.addEventListener('DOMContentLoaded', () => {
     document.getElementById('search-input').addEventListener('input', (e) => {
         handleSearch(e.target.value);
     });
+    const adminCreateBtn = document.getElementById('admin-users-create-btn');
+    if (adminCreateBtn) {
+        adminCreateBtn.addEventListener('click', openAdminCreateModal);
+    }
     const groupSearchInput = document.getElementById('group-search');
     if (groupSearchInput) {
         groupSearchInput.addEventListener('input', (e) => {

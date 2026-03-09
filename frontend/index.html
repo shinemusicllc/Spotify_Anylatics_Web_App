@@ -338,7 +338,13 @@
             <div class="max-w-4xl">
                 <div class="flex items-center justify-between mb-8">
                     <h2 class="text-2xl font-bold" style="font-family:'Inter Tight','Inter',system-ui,sans-serif; letter-spacing:-0.02em;">User Management</h2>
-                    <span id="admin-users-count" class="text-sm text-secondary-text">0 users</span>
+                    <div class="flex items-center gap-4">
+                        <button id="admin-users-create-btn" class="btn-accent inline-flex items-center gap-2 px-5 py-2 rounded-full text-sm font-bold cursor-pointer">
+                            <span class="material-icons-round text-base">person_add</span>
+                            Create User
+                        </button>
+                        <span id="admin-users-count" class="text-sm text-secondary-text">0 users</span>
+                    </div>
                 </div>
                 <div id="admin-users-list" class="space-y-3">
                     <!-- Rendered by JS -->
@@ -473,6 +479,50 @@
             </div>
         </div>
 
-    <script src="app.js?v=20260309-13"></script>
+        <!-- Admin Create User Modal -->
+        <div id="admin-create-modal" class="modal-overlay">
+            <div class="modal-content" style="max-width:500px">
+                <div class="flex items-center justify-between mb-6">
+                    <div>
+                        <h2 class="text-xl font-bold">Create User</h2>
+                        <p class="text-sm text-secondary-text mt-1">Add a new account directly from the admin panel.</p>
+                    </div>
+                    <button onclick="closeAdminCreateModal()" class="text-secondary-text hover:text-white transition-colors cursor-pointer">
+                        <span class="material-icons-round">close</span>
+                    </button>
+                </div>
+                <div class="space-y-4">
+                    <div class="grid grid-cols-2 gap-3">
+                        <div>
+                            <label class="block text-[13px] font-semibold text-secondary-text mb-2">Username</label>
+                            <input id="admin-create-username" type="text" class="settings-input" placeholder="username" autocomplete="off" data-lpignore="true" data-1p-ignore="true">
+                        </div>
+                        <div>
+                            <label class="block text-[13px] font-semibold text-secondary-text mb-2">Role</label>
+                            <div id="admin-create-role-wrap"></div>
+                        </div>
+                    </div>
+                    <div>
+                        <label class="block text-[13px] font-semibold text-secondary-text mb-2">Email</label>
+                        <input id="admin-create-email" type="email" class="settings-input" placeholder="user@email.com" autocomplete="off" data-lpignore="true" data-1p-ignore="true">
+                    </div>
+                    <div>
+                        <label class="block text-[13px] font-semibold text-secondary-text mb-2">Display Name <span class="text-secondary-text font-normal">(optional)</span></label>
+                        <input id="admin-create-displayname" type="text" class="settings-input" placeholder="Display name" autocomplete="off" data-lpignore="true" data-1p-ignore="true">
+                    </div>
+                    <div>
+                        <label class="block text-[13px] font-semibold text-secondary-text mb-2">Temporary Password</label>
+                        <input id="admin-create-password" type="password" class="settings-input" placeholder="At least 4 characters" autocomplete="new-password" data-lpignore="true" data-1p-ignore="true">
+                    </div>
+                    <div class="pt-2 flex gap-3">
+                        <button onclick="closeAdminCreateModal()" class="flex-1 btn-ghost px-4 py-3 rounded-xl border border-white/20 text-sm font-bold cursor-pointer">Cancel</button>
+                        <button onclick="submitAdminCreateUser()" class="flex-1 btn-accent px-4 py-3 rounded-xl text-sm font-bold cursor-pointer">Create User</button>
+                    </div>
+                    <span id="admin-create-status" class="text-sm font-medium" style="display:none"></span>
+                </div>
+            </div>
+        </div>
+
+    <script src="app.js?v=20260309-14"></script>
 </body>
 </html>
