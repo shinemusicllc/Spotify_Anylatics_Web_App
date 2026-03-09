@@ -3103,19 +3103,6 @@ document.addEventListener('DOMContentLoaded', () => {
 
     const listElForDelete = document.getElementById('link-list');
     if (listElForDelete) {
-        listElForDelete.addEventListener('mousedown', (e) => {
-            if (e.button !== 0) return;
-            if (state.suppressNextRowClick) return;
-            if (isInteractiveRowTarget(e.target)) return;
-            const row = e.target.closest('.custom-grid-row');
-            if (!row) return;
-            const item = state.items.find((i) =>
-                String(i.id) === String(row.dataset.itemId)
-                || (i.type === row.dataset.type && i.spotify_id === row.dataset.spotifyId)
-            );
-            if (!item) return;
-            handleRowSelection(item, e);
-        });
         listElForDelete.addEventListener('click', (e) => {
             const btn = e.target.closest('.row-delete-btn');
             const refreshBtn = e.target.closest('.row-refresh-btn');
@@ -3140,6 +3127,13 @@ document.addEventListener('DOMContentLoaded', () => {
                     state.suppressNextRowClick = false;
                     return;
                 }
+                if (isInteractiveRowTarget(e.target)) return;
+                const item = state.items.find((i) =>
+                    String(i.id) === String(row.dataset.itemId)
+                    || (i.type === row.dataset.type && i.spotify_id === row.dataset.spotifyId)
+                );
+                if (!item) return;
+                handleRowSelection(item, e);
                 return;
             }
             e.preventDefault();
