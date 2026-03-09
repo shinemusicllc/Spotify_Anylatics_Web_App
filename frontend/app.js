@@ -134,8 +134,10 @@ const state = {
     selectionAnchorKey: null,
     draggingRowKeys: [],
     dragOverRowKey: null,
+    dragOverRowPlacement: 'before',
     draggingGroupId: null,
     dragOverGroupId: null,
+    dragOverGroupPlacement: 'before',
     suppressNextGroupClick: false,
     suppressNextRowClick: false,
 };
@@ -570,7 +572,7 @@ function handleRowSelection(item, event) {
     renderList({ preserveScroll: true });
 }
 
-function moveItemsByKeys(draggedKeys, targetKey) {
+function moveItemsByKeys(draggedKeys, targetKey, placement = 'before') {
     const draggedSet = new Set((draggedKeys || []).filter(Boolean));
     if (!draggedSet.size || !targetKey || draggedSet.has(targetKey)) return false;
 
@@ -581,13 +583,14 @@ function moveItemsByKeys(draggedKeys, targetKey) {
     const targetIndex = remaining.findIndex((item) => itemKey(item) === targetKey);
     if (targetIndex === -1) return false;
 
-    remaining.splice(targetIndex, 0, ...draggedItems);
+    const insertIndex = placement === 'after' ? targetIndex + 1 : targetIndex;
+    remaining.splice(insertIndex, 0, ...draggedItems);
     state.items = remaining;
     persistCurrentItemOrder();
     return true;
 }
 
-function moveCustomGroupBefore(draggedGroupId, targetGroupId) {
+function moveCustomGroupBefore(draggedGroupId, targetGroupId, placement = 'before') {
     const dragged = normalizeGroupName(draggedGroupId);
     const target = normalizeGroupName(targetGroupId);
     if (!dragged || !target || dragged === target) return false;
@@ -607,7 +610,8 @@ function moveCustomGroupBefore(draggedGroupId, targetGroupId) {
     const [draggedName] = next.splice(draggedIndex, 1);
     const targetIndex = next.findIndex((name) => name.toLowerCase() === target.toLowerCase());
     if (targetIndex === -1) return false;
-    next.splice(targetIndex, 0, draggedName);
+    const insertIndex = placement === 'after' ? targetIndex + 1 : targetIndex;
+    next.splice(insertIndex, 0, draggedName);
 
     state.customGroups = next;
     saveCustomGroups();
@@ -620,7 +624,10 @@ function syncRowDragUi(container) {
     host.querySelectorAll('.custom-grid-row').forEach((row) => {
         const key = row.dataset.itemKey;
         row.classList.toggle('row-dragging', state.draggingRowKeys.includes(key));
-        row.classList.toggle('row-drop-target', Boolean(state.dragOverRowKey && state.dragOverRowKey === key && !state.draggingRowKeys.includes(key)));
+        const isDropTarget = Boolean(state.dragOverRowKey && state.dragOverRowKey === key && !state.draggingRowKeys.includes(key));
+        row.classList.toggle('row-drop-target', isDropTarget);
+        row.classList.toggle('row-drop-before', isDropTarget && state.dragOverRowPlacement !== 'after');
+        row.classList.toggle('row-drop-after', isDropTarget && state.dragOverRowPlacement === 'after');
     });
 }
 
@@ -629,8 +636,11 @@ function syncGroupDragUi(container) {
     if (!host) return;
     host.querySelectorAll('.group-item[data-group]').forEach((groupBtn) => {
         const groupId = normalizeGroupName(groupBtn.getAttribute('data-group'));
+        const isDropTarget = Boolean(groupId && state.dragOverGroupId === groupId && state.draggingGroupId !== groupId);
         groupBtn.classList.toggle('group-item-dragging', Boolean(groupId && state.draggingGroupId === groupId));
-        groupBtn.classList.toggle('group-item-drop-target', Boolean(groupId && state.dragOverGroupId === groupId && state.draggingGroupId !== groupId));
+        groupBtn.classList.toggle('group-item-drop-target', isDropTarget);
+        groupBtn.classList.toggle('group-drop-before', isDropTarget && state.dragOverGroupPlacement !== 'after');
+        groupBtn.classList.toggle('group-drop-after', isDropTarget && state.dragOverGroupPlacement === 'after');
     });
 }
 
@@ -3028,6 +3038,7 @@ document.addEventListener('DOMContentLoaded', () => {
             }
             state.draggingGroupId = groupId;
             state.dragOverGroupId = groupId;
+            state.dragOverGroupPlacement = 'before';
             state.suppressNextGroupClick = true;
             if (e.dataTransfer) {
                 e.dataTransfer.effectAllowed = 'move';
@@ -3039,10 +3050,14 @@ document.addEventListener('DOMContentLoaded', () => {
             const groupBtn = e.target.closest('[data-group]');
             if (!groupBtn || !state.draggingGroupId) return;
             const targetGroupId = normalizeGroupName(groupBtn.getAttribute('data-group'));
-            if (!targetGroupId || targetGroupId === state.dragOverGroupId) return;
+            if (!targetGroupId) return;
             if (targetGroupId.toLowerCase() === ALL_GROUP_ID) return;
             e.preventDefault();
+            const rect = groupBtn.getBoundingClientRect();
+            const placement = e.clientY > rect.top + rect.height / 2 ? 'after' : 'before';
+            if (targetGroupId === state.dragOverGroupId && placement === state.dragOverGroupPlacement) return;
             state.dragOverGroupId = targetGroupId;
+            state.dragOverGroupPlacement = placement;
             syncGroupDragUi(groupList);
         });
         groupList.addEventListener('drop', (e) => {
@@ -3050,9 +3065,10 @@ document.addEventListener('DOMContentLoaded', () => {
             if (!groupBtn || !state.draggingGroupId) return;
             e.preventDefault();
             const targetGroupId = normalizeGroupName(groupBtn.getAttribute('data-group'));
-            const moved = moveCustomGroupBefore(state.draggingGroupId, targetGroupId);
+            const moved = moveCustomGroupBefore(state.draggingGroupId, targetGroupId, state.dragOverGroupPlacement);
             state.draggingGroupId = null;
             state.dragOverGroupId = null;
+            state.dragOverGroupPlacement = 'before';
             rebuildGroups();
             renderGroups();
             if (moved) {
@@ -3066,6 +3082,7 @@ document.addEventListener('DOMContentLoaded', () => {
             if (!state.draggingGroupId && !state.dragOverGroupId) return;
             state.draggingGroupId = null;
             state.dragOverGroupId = null;
+            state.dragOverGroupPlacement = 'before';
             syncGroupDragUi(groupList);
             window.setTimeout(() => {
                 state.suppressNextGroupClick = false;
@@ -3086,6 +3103,19 @@ document.addEventListener('DOMContentLoaded', () => {
 
     const listElForDelete = document.getElementById('link-list');
     if (listElForDelete) {
+        listElForDelete.addEventListener('mousedown', (e) => {
+            if (e.button !== 0) return;
+            if (state.suppressNextRowClick) return;
+            if (isInteractiveRowTarget(e.target)) return;
+            const row = e.target.closest('.custom-grid-row');
+            if (!row) return;
+            const item = state.items.find((i) =>
+                String(i.id) === String(row.dataset.itemId)
+                || (i.type === row.dataset.type && i.spotify_id === row.dataset.spotifyId)
+            );
+            if (!item) return;
+            handleRowSelection(item, e);
+        });
         listElForDelete.addEventListener('click', (e) => {
             const btn = e.target.closest('.row-delete-btn');
             const refreshBtn = e.target.closest('.row-refresh-btn');
@@ -3110,13 +3140,6 @@ document.addEventListener('DOMContentLoaded', () => {
                     state.suppressNextRowClick = false;
                     return;
                 }
-                if (isInteractiveRowTarget(e.target)) return;
-                const item = state.items.find((i) =>
-                    String(i.id) === String(row.dataset.itemId)
-                    || (i.type === row.dataset.type && i.spotify_id === row.dataset.spotifyId)
-                );
-                if (!item) return;
-                handleRowSelection(item, e);
                 return;
             }
             e.preventDefault();
@@ -3144,6 +3167,7 @@ document.addEventListener('DOMContentLoaded', () => {
                 : [draggedKey];
             state.draggingRowKeys = selectedKeys;
             state.dragOverRowKey = draggedKey;
+            state.dragOverRowPlacement = 'before';
             state.suppressNextRowClick = true;
             if (e.dataTransfer) {
                 e.dataTransfer.effectAllowed = 'move';
@@ -3155,18 +3179,23 @@ document.addEventListener('DOMContentLoaded', () => {
             const row = e.target.closest('.custom-grid-row');
             if (!row || !state.draggingRowKeys.length) return;
             const targetKey = row.dataset.itemKey;
-            if (!targetKey || targetKey === state.dragOverRowKey) return;
+            if (!targetKey) return;
             e.preventDefault();
+            const rect = row.getBoundingClientRect();
+            const placement = e.clientY > rect.top + rect.height / 2 ? 'after' : 'before';
+            if (targetKey === state.dragOverRowKey && placement === state.dragOverRowPlacement) return;
             state.dragOverRowKey = targetKey;
+            state.dragOverRowPlacement = placement;
             syncRowDragUi(listElForDelete);
         });
         listElForDelete.addEventListener('drop', (e) => {
             const row = e.target.closest('.custom-grid-row');
             if (!row || !state.draggingRowKeys.length) return;
             e.preventDefault();
-            const moved = moveItemsByKeys(state.draggingRowKeys, row.dataset.itemKey);
+            const moved = moveItemsByKeys(state.draggingRowKeys, row.dataset.itemKey, state.dragOverRowPlacement);
             state.draggingRowKeys = [];
             state.dragOverRowKey = null;
+            state.dragOverRowPlacement = 'before';
             renderList({ preserveScroll: true });
             if (moved) {
                 showToast('Row order updated', 'success');
@@ -3179,6 +3208,7 @@ document.addEventListener('DOMContentLoaded', () => {
             if (!state.draggingRowKeys.length && !state.dragOverRowKey) return;
             state.draggingRowKeys = [];
             state.dragOverRowKey = null;
+            state.dragOverRowPlacement = 'before';
             syncRowDragUi(listElForDelete);
             window.setTimeout(() => {
                 state.suppressNextRowClick = false;
