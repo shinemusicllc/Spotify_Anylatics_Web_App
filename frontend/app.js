@@ -1908,6 +1908,15 @@ function initStickyHeader() {
 
 state.currentView = 'linkchecker'; // 'linkchecker' | 'settings' | 'users'
 
+function setElementDisplay(el, mode) {
+    if (!el) return;
+    if (!mode) {
+        el.style.removeProperty('display');
+        return;
+    }
+    el.style.display = mode;
+}
+
 function switchToView(view) {
     var listWrap = document.querySelector('.list-wrap');
     var settingsPanel = document.getElementById('settings-panel');
@@ -1923,9 +1932,9 @@ function switchToView(view) {
         : null;
 
     // 1) Hide ALL panels
-    if (listWrap) listWrap.style.display = 'none';
-    if (settingsPanel) settingsPanel.style.display = 'none';
-    if (adminPanel) adminPanel.style.display = 'none';
+    setElementDisplay(listWrap, 'none');
+    setElementDisplay(settingsPanel, 'none');
+    setElementDisplay(adminPanel, 'none');
 
     // 2) Update sidebar nav active state
     var navMap = { linkchecker: 'nav-links', settings: 'nav-settings', users: 'nav-users' };
@@ -1945,26 +1954,26 @@ function switchToView(view) {
 
     // 3) Show/hide toolbar (only for linkchecker)
     var showToolbar = (view === 'linkchecker');
-    if (btnRefresh) btnRefresh.style.display = showToolbar ? '' : 'none';
-    if (btnAddLink) btnAddLink.style.display = showToolbar ? '' : 'none';
-    if (searchWrap) searchWrap.style.display = showToolbar ? '' : 'none';
+    setElementDisplay(btnRefresh, showToolbar ? null : 'none');
+    setElementDisplay(btnAddLink, showToolbar ? null : 'none');
+    setElementDisplay(searchWrap, showToolbar ? null : 'none');
 
     // 4) Show the correct panel and load its data
     state.currentView = view;
 
     if (view === 'linkchecker') {
-        if (listWrap) listWrap.style.display = '';
+        setElementDisplay(listWrap, null);
         if (breadcrumbParent) breadcrumbParent.textContent = 'Link Checker';
         updateGroupHeader();
         loadData();
     } else if (view === 'settings') {
-        if (settingsPanel) settingsPanel.style.display = 'block';
+        setElementDisplay(settingsPanel, 'block');
         if (breadcrumbParent) breadcrumbParent.textContent = 'Account';
         if (breadcrumb) breadcrumb.textContent = 'Settings';
         if (pageTitle) pageTitle.textContent = 'Account Settings';
         loadSettingsData();
     } else if (view === 'users') {
-        if (adminPanel) adminPanel.style.display = 'block';
+        setElementDisplay(adminPanel, 'block');
         if (breadcrumbParent) breadcrumbParent.textContent = 'Admin';
         if (breadcrumb) breadcrumb.textContent = 'Users';
         if (pageTitle) pageTitle.textContent = 'User Management';
@@ -1974,9 +1983,13 @@ function switchToView(view) {
 
 // Legacy wrappers for backward compatibility
 function showSettings() { switchToView('settings'); }
-function hideSettings() { /* no-op, use switchToView instead */ }
+function hideSettings() {
+    if (state.currentView === 'settings') switchToView('linkchecker');
+}
 function showAdminUsers() { switchToView('users'); }
-function hideAdminUsers() { /* no-op, use switchToView instead */ }
+function hideAdminUsers() {
+    if (state.currentView === 'users') switchToView('linkchecker');
+}
 
 function loadSettingsData() {
     const user = getAuthUser();
@@ -2237,40 +2250,6 @@ document.addEventListener('click', function() {
 // ═══════════════════════════════════════════════════════════════════
 // ADMIN USER MANAGEMENT
 // ═══════════════════════════════════════════════════════════════════
-
-function showAdminUsers() {
-    document.querySelector('.list-wrap').style.display = 'none';
-    const settingsPanel = document.getElementById('settings-panel');
-    if (settingsPanel) settingsPanel.style.display = 'none';
-    const adminPanel = document.getElementById('admin-users-panel');
-    if (adminPanel) adminPanel.style.display = '';
-
-    const breadcrumb = document.getElementById('breadcrumb-group');
-    const pageTitle = document.getElementById('page-title');
-    if (breadcrumb) {
-        breadcrumb.textContent = 'Users';
-        if (breadcrumb.previousElementSibling) breadcrumb.previousElementSibling.previousElementSibling.textContent = 'Admin';
-    }
-    if (pageTitle) pageTitle.textContent = 'User Management';
-
-    document.getElementById('btn-refresh')?.style && (document.getElementById('btn-refresh').style.display = 'none');
-    document.getElementById('btn-add-link')?.style && (document.getElementById('btn-add-link').style.display = 'none');
-    document.getElementById('search-input')?.parentElement && (document.getElementById('search-input').parentElement.style.display = 'none');
-
-    loadAdminUsers();
-}
-
-function hideAdminUsers() {
-    const adminPanel = document.getElementById('admin-users-panel');
-    if (adminPanel) adminPanel.style.display = 'none';
-    document.querySelector('.list-wrap').style.display = '';
-
-    document.getElementById('btn-refresh')?.style && (document.getElementById('btn-refresh').style.display = '');
-    document.getElementById('btn-add-link')?.style && (document.getElementById('btn-add-link').style.display = '');
-    document.getElementById('search-input')?.parentElement && (document.getElementById('search-input').parentElement.style.display = '');
-
-    updateGroupHeader();
-}
 
 let _adminUsersCache = [];
 
