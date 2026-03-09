@@ -574,6 +574,10 @@ h3 {
   align-items: center;
 }
 
+.list-head .head-cell[data-col-key="checked"] {
+  padding-right: 0;
+}
+
 .head-cell-label {
   display: block;
   white-space: normal;
@@ -583,41 +587,16 @@ h3 {
 
 .column-resize-handle {
   position: absolute;
-  top: -10px;
-  right: -12px;
-  width: 24px;
-  height: calc(100% + 20px);
+  top: 0;
+  right: -9px;
+  width: 18px;
+  height: 100%;
   padding: 0;
   border: none;
   background: transparent;
   cursor: col-resize;
   z-index: 5;
-}
-
-.column-resize-handle::before {
-  content: "";
-  position: absolute;
-  top: 10px;
-  bottom: 10px;
-  left: 50%;
-  width: 2px;
-  transform: translateX(-50%);
-  border-radius: 9999px;
-  background: rgba(255, 255, 255, 0.02);
-  transition:
-    background 140ms ease,
-    box-shadow 140ms ease;
-}
-
-.head-cell:hover .column-resize-handle::before,
-.column-resize-handle:focus-visible::before {
-  background: rgba(255, 255, 255, 0.16);
-}
-
-.column-resize-handle:hover::before,
-.column-resize-handle:active::before {
-  background: rgba(29, 185, 84, 0.9);
-  box-shadow: 0 0 10px rgba(29, 185, 84, 0.24);
+  touch-action: none;
 }
 
 .column-resizing,

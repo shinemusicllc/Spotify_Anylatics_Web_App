@@ -482,6 +482,10 @@ function loadPersistedColumnWidths() {
         const parsed = raw ? JSON.parse(raw) : {};
         const widths = { ...DEFAULT_COLUMN_WIDTHS };
         Object.keys(DEFAULT_COLUMN_WIDTHS).forEach((key) => {
+            if (key === 'checked') {
+                widths[key] = DEFAULT_COLUMN_WIDTHS[key];
+                return;
+            }
             widths[key] = clampColumnWidth(key, parsed?.[key]);
         });
         return widths;
@@ -508,7 +512,7 @@ function applyColumnWidths(widths = state.columnWidths) {
 }
 
 function setColumnWidth(key, width, persist = false) {
-    if (!(key in DEFAULT_COLUMN_WIDTHS)) return;
+    if (!(key in DEFAULT_COLUMN_WIDTHS) || key === 'checked') return;
     state.columnWidths = {
         ...state.columnWidths,
         [key]: clampColumnWidth(key, width),
