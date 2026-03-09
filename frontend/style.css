@@ -323,22 +323,24 @@ h3 {
 .custom-grid-row.row-drop-after::after {
   content: "";
   position: absolute;
-  left: 12px;
-  right: 12px;
+  left: 10px;
+  right: 10px;
   height: 3px;
-  border-radius: 9999px;
+  border-radius: 12px;
   background: rgba(39, 214, 107, 0.96);
-  box-shadow: 0 0 0 1px rgba(39, 214, 107, 0.12), 0 0 16px rgba(39, 214, 107, 0.18);
+  box-shadow:
+    0 0 0 1px rgba(39, 214, 107, 0.12),
+    0 0 12px rgba(39, 214, 107, 0.16);
   pointer-events: none;
   z-index: 3;
 }
 
 .custom-grid-row.row-drop-before::after {
-  top: -1px;
+  top: 5px;
 }
 
 .custom-grid-row.row-drop-after::after {
-  bottom: -1px;
+  bottom: 5px;
 }
 
 .meta-grid {
