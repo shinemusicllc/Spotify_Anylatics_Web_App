@@ -16,6 +16,7 @@ class ItemResponse(BaseModel):
     # Owner / Artist
     owner_name: str | None = None
     owner_image: str | None = None
+    owner_url: str | None = None
 
     # Metrics
     followers: int | None = None

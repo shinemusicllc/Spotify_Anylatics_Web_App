@@ -600,6 +600,7 @@ async def query_artist(artist_id: str) -> dict[str, Any] | None:
             "followers": followers,
             "monthly_listeners": None,
             "owner_name": data.get("name"),
+            "owner_url": f"https://open.spotify.com/artist/{artist_id}",
             "playcount": None,
             "total_plays": None,
         }
@@ -624,6 +625,7 @@ async def query_artist(artist_id: str) -> dict[str, Any] | None:
         return {
             "name": scraped.get("name"),
             "owner_name": scraped.get("owner_name") or scraped.get("name"),
+            "owner_url": f"https://open.spotify.com/artist/{artist_id}",
             "monthly_listeners": scraped.get("monthly_listeners"),
             "followers": scraped.get("followers"),
             "playcount": None,
@@ -677,6 +679,7 @@ async def get_track(track_id: str) -> dict[str, Any] | None:
             "name": data.get("name"),
             "image": images[0]["url"] if images else None,
             "owner_name": primary_artist,
+            "owner_url": f"https://open.spotify.com/artist/{artists[0]['id']}" if artists and artists[0].get("id") else None,
             "duration_ms": data.get("duration_ms"),
             "release_date": album.get("release_date"),
             "playcount": None,
@@ -847,6 +850,7 @@ async def fetch_album(album_id: str) -> dict[str, Any] | None:
             "name": data.get("name"),
             "image": images[0]["url"] if images else None,
             "owner_name": artists[0]["name"] if artists else None,
+            "owner_url": f"https://open.spotify.com/artist/{artists[0]['id']}" if artists and artists[0].get("id") else None,
             "track_count": data.get("total_tracks"),
             "release_date": data.get("release_date"),
             "playcount": None,
@@ -965,6 +969,7 @@ async def _fetch_track_via_pathfinder(track_id: str) -> dict[str, Any] | None:
     first_artist_items = ((track_union.get("firstArtist") or {}).get("items") or [])
     primary_artist = first_artist_items[0] if first_artist_items else {}
     owner_name = ((primary_artist.get("profile") or {}).get("name"))
+    owner_artist_id = _spotify_uri_to_id(primary_artist.get("uri"))
     owner_image = _first_image_from_sources(
         ((primary_artist.get("visuals") or {}).get("avatarImage") or {}).get("sources") or []
     )
@@ -979,6 +984,7 @@ async def _fetch_track_via_pathfinder(track_id: str) -> dict[str, Any] | None:
         "image": _first_image_from_sources(album_cover_sources),
         "owner_name": owner_name,
         "owner_image": owner_image,
+        "owner_url": f"https://open.spotify.com/artist/{owner_artist_id}" if owner_artist_id else None,
         "duration_ms": duration_ms,
         "release_date": release_date,
         "playcount": playcount,
@@ -1026,6 +1032,7 @@ async def _fetch_artist_via_pathfinder(artist_id: str) -> dict[str, Any] | None:
         "image": avatar,
         "owner_name": profile.get("name"),
         "owner_image": avatar,
+        "owner_url": f"https://open.spotify.com/artist/{artist_id}",
         "followers": _safe_int(stats.get("followers")),
         "monthly_listeners": _safe_int(stats.get("monthlyListeners")),
         "playcount": None,
@@ -1077,6 +1084,7 @@ async def _fetch_album_via_pathfinder(album_id: str) -> dict[str, Any] | None:
     image: str | None = None
     owner_name: str | None = None
     owner_image: str | None = None
+    owner_url: str | None = None
     release_date: str | None = None
 
     offset = 0
@@ -1117,6 +1125,8 @@ async def _fetch_album_via_pathfinder(album_id: str) -> dict[str, Any] | None:
             artist_items = ((album_union.get("artists") or {}).get("items") or [])
             main_artist = artist_items[0] if artist_items else {}
             owner_name = ((main_artist.get("profile") or {}).get("name"))
+            owner_artist_id = _spotify_uri_to_id(main_artist.get("uri"))
+            owner_url = f"https://open.spotify.com/artist/{owner_artist_id}" if owner_artist_id else None
             owner_image = _first_image_from_sources(
                 ((main_artist.get("visuals") or {}).get("avatarImage") or {}).get("sources") or []
             )
@@ -1163,6 +1173,7 @@ async def _fetch_album_via_pathfinder(album_id: str) -> dict[str, Any] | None:
         "image": image,
         "owner_name": owner_name,
         "owner_image": owner_image,
+        "owner_url": owner_url,
         "track_count": expected,
         "release_date": release_date,
         "tracks": tracks,

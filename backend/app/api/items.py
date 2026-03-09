@@ -16,7 +16,70 @@ from app.services.auth import get_current_user
 router = APIRouter()
 
 
-def _item_to_response(item: Item) -> ItemResponse:
+def _spotify_url(item_type: str, spotify_id: str) -> str:
+    return f"https://open.spotify.com/{item_type}/{spotify_id}"
+
+
+def _extract_owner_url(item: Item, raw_data: dict | None) -> str | None:
+    if isinstance(raw_data, dict):
+        owner_url = raw_data.get("owner_url")
+        if isinstance(owner_url, str) and owner_url.strip():
+            return owner_url.strip()
+
+        if item.item_type == "track":
+            artists = raw_data.get("artists") or []
+            if isinstance(artists, list) and artists:
+                first_artist = artists[0] or {}
+                artist_id = first_artist.get("spotify_id") or first_artist.get("id")
+                if artist_id:
+                    return _spotify_url("artist", artist_id)
+
+        if item.item_type == "album":
+            artists = raw_data.get("artists") or []
+            if isinstance(artists, list) and artists:
+                first_artist = artists[0] or {}
+                artist_id = first_artist.get("spotify_id") or first_artist.get("id")
+                if artist_id:
+                    return _spotify_url("artist", artist_id)
+
+            tracks = raw_data.get("tracks") or []
+            if isinstance(tracks, list) and tracks:
+                first_track = tracks[0] or {}
+                track_artists = first_track.get("artists") or []
+                if isinstance(track_artists, list) and track_artists:
+                    first_artist = track_artists[0] or {}
+                    artist_id = first_artist.get("spotify_id") or first_artist.get("id")
+                    if artist_id:
+                        return _spotify_url("artist", artist_id)
+
+    if item.item_type == "artist":
+        return _spotify_url("artist", item.spotify_id)
+    return None
+
+
+async def _load_owner_urls(db: AsyncSession, items: list[Item]) -> dict[str, str | None]:
+    spotify_ids = [item.spotify_id for item in items if item.spotify_id]
+    if not spotify_ids:
+        return {}
+
+    result = await db.execute(
+        select(RawResponse)
+        .where(RawResponse.spotify_id.in_(spotify_ids))
+        .order_by(RawResponse.captured_at.desc())
+    )
+    rows = result.scalars().all()
+    raw_map: dict[str, dict] = {}
+    for row in rows:
+        if row.spotify_id not in raw_map and isinstance(row.response_data, dict):
+            raw_map[row.spotify_id] = row.response_data
+
+    return {
+        item.spotify_id: _extract_owner_url(item, raw_map.get(item.spotify_id))
+        for item in items
+    }
+
+
+def _item_to_response(item: Item, owner_url: str | None = None) -> ItemResponse:
     """Convert DB Item model to API response schema."""
     duration = None
     if item.duration_ms:
@@ -34,6 +97,7 @@ def _item_to_response(item: Item) -> ItemResponse:
         image=item.image,
         owner_name=item.owner_name,
         owner_image=item.owner_image,
+        owner_url=owner_url,
         followers=item.followers,
         monthly_listeners=item.monthly_listeners,
         monthly_plays=item.monthly_listeners,  # Alias for frontend
@@ -90,9 +154,10 @@ async def list_items(
     query = query.limit(limit).offset(offset)
     result = await db.execute(query)
     items = result.scalars().all()
+    owner_url_map = await _load_owner_urls(db, items)
 
     return ItemListResponse(
-        items=[_item_to_response(i) for i in items],
+        items=[_item_to_response(i, owner_url_map.get(i.spotify_id)) for i in items],
         total=total,
     )
 
@@ -119,7 +184,8 @@ async def get_item(
     if current_user.role != "admin" and item.user_id != current_user.id:
         raise HTTPException(status_code=403, detail="Not authorized to view this item")
 
-    return _item_to_response(item)
+    owner_url_map = await _load_owner_urls(db, [item])
+    return _item_to_response(item, owner_url_map.get(item.spotify_id))
 
 
 @router.delete("/items/{item_type}/{spotify_id}")

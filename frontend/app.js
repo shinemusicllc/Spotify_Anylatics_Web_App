@@ -971,6 +971,8 @@ function renderRow(item) {
     const status = getStatusInfo(item);
     const isError = item.status === 'error';
     const spotifyUrl = getSpotifyUrl(item.type, item.spotify_id);
+    const ownerUrl = item.owner_url || spotifyUrl;
+    const coverUrl = item.image || `https://picsum.photos/seed/${item.spotify_id}/128/128`;
     const checkedAt = item.last_checked || item.created_at || '';
     const updatedAt = formatUpdatedAt(checkedAt);
 
@@ -981,30 +983,31 @@ function renderRow(item) {
 
     const row = document.createElement('div');
     row.className = 'custom-grid-row px-4 py-3 bg-white/5 rounded-lg border border-transparent hover:bg-row-hover hover:border-white/10 transition-all group';
-    row.dataset.spotifyUrl = spotifyUrl;
     row.dataset.itemId = item.id;
     row.dataset.type = item.type;
     row.dataset.spotifyId = item.spotify_id;
 
-    // Click → open popup window
-    row.addEventListener('click', (e) => {
-        // Ignore clicks on row actions (delete, etc.)
-        if (e.target.closest('.row-delete-btn') || e.target.closest('.row-refresh-btn')) return;
-        // Don't open if user is selecting text
-        if (window.getSelection().toString()) return;
-        openSpotifyPopup(spotifyUrl);
-    });
-
     row.innerHTML = `
         <!-- Left: Asset Details -->
         <div class="flex items-center gap-4">
-            <img alt="Cover" class="list-cover-image" src="${item.image || `https://picsum.photos/seed/${item.spotify_id}/128/128`}">
+            <button type="button" class="list-cover-trigger" data-action="preview-image" data-image-url="${escapeHtml(coverUrl)}" aria-label="Preview cover image">
+                <img alt="Cover" class="list-cover-image" src="${coverUrl}">
+            </button>
             <div>
                 <span class="list-type-badge ${isError ? 'badge-error' : getBadgeClass(item.type)}">${item.type}</span>
-                <h3 class="list-asset-title ${isError ? 'text-white/80' : ''}">${escapeHtml(item.name || 'Unknown')}</h3>
+                <h3 class="list-asset-title ${isError ? 'text-white/80' : ''}">
+                    <a class="list-title-link" href="${spotifyUrl}" target="_blank" rel="noopener noreferrer">${escapeHtml(item.name || 'Unknown')}</a>
+                </h3>
+                <div class="list-asset-meta">
+                    <p class="list-asset-uri text-secondary-text">spotify:${item.type}:${item.spotify_id}</p>
+                    <button type="button" class="list-copy-btn" data-action="copy-link" data-copy-value="${spotifyUrl}" aria-label="Copy Spotify link">
+                        <span class="material-icons-round">content_copy</span>
+                        <span>Copy</span>
+                    </button>
+                </div>
                 ${isError
                     ? `<p class="list-asset-error text-red-400 font-medium flex items-center gap-1"><span class="material-icons-round list-error-icon">warning</span> Error ${item.error_code}: ${item.error_message || 'Unknown error'}</p>`
-                    : `<p class="list-asset-uri text-secondary-text">spotify:${item.type}:${item.spotify_id}</p>`
+                    : ``
                 }
             </div>
         </div>
@@ -1013,7 +1016,9 @@ function renderRow(item) {
             <div class="flex items-center gap-3 meta-cell">
                 ${ownerHtml}
                 <div class="list-owner-meta">
-                    <div class="list-owner-name">${escapeHtml(item.owner_name || '-')}</div>
+                    <div class="list-owner-name">
+                        <a class="list-owner-link" href="${ownerUrl}" target="_blank" rel="noopener noreferrer">${escapeHtml(item.owner_name || '-')}</a>
+                    </div>
                     <div class="list-owner-time text-secondary-text">${updatedAt}</div>
                 </div>
             </div>
@@ -1173,8 +1178,34 @@ function updateApiStatus() {
 }
 
 // ═══════════════════════════════════════════════════════════════════
-// POPUP WINDOW — Open Spotify link in mini window
+// LINK / PREVIEW HELPERS
 // ═══════════════════════════════════════════════════════════════════
+
+async function copyToClipboard(value, successMessage) {
+    if (!value) return;
+    try {
+        await navigator.clipboard.writeText(value);
+        showToast(successMessage || 'Copied', 'success');
+    } catch (err) {
+        showToast('Copy failed', 'error');
+    }
+}
+
+function openImagePreview(url) {
+    if (!url) return;
+    const modal = document.getElementById('image-preview-modal');
+    const image = document.getElementById('image-preview-img');
+    if (!modal || !image) return;
+    image.src = url;
+    modal.classList.add('open');
+}
+
+function closeImagePreview() {
+    const modal = document.getElementById('image-preview-modal');
+    const image = document.getElementById('image-preview-img');
+    if (modal) modal.classList.remove('open');
+    if (image) image.src = '';
+}
 
 async function handleDeleteItem(item) {
     if (!item) return;
@@ -2799,6 +2830,20 @@ document.addEventListener('DOMContentLoaded', () => {
         listElForDelete.addEventListener('click', (e) => {
             const btn = e.target.closest('.row-delete-btn');
             const refreshBtn = e.target.closest('.row-refresh-btn');
+            const copyBtn = e.target.closest('[data-action="copy-link"]');
+            const previewBtn = e.target.closest('[data-action="preview-image"]');
+            if (copyBtn) {
+                e.preventDefault();
+                e.stopPropagation();
+                copyToClipboard(copyBtn.getAttribute('data-copy-value'), 'Link copied');
+                return;
+            }
+            if (previewBtn) {
+                e.preventDefault();
+                e.stopPropagation();
+                openImagePreview(previewBtn.getAttribute('data-image-url'));
+                return;
+            }
             if (!btn && !refreshBtn) return;
             e.preventDefault();
             e.stopPropagation();
@@ -2813,6 +2858,15 @@ document.addEventListener('DOMContentLoaded', () => {
                 handleDeleteItem(item);
             } else if (refreshBtn) {
                 handleRefreshItem(item);
+            }
+        });
+    }
+
+    const imagePreviewModal = document.getElementById('image-preview-modal');
+    if (imagePreviewModal) {
+        imagePreviewModal.addEventListener('click', (e) => {
+            if (e.target.classList.contains('modal-overlay') || e.target.closest('#image-preview-close')) {
+                closeImagePreview();
             }
         });
     }
@@ -2882,7 +2936,10 @@ document.addEventListener('DOMContentLoaded', () => {
 
     // Keyboard shortcuts
     document.addEventListener('keydown', (e) => {
-        if (e.key === 'Escape') closeModal();
+        if (e.key === 'Escape') {
+            closeModal();
+            closeImagePreview();
+        }
         if ((e.ctrlKey || e.metaKey) && e.key === 'k') {
             e.preventDefault();
             document.getElementById('search-input').focus();
