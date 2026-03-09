@@ -1192,7 +1192,6 @@ function renderRow(item) {
     row.dataset.type = item.type;
     row.dataset.spotifyId = item.spotify_id;
     row.dataset.itemKey = key;
-    row.draggable = true;
 
     row.innerHTML = `
         <!-- Left: Asset Details -->
@@ -1241,6 +1240,9 @@ function renderRow(item) {
             <div class="meta-cell text-right row-action-cell">
                 <span class="list-checked-text text-secondary-text row-checked" data-checked-at="${escapeHtml(checkedAt)}">${timeAgo(checkedAt)}</span>
                 <div class="row-action-buttons">
+                    <button type="button" class="row-drag-handle" aria-label="Reorder row" draggable="true">
+                        <span class="material-icons-round">drag_indicator</span>
+                    </button>
                     <button type="button" class="row-refresh-btn" aria-label="Refresh row">
                         <span class="material-icons-round">refresh</span>
                     </button>
@@ -3150,8 +3152,9 @@ document.addEventListener('DOMContentLoaded', () => {
             }
         });
         listElForDelete.addEventListener('dragstart', (e) => {
-            const row = e.target.closest('.custom-grid-row');
-            if (!row || isInteractiveRowTarget(e.target)) {
+            const dragHandle = e.target.closest('.row-drag-handle');
+            const row = dragHandle ? dragHandle.closest('.custom-grid-row') : null;
+            if (!row || !dragHandle) {
                 e.preventDefault();
                 return;
             }

@@ -259,10 +259,6 @@ h3 {
   user-select: none;
 }
 
-.custom-grid-row[draggable="true"] {
-  cursor: grab;
-}
-
 .custom-grid-row.row-selected {
   background: rgba(17, 48, 29, 0.42);
   border-color: rgba(29, 185, 84, 0.58);
@@ -751,7 +747,8 @@ h3 {
 }
 
 .row-refresh-btn,
-.row-delete-btn {
+.row-delete-btn,
+.row-drag-handle {
   display: none;
   align-items: center;
   justify-content: center;
@@ -768,15 +765,25 @@ h3 {
 }
 
 .row-refresh-btn .material-icons-round,
-.row-delete-btn .material-icons-round {
+.row-delete-btn .material-icons-round,
+.row-drag-handle .material-icons-round {
   font-size: 16px;
 }
 
 .row-refresh-btn:hover,
-.row-delete-btn:hover {
+.row-delete-btn:hover,
+.row-drag-handle:hover {
   background: rgba(255, 255, 255, 0.08);
   border-color: rgba(255, 255, 255, 0.34);
   color: #b3b3b3;
+}
+
+.row-drag-handle {
+  cursor: grab;
+}
+
+.row-drag-handle:active {
+  cursor: grabbing;
 }
 
 .custom-grid-row:hover .row-checked {
@@ -788,7 +795,8 @@ h3 {
 }
 
 .custom-grid-row:hover .row-refresh-btn,
-.custom-grid-row:hover .row-delete-btn {
+.custom-grid-row:hover .row-delete-btn,
+.custom-grid-row:hover .row-drag-handle {
   display: inline-flex;
 }
 
