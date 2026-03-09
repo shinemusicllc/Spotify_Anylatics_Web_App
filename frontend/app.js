@@ -295,6 +295,81 @@ function formatUpdatedAt(isoDate) {
     return `${get('hour')}:${get('minute')} ${get('day')}/${get('month')}/${get('year')}`;
 }
 
+function formatCellValue(value) {
+    if (value == null || value === '' || Number.isNaN(Number(value))) return '-';
+    return formatDetailedMetric(value);
+}
+
+function formatDeltaDays(days) {
+    if (days == null || Number.isNaN(Number(days))) return '--';
+    return String(Math.max(0, Number(days))).padStart(2, '0');
+}
+
+function renderDeltaBadge(delta, days) {
+    if (delta == null || Number.isNaN(Number(delta))) return '';
+
+    const numeric = Number(delta);
+    let icon = 'remove';
+    let cls = 'metric-delta-flat';
+    let text = '0';
+
+    if (numeric > 0) {
+        icon = 'north';
+        cls = 'metric-delta-up';
+        text = `+${formatDetailedMetric(numeric)}`;
+    } else if (numeric < 0) {
+        icon = 'south';
+        cls = 'metric-delta-down';
+        text = `-${formatDetailedMetric(Math.abs(numeric))}`;
+    }
+
+    return `
+        <div class="metric-delta ${cls}">
+            <span class="material-icons-round">${icon}</span>
+            <span>${text}/${formatDeltaDays(days)}</span>
+        </div>
+    `;
+}
+
+function renderMetricCell(value, delta, days) {
+    const hasValue = !(value == null || value === '' || Number.isNaN(Number(value)));
+    return `
+        <div class="metric-stack">
+            <span class="metric-main ${hasValue ? '' : 'metric-empty'}">${hasValue ? formatCellValue(value) : '-'}</span>
+            ${renderDeltaBadge(delta, days)}
+        </div>
+    `;
+}
+
+function getExcelColumnValues(item) {
+    const type = item.type;
+    return {
+        playlistSaves: type === 'playlist' ? (item.saves ?? item.followers) : null,
+        playlistSavesDelta: type === 'playlist' ? item.followers_delta : null,
+        playlistTrackCount: type === 'playlist' ? item.track_count : null,
+        playlistTrackCountDelta: type === 'playlist' ? item.track_count_delta : null,
+        albumTrackCount: type === 'album' ? item.track_count : null,
+        albumTrackCountDelta: type === 'album' ? item.track_count_delta : null,
+        artistFollowers: type === 'artist' || type === 'track' ? item.followers : null,
+        artistFollowersDelta: type === 'artist' || type === 'track' ? item.followers_delta : null,
+        artistListeners: type === 'artist' || type === 'track' ? item.monthly_listeners : null,
+        artistListenersDelta: type === 'artist' || type === 'track' ? item.monthly_listeners_delta : null,
+        trackViews: type === 'track' ? item.playcount : null,
+        trackViewsDelta: type === 'track' ? item.playcount_delta : null,
+        deltaDays: item.delta_days,
+    };
+}
+
+function getItemSubtitle(item) {
+    if (item.type === 'album' && Array.isArray(item.export_tracks) && item.export_tracks.length > 0) {
+        return `${item.export_tracks.length} tracks ready for export`;
+    }
+    if (item.type === 'track' && Array.isArray(item.artist_names) && item.artist_names.length > 1) {
+        return `Primary artist metrics from ${item.artist_names[0]}`;
+    }
+    return null;
+}
+
 /** Parse Spotify URL to get type and id */
 function parseSpotifyUrl(input) {
     input = input.trim();
@@ -1235,7 +1310,7 @@ function normalizeJobResult(result, fallback = {}) {
 function renderRow(item) {
     const status = getStatusInfo(item);
     const isError = item.status === 'error';
-    const spotifyUrl = getSpotifyUrl(item.type, item.spotify_id);
+    const spotifyUrl = item.spotify_url || getSpotifyUrl(item.type, item.spotify_id);
     const ownerUrl = item.owner_url || spotifyUrl;
     const coverUrl = item.image || `https://picsum.photos/seed/${item.spotify_id}/128/128`;
     const checkedAt = item.last_checked || item.created_at || '';
@@ -1252,6 +1327,8 @@ function renderRow(item) {
 
     const isDropBefore = isDropTarget && state.dragOverRowPlacement !== 'after';
     const isDropAfter = isDropTarget && state.dragOverRowPlacement === 'after';
+    const excel = getExcelColumnValues(item);
+    const subtitle = getItemSubtitle(item);
 
     const row = document.createElement('div');
     row.className = `custom-grid-row px-4 py-3 bg-white/5 rounded-lg border border-transparent hover:bg-row-hover hover:border-white/10 transition-all group ${isSelected ? 'row-selected' : ''} ${isDragging ? 'row-dragging' : ''} ${isDropTarget ? 'row-drop-target' : ''} ${isDropBefore ? 'row-drop-before' : ''} ${isDropAfter ? 'row-drop-after' : ''}`;
@@ -1283,6 +1360,7 @@ function renderRow(item) {
                     ? `<p class="list-asset-error text-red-400 font-medium flex items-center gap-1"><span class="material-icons-round list-error-icon">warning</span> Error ${item.error_code}: ${item.error_message || 'Unknown error'}</p>`
                     : ``
                 }
+                ${subtitle ? `<p class="list-asset-subtitle text-secondary-text">${escapeHtml(subtitle)}</p>` : ``}
             </div>
         </div>
         <!-- Right: Metadata -->
@@ -1296,17 +1374,20 @@ function renderRow(item) {
                     <div class="list-owner-time text-secondary-text">${updatedAt}</div>
                 </div>
             </div>
-            <div class="list-stats-cell text-secondary-text meta-cell">
-                ${getStatIcons(item)}
-            </div>
-            <div class="list-metric-value text-secondary-text meta-cell">${getMetric1(item)}</div>
-            <div class="list-metric-value text-secondary-text meta-cell">${getMetric2(item)}</div>
-            <div class="flex items-center gap-2 meta-cell">
-                <span class="status-dot ${status.dot}"></span>
-                <span class="list-status-label ${status.color} truncate">${status.label}</span>
-            </div>
+            <div class="meta-cell">${renderMetricCell(excel.playlistSaves, excel.playlistSavesDelta, excel.deltaDays)}</div>
+            <div class="meta-cell">${renderMetricCell(excel.playlistTrackCount, excel.playlistTrackCountDelta, excel.deltaDays)}</div>
+            <div class="meta-cell">${renderMetricCell(excel.albumTrackCount, excel.albumTrackCountDelta, excel.deltaDays)}</div>
+            <div class="meta-cell">${renderMetricCell(excel.artistFollowers, excel.artistFollowersDelta, excel.deltaDays)}</div>
+            <div class="meta-cell">${renderMetricCell(excel.artistListeners, excel.artistListenersDelta, excel.deltaDays)}</div>
+            <div class="meta-cell">${renderMetricCell(excel.trackViews, excel.trackViewsDelta, excel.deltaDays)}</div>
             <div class="meta-cell text-right row-action-cell">
-                <span class="list-checked-text text-secondary-text row-checked" data-checked-at="${escapeHtml(checkedAt)}">${timeAgo(checkedAt)}</span>
+                <div class="checked-stack">
+                    <span class="list-checked-text text-secondary-text row-checked" data-checked-at="${escapeHtml(checkedAt)}">${timeAgo(checkedAt)}</span>
+                    <span class="checked-status ${status.color}">
+                        <span class="status-dot ${status.dot}"></span>
+                        <span class="truncate">${status.label}</span>
+                    </span>
+                </div>
                 <div class="row-action-buttons">
                     <button type="button" class="row-refresh-btn" aria-label="Refresh row">
                         <span class="material-icons-round">refresh</span>
@@ -1851,6 +1932,7 @@ async function pollJobs() {
             );
             if (job.status === 'completed') {
                 hasTerminalUpdate = true;
+                shouldReload = true;
                 state.pendingJobs.delete(jobId);
                 state.pendingJobToItem.delete(jobId);
                 const completedAt = job.completed_at || new Date().toISOString();
@@ -1884,6 +1966,7 @@ async function pollJobs() {
                 }
             } else if (job.status === 'error') {
                 hasTerminalUpdate = true;
+                shouldReload = true;
                 state.pendingJobs.delete(jobId);
                 state.pendingJobToItem.delete(jobId);
                 const idx = state.items.findIndex(i => i.id === mappedItemId || i.id === jobId);

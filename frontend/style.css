@@ -81,9 +81,9 @@ h3 {
   --right-col: 7fr;
   --meta-gap: 18px;
   --row-px: 2rem;
-  --owner-col: minmax(190px, 1.35fr);
-  --middle-col-min: 112px;
-  --checked-col: 90px;
+  --owner-col: minmax(180px, 1.25fr);
+  --middle-col-min: 96px;
+  --checked-col: 130px;
   --surface-0: #0e1116;
   --surface-1: #10151d;
   --surface-2: #131a24;
@@ -342,7 +342,7 @@ h3 {
 .meta-grid {
   display: grid;
   grid-template-columns:
-    var(--owner-col) repeat(4, minmax(var(--middle-col-min), 1fr))
+    var(--owner-col) repeat(6, minmax(var(--middle-col-min), 1fr))
     var(--checked-col);
   column-gap: var(--meta-gap);
   align-items: center;
@@ -585,9 +585,12 @@ h3 {
   box-shadow: none !important;
 }
 
+.list-grid .meta-grid > :nth-child(2),
 .list-grid .meta-grid > :nth-child(3),
 .list-grid .meta-grid > :nth-child(4),
-.list-grid .meta-grid > :nth-child(6) {
+.list-grid .meta-grid > :nth-child(5),
+.list-grid .meta-grid > :nth-child(6),
+.list-grid .meta-grid > :nth-child(7) {
   font-variant-numeric: tabular-nums;
   letter-spacing: 0.015em;
 }
@@ -789,10 +792,83 @@ h3 {
 .row-action-cell {
   position: relative;
   display: flex;
+  align-items: flex-end;
+  justify-content: flex-end;
+  min-width: 130px;
+  z-index: 6;
+}
+
+.checked-stack {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 6px;
+}
+
+.checked-status {
+  display: inline-flex;
   align-items: center;
   justify-content: flex-end;
-  min-width: 90px;
-  z-index: 6;
+  gap: 6px;
+  font-size: 12px;
+  line-height: 1;
+  font-weight: 500;
+}
+
+.metric-stack {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 6px;
+  min-height: 40px;
+}
+
+.metric-main {
+  font-size: 14px;
+  line-height: 1.1;
+  font-weight: 500;
+  color: #f2f5fb;
+}
+
+.metric-empty {
+  color: #7f8896;
+}
+
+.metric-delta {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 3px 8px;
+  border-radius: 9999px;
+  font-size: 11px;
+  line-height: 1;
+  font-weight: 700;
+  letter-spacing: 0.01em;
+}
+
+.metric-delta .material-icons-round {
+  font-size: 13px;
+}
+
+.metric-delta-up {
+  color: #6ee7a8;
+  background: rgba(34, 197, 94, 0.14);
+}
+
+.metric-delta-down {
+  color: #fca5a5;
+  background: rgba(239, 68, 68, 0.14);
+}
+
+.metric-delta-flat {
+  color: #cbd5e1;
+  background: rgba(148, 163, 184, 0.14);
+}
+
+.list-asset-subtitle {
+  margin-top: 6px;
+  font-size: 12px;
+  line-height: 1.25;
 }
 
 .row-action-buttons {
@@ -1183,12 +1259,13 @@ h3 {
 
 @media (max-width: 1024px) {
   .meta-grid {
-    grid-template-columns: var(--owner-col) repeat(2, minmax(90px, 1fr)) var(
+    grid-template-columns: var(--owner-col) repeat(4, minmax(90px, 1fr)) var(
         --checked-col
       );
   }
   .meta-grid > :nth-child(3),
-  .meta-grid > :nth-child(5) {
+  .meta-grid > :nth-child(4),
+  .meta-grid > :nth-child(6) {
     display: none;
   }
 }

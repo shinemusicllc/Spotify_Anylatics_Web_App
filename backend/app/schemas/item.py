@@ -4,6 +4,14 @@ from datetime import datetime
 from pydantic import BaseModel
 
 
+class AlbumTrackExport(BaseModel):
+    """Export-friendly album track row."""
+
+    artist_names: str
+    track_name: str
+    spotify_url: str | None = None
+
+
 class ItemResponse(BaseModel):
     """Single item response."""
 
@@ -11,12 +19,15 @@ class ItemResponse(BaseModel):
     spotify_id: str
     type: str
     name: str | None = None
+    spotify_url: str | None = None
     image: str | None = None
 
     # Owner / Artist
     owner_name: str | None = None
     owner_image: str | None = None
     owner_url: str | None = None
+    artist_names: list[str] | None = None
+    export_tracks: list[AlbumTrackExport] | None = None
 
     # Metrics
     followers: int | None = None
@@ -29,6 +40,11 @@ class ItemResponse(BaseModel):
     duration: str | None = None
     release_date: str | None = None
     saves: int | None = None
+    followers_delta: int | None = None
+    monthly_listeners_delta: int | None = None
+    playcount_delta: int | None = None
+    track_count_delta: int | None = None
+    delta_days: int | None = None
 
     # Status
     status: str = "pending"

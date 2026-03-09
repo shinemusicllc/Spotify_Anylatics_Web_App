@@ -1,16 +1,18 @@
 """Items endpoints — query stored items."""
 
+from collections import defaultdict
+
 from fastapi import APIRouter, Depends, HTTPException, Query
-from sqlalchemy import select, func, delete
+from sqlalchemy import delete, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.database import get_db
-from app.models.item import Item
 from app.models.crawl_job import CrawlJob
+from app.models.item import Item
 from app.models.metrics_snapshot import MetricsSnapshot
 from app.models.raw_response import RawResponse
 from app.models.user import User
-from app.schemas.item import ItemResponse, ItemListResponse
+from app.schemas.item import ItemListResponse, ItemResponse
 from app.services.auth import get_current_user
 
 router = APIRouter()
@@ -57,7 +59,83 @@ def _extract_owner_url(item: Item, raw_data: dict | None) -> str | None:
     return None
 
 
-async def _load_owner_urls(db: AsyncSession, items: list[Item]) -> dict[str, str | None]:
+def _extract_artist_names(raw_data: dict | None) -> list[str]:
+    if not isinstance(raw_data, dict):
+        return []
+
+    artist_names = raw_data.get("artist_names")
+    if isinstance(artist_names, list):
+        return [
+            name.strip()
+            for name in artist_names
+            if isinstance(name, str) and name.strip()
+        ]
+
+    artists = raw_data.get("artists")
+    if isinstance(artists, list):
+        names: list[str] = []
+        for artist in artists:
+            if not isinstance(artist, dict):
+                continue
+            name = artist.get("name")
+            if isinstance(name, str) and name.strip():
+                names.append(name.strip())
+        return names
+
+    return []
+
+
+def _build_album_export_tracks(raw_data: dict | None) -> list[dict]:
+    if not isinstance(raw_data, dict):
+        return []
+
+    tracks = raw_data.get("tracks")
+    if not isinstance(tracks, list):
+        return []
+
+    export_rows: list[dict] = []
+    for track in tracks:
+        if not isinstance(track, dict):
+            continue
+
+        track_name = track.get("name")
+        if not isinstance(track_name, str) or not track_name.strip():
+            continue
+
+        artist_names = _extract_artist_names(track)
+        spotify_url = track.get("spotify_url")
+        if not isinstance(spotify_url, str) or not spotify_url.strip():
+            spotify_id = track.get("spotify_id")
+            spotify_url = (
+                _spotify_url("track", spotify_id.strip())
+                if isinstance(spotify_id, str) and spotify_id.strip()
+                else None
+            )
+
+        export_rows.append(
+            {
+                "artist_names": ", ".join(artist_names) if artist_names else "-",
+                "track_name": track_name.strip(),
+                "spotify_url": spotify_url,
+            }
+        )
+
+    return export_rows
+
+
+def _format_added_date(value) -> str | None:
+    if value is None:
+        return None
+    return value.strftime("%d/%m %H:%M")
+
+
+def _compute_delta(current: int | None, previous: int | None) -> int | None:
+    if current is None or previous is None:
+        return None
+    return current - previous
+
+
+async def _load_latest_raw_data(db: AsyncSession, items: list[Item]) -> dict[str, dict]:
     spotify_ids = [item.spotify_id for item in items if item.spotify_id]
     if not spotify_ids:
         return {}
@@ -72,14 +150,35 @@ async def _load_owner_urls(db: AsyncSession, items: list[Item]) -> dict[str, str
     for row in rows:
         if row.spotify_id not in raw_map and isinstance(row.response_data, dict):
             raw_map[row.spotify_id] = row.response_data
-
-    return {
-        item.spotify_id: _extract_owner_url(item, raw_map.get(item.spotify_id))
-        for item in items
-    }
+    return raw_map
 
 
-def _item_to_response(item: Item, owner_url: str | None = None) -> ItemResponse:
+async def _load_recent_snapshots(db: AsyncSession, items: list[Item]) -> dict:
+    item_ids = [item.id for item in items if item.id]
+    if not item_ids:
+        return {}
+
+    result = await db.execute(
+        select(MetricsSnapshot)
+        .where(MetricsSnapshot.item_id.in_(item_ids))
+        .order_by(MetricsSnapshot.item_id, MetricsSnapshot.captured_at.desc())
+    )
+    rows = result.scalars().all()
+
+    snapshot_map: dict = defaultdict(list)
+    for row in rows:
+        bucket = snapshot_map[row.item_id]
+        if len(bucket) < 2:
+            bucket.append(row)
+    return snapshot_map
+
+
+def _item_to_response(
+    item: Item,
+    owner_url: str | None = None,
+    raw_data: dict | None = None,
+    snapshots: list[MetricsSnapshot] | None = None,
+) -> ItemResponse:
     """Convert DB Item model to API response schema."""
     duration = None
     if item.duration_ms:
@@ -88,31 +187,65 @@ def _item_to_response(item: Item, owner_url: str | None = None) -> ItemResponse:
 
     has_total_plays = item.item_type in {"track", "album", "playlist"}
     total_plays = item.playcount if has_total_plays else None
+    artist_names = _extract_artist_names(raw_data)
+    export_tracks = _build_album_export_tracks(raw_data) if item.item_type == "album" else None
+
+    snapshots = snapshots or []
+    latest_snapshot = snapshots[0] if len(snapshots) >= 1 else None
+    previous_snapshot = snapshots[1] if len(snapshots) >= 2 else None
+
+    delta_days = None
+    if latest_snapshot and previous_snapshot:
+        delta_days = max(
+            0,
+            int((latest_snapshot.captured_at - previous_snapshot.captured_at).total_seconds() // 86400),
+        )
 
     return ItemResponse(
         id=str(item.id),
         spotify_id=item.spotify_id,
         type=item.item_type,
         name=item.name,
+        spotify_url=_spotify_url(item.item_type, item.spotify_id),
         image=item.image,
         owner_name=item.owner_name,
         owner_image=item.owner_image,
         owner_url=owner_url,
+        artist_names=artist_names or None,
+        export_tracks=export_tracks or None,
         followers=item.followers,
         monthly_listeners=item.monthly_listeners,
-        monthly_plays=item.monthly_listeners,  # Alias for frontend
+        monthly_plays=item.monthly_listeners,
         playcount=item.playcount,
         total_plays=total_plays,
         track_count=item.track_count,
         album_count=item.album_count,
         duration=duration,
         release_date=item.release_date,
-        saves=item.followers,  # Playlist saves ~ followers
+        saves=item.followers,
+        followers_delta=_compute_delta(
+            latest_snapshot.followers if latest_snapshot else item.followers,
+            previous_snapshot.followers if previous_snapshot else None,
+        ),
+        monthly_listeners_delta=_compute_delta(
+            latest_snapshot.monthly_listeners if latest_snapshot else item.monthly_listeners,
+            previous_snapshot.monthly_listeners if previous_snapshot else None,
+        ),
+        playcount_delta=_compute_delta(
+            latest_snapshot.playcount if latest_snapshot else item.playcount,
+            previous_snapshot.playcount if previous_snapshot else None,
+        ),
+        track_count_delta=_compute_delta(
+            latest_snapshot.track_count if latest_snapshot else item.track_count,
+            previous_snapshot.track_count if previous_snapshot else None,
+        ),
+        delta_days=delta_days,
         status=item.status,
         error_code=item.error_code,
         error_message=item.error_message,
         group=item.group,
         user_id=str(item.user_id) if item.user_id else None,
+        added_date=_format_added_date(item.created_at),
         last_checked=item.last_checked,
         created_at=item.created_at,
     )
@@ -132,7 +265,6 @@ async def list_items(
     """List all items with optional filters."""
     query = select(Item).order_by(Item.updated_at.desc())
 
-    # Non-admin users only see their own items; admin can filter by user_id
     if current_user.role != "admin":
         query = query.where(Item.user_id == current_user.id)
     elif user_id:
@@ -145,19 +277,26 @@ async def list_items(
     if status:
         query = query.where(Item.status == status)
 
-    # Total count
     count_query = select(func.count()).select_from(query.subquery())
     total_result = await db.execute(count_query)
     total = total_result.scalar() or 0
 
-    # Paginated results
     query = query.limit(limit).offset(offset)
     result = await db.execute(query)
     items = result.scalars().all()
-    owner_url_map = await _load_owner_urls(db, items)
+    raw_map = await _load_latest_raw_data(db, items)
+    snapshot_map = await _load_recent_snapshots(db, items)
 
     return ItemListResponse(
-        items=[_item_to_response(i, owner_url_map.get(i.spotify_id)) for i in items],
+        items=[
+            _item_to_response(
+                item,
+                _extract_owner_url(item, raw_map.get(item.spotify_id)),
+                raw_map.get(item.spotify_id),
+                snapshot_map.get(item.id),
+            )
+            for item in items
+        ],
         total=total,
     )
 
@@ -180,12 +319,17 @@ async def get_item(
     if not item:
         raise HTTPException(status_code=404, detail="Item not found")
 
-    # Ownership check
     if current_user.role != "admin" and item.user_id != current_user.id:
         raise HTTPException(status_code=403, detail="Not authorized to view this item")
 
-    owner_url_map = await _load_owner_urls(db, [item])
-    return _item_to_response(item, owner_url_map.get(item.spotify_id))
+    raw_map = await _load_latest_raw_data(db, [item])
+    snapshot_map = await _load_recent_snapshots(db, [item])
+    return _item_to_response(
+        item,
+        _extract_owner_url(item, raw_map.get(item.spotify_id)),
+        raw_map.get(item.spotify_id),
+        snapshot_map.get(item.id),
+    )
 
 
 @router.delete("/items/{item_type}/{spotify_id}")
@@ -206,7 +350,6 @@ async def delete_item(
     if not item:
         raise HTTPException(status_code=404, detail="Item not found")
 
-    # Ownership check
     if current_user.role != "admin" and item.user_id != current_user.id:
         raise HTTPException(status_code=403, detail="Not authorized to delete this item")
 
@@ -228,7 +371,6 @@ async def clear_items(
     """Clear all items (or items in one group)."""
     selected_items = select(Item.id, Item.spotify_id)
 
-    # Non-admin users only clear their own items; admin can filter by user_id
     if current_user.role != "admin":
         selected_items = selected_items.where(Item.user_id == current_user.id)
     elif user_id:

@@ -3,7 +3,7 @@
 import uuid
 from datetime import datetime
 
-from sqlalchemy import String, BigInteger, DateTime, ForeignKey
+from sqlalchemy import String, BigInteger, DateTime, ForeignKey, Integer
 from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import Mapped, mapped_column
 
@@ -27,6 +27,7 @@ class MetricsSnapshot(Base):
     followers: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
     monthly_listeners: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
     playcount: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
+    track_count: Mapped[int | None] = mapped_column(Integer, nullable=True)
 
     captured_at: Mapped[datetime] = mapped_column(
         DateTime, default=datetime.utcnow, index=True

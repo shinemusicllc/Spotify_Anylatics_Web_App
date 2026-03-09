@@ -7,12 +7,14 @@ Runs as background tasks via event-loop tasks.
 import asyncio
 import logging
 from datetime import datetime
+from urllib.parse import urlparse
 
 from sqlalchemy import select
 
 from app.database import async_session
 from app.models.item import Item
 from app.models.crawl_job import CrawlJob
+from app.models.metrics_snapshot import MetricsSnapshot
 from app.models.raw_response import RawResponse
 from app.services import spotify_client
 from app.services import spotify_web_scraper
@@ -271,6 +273,95 @@ def _prefer_existing_on_none(current, incoming):
     return incoming
 
 
+def _extract_primary_artist_id(data: dict) -> str | None:
+    artists = data.get("artists") or []
+    if isinstance(artists, list):
+        for artist in artists:
+            if not isinstance(artist, dict):
+                continue
+            artist_id = artist.get("spotify_id") or artist.get("id")
+            if isinstance(artist_id, str) and artist_id.strip():
+                return artist_id.strip()
+
+    owner_url = data.get("owner_url")
+    if not isinstance(owner_url, str) or not owner_url.strip():
+        return None
+
+    parsed = urlparse(owner_url)
+    parts = [part for part in parsed.path.split("/") if part]
+    if len(parts) >= 2 and parts[-2] == "artist":
+        return parts[-1].strip() or None
+    return None
+
+
+async def _enrich_track_artist_metrics(data: dict) -> dict:
+    primary_artist_id = _extract_primary_artist_id(data)
+    if not primary_artist_id:
+        return data
+
+    artist_data = await spotify_client.query_artist(primary_artist_id)
+    if not artist_data or artist_data.get("error"):
+        return data
+
+    merged = dict(data)
+    if artist_data.get("followers") is not None:
+        merged["followers"] = artist_data.get("followers")
+    if artist_data.get("monthly_listeners") is not None:
+        merged["monthly_listeners"] = artist_data.get("monthly_listeners")
+    if not merged.get("owner_name") and artist_data.get("owner_name"):
+        merged["owner_name"] = artist_data.get("owner_name")
+    if not merged.get("owner_image") and artist_data.get("owner_image"):
+        merged["owner_image"] = artist_data.get("owner_image")
+    if not merged.get("owner_url") and artist_data.get("owner_url"):
+        merged["owner_url"] = artist_data.get("owner_url")
+    return merged
+
+
+def _formatted_item_name(item_type: str, data: dict) -> str | None:
+    name = data.get("name")
+    if not isinstance(name, str) or not name.strip():
+        return None
+    base_name = name.strip()
+
+    if item_type == "track":
+        artist_names = data.get("artist_names") or []
+        if not isinstance(artist_names, list):
+            artist_names = []
+        artist_names = [
+            artist.strip()
+            for artist in artist_names
+            if isinstance(artist, str) and artist.strip()
+        ]
+        if not artist_names and isinstance(data.get("owner_name"), str) and data.get("owner_name").strip():
+            artist_names = [data.get("owner_name").strip()]
+        if artist_names:
+            prefix = ', '.join(artist_names)
+            if base_name.lower().startswith(f"{prefix.lower()} - "):
+                return base_name
+            return f"{prefix} - {base_name}"
+
+    if item_type == "album":
+        owner_name = data.get("owner_name")
+        if isinstance(owner_name, str) and owner_name.strip():
+            prefix = owner_name.strip()
+            if base_name.lower().startswith(f"{prefix.lower()} - "):
+                return base_name
+            return f"{prefix} - {base_name}"
+
+    return base_name
+
+
+async def _finalize_payload(item_type: str, data: dict) -> dict:
+    merged = dict(data)
+    if item_type == "track":
+        merged = await _enrich_track_artist_metrics(merged)
+
+    formatted_name = _formatted_item_name(item_type, merged)
+    if formatted_name:
+        merged["name"] = formatted_name
+    return merged
+
+
 async def crawl_item_task(job_id: str, spotify_id: str, item_type: str):
     """
     Background task: crawl a single Spotify item.
@@ -349,6 +440,7 @@ async def crawl_item_task(job_id: str, spotify_id: str, item_type: str):
                 data,
                 existing=existing_data,
             )
+            data = await _finalize_payload(item_type, data)
 
             # 3. Check if response indicates an error
             if data.get("error"):
@@ -400,6 +492,16 @@ async def crawl_item_task(job_id: str, spotify_id: str, item_type: str):
                 item.error_code = None
                 item.error_message = None
                 item.last_checked = datetime.utcnow()
+
+                snapshot = MetricsSnapshot(
+                    item_id=item.id,
+                    spotify_id=spotify_id,
+                    followers=item.followers,
+                    monthly_listeners=item.monthly_listeners,
+                    playcount=item.playcount,
+                    track_count=item.track_count,
+                )
+                db.add(snapshot)
 
             # 5. Save raw response for debugging
             raw = RawResponse(

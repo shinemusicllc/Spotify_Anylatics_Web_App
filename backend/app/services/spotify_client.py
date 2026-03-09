@@ -677,6 +677,12 @@ async def get_track(track_id: str) -> dict[str, Any] | None:
 
         webapi_result = {
             "name": data.get("name"),
+            "artist_names": [artist.get("name") for artist in artists if artist.get("name")],
+            "artists": [
+                {"spotify_id": artist.get("id"), "name": artist.get("name")}
+                for artist in artists
+                if artist.get("name")
+            ],
             "image": images[0]["url"] if images else None,
             "owner_name": primary_artist,
             "owner_url": f"https://open.spotify.com/artist/{artists[0]['id']}" if artists and artists[0].get("id") else None,
@@ -965,6 +971,7 @@ async def _fetch_track_via_pathfinder(track_id: str) -> dict[str, Any] | None:
     album = track_union.get("albumOfTrack") or {}
     album_cover_sources = (album.get("coverArt") or {}).get("sources") or []
     release_date = _pathfinder_date_to_iso(album.get("date"))
+    artists, artist_names = _pathfinder_extract_artists(track_union.get("artists"))
 
     first_artist_items = ((track_union.get("firstArtist") or {}).get("items") or [])
     primary_artist = first_artist_items[0] if first_artist_items else {}
@@ -981,6 +988,12 @@ async def _fetch_track_via_pathfinder(track_id: str) -> dict[str, Any] | None:
 
     return {
         "name": track_union.get("name"),
+        "artist_names": artist_names or ([owner_name] if owner_name else []),
+        "artists": artists or (
+            [{"spotify_id": owner_artist_id, "name": owner_name}]
+            if owner_artist_id or owner_name
+            else []
+        ),
         "image": _first_image_from_sources(album_cover_sources),
         "owner_name": owner_name,
         "owner_image": owner_image,
