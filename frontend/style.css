@@ -787,16 +787,21 @@ h3 {
 }
 
 .row-action-cell {
+  position: relative;
   display: flex;
   align-items: center;
   justify-content: flex-end;
   min-width: 90px;
+  z-index: 6;
 }
 
 .row-action-buttons {
   display: none;
   align-items: center;
   gap: 6px;
+  position: relative;
+  z-index: 7;
+  pointer-events: auto;
 }
 
 .row-refresh-btn,
@@ -814,6 +819,9 @@ h3 {
     background 120ms ease,
     border-color 120ms ease,
     color 120ms ease;
+  position: relative;
+  z-index: 8;
+  pointer-events: auto;
 }
 
 .row-refresh-btn .material-icons-round,

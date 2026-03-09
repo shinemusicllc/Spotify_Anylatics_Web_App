@@ -1567,7 +1567,8 @@ async function clearList() {
 
 async function refreshAllItems() {
     const selectedVisibleItems = state.filteredItems.filter((item) => state.selectedItemKeys.has(itemKey(item)));
-    const targetItems = selectedVisibleItems.length > 0
+    const useSelectionScope = selectedVisibleItems.length >= 2;
+    const targetItems = useSelectionScope
         ? selectedVisibleItems
         : (state.activeGroup === ALL_GROUP_ID
             ? state.items
@@ -1612,7 +1613,7 @@ async function refreshAllItems() {
         };
         startPolling();
         renderList({ preserveScroll: true });
-        const scopeLabel = selectedVisibleItems.length > 0 ? 'selected links' : 'links';
+        const scopeLabel = useSelectionScope ? 'selected links' : 'links';
         showToast(`Refresh started for ${result.count || urls.length} ${scopeLabel}`, 'success');
     } catch (e) {
         state.batchRefresh = null;
