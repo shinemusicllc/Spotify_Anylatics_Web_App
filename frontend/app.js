@@ -543,7 +543,7 @@ function getVisibleItems() {
 }
 
 function isInteractiveRowTarget(target) {
-    return Boolean(target?.closest('a, button, input, textarea, select, label, [role="button"]'));
+    return Boolean(target?.closest('a, button, input, textarea, select, label, [role="button"], .row-action-cell, .row-action-buttons'));
 }
 
 function handleRowSelection(item, event) {
@@ -1881,8 +1881,6 @@ async function pollJobs() {
                 if (inBatch && state.batchRefresh) {
                     state.batchRefresh.done += 1;
                     shouldNotifyBatchDone = true;
-                } else {
-                    showToast(`Crawl completed: ${job.result?.name || 'item'}`, 'success');
                 }
             } else if (job.status === 'error') {
                 hasTerminalUpdate = true;
@@ -1900,8 +1898,6 @@ async function pollJobs() {
                     state.batchRefresh.done += 1;
                     state.batchRefresh.errors += 1;
                     shouldNotifyBatchDone = true;
-                } else {
-                    showToast(`Crawl failed: ${job.error || 'Unknown'}`, 'error');
                 }
             }
         } catch {
@@ -1914,9 +1910,9 @@ async function pollJobs() {
         if (batch.done >= batch.expected) {
             const ok = Math.max(0, batch.expected - batch.errors);
             if (batch.errors > 0) {
-                showToast(`Refresh done (${batch.groupName}): ${ok} ok, ${batch.errors} errors`, 'info');
+                showToast(`Refresh completed: ${ok}/${batch.expected} links, ${batch.errors} errors`, 'info');
             } else {
-                showToast(`Refresh done for ${batch.groupName}: ${ok} links`, 'success');
+                showToast(`Refresh completed: ${ok}/${batch.expected} links`, 'success');
             }
             state.batchRefresh = null;
         }
@@ -3218,7 +3214,7 @@ document.addEventListener('DOMContentLoaded', () => {
                 openImagePreview(previewBtn.getAttribute('data-image-url'));
                 return;
             }
-            const row = (btn || refreshBtn || e.target.closest('.custom-grid-row'));
+            const row = e.target.closest('.custom-grid-row');
             if (!row) return;
             if (!btn && !refreshBtn) {
                 return;
