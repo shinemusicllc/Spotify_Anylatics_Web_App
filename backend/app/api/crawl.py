@@ -1,6 +1,7 @@
 """Crawl endpoints - trigger crawl jobs."""
 
 import asyncio
+import uuid
 
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy import select
@@ -23,6 +24,23 @@ from app.services.auth import get_current_user
 router = APIRouter()
 
 
+async def _resolve_target_user_id(
+    db: AsyncSession, current_user: User, requested_user_id: uuid.UUID | None
+) -> uuid.UUID:
+    if requested_user_id is None:
+        return current_user.id
+
+    if current_user.role != "admin":
+        raise HTTPException(status_code=403, detail="Not authorized to set target user")
+
+    user_result = await db.execute(select(User).where(User.id == requested_user_id))
+    target_user = user_result.scalar_one_or_none()
+    if not target_user:
+        raise HTTPException(status_code=404, detail="Target user not found")
+
+    return target_user.id
+
+
 @router.post("/crawl", response_model=CrawlResponse)
 async def crawl(
     req: CrawlRequest,
@@ -35,19 +53,42 @@ async def crawl(
         raise HTTPException(status_code=400, detail="Invalid Spotify URL or URI")
 
     item_type, spotify_id = parsed
+    target_user_id = await _resolve_target_user_id(db, current_user, req.target_user_id)
+    requested_group = (req.group or "").strip() or None
 
     # Check if item already exists
     existing = await db.execute(select(Item).where(Item.spotify_id == spotify_id))
     item = existing.scalar_one_or_none()
 
-    if not item:
+    if item:
+        # Non-admin users must not mutate another user's tracked item.
+        if current_user.role != "admin" and item.user_id and item.user_id != current_user.id:
+            raise HTTPException(
+                status_code=409,
+                detail="This link is already tracked by another user",
+            )
+
+        # Admin can route the item ownership to selected target user.
+        if req.target_user_id is not None and current_user.role == "admin":
+            item.user_id = target_user_id
+        elif item.user_id is None:
+            item.user_id = target_user_id
+
+        # Respect explicit group selection in add-link modal.
+        if req.group is not None:
+            item.group = requested_group
+
+        item.status = "crawling"
+        item.error_code = None
+        item.error_message = None
+    else:
         # Create placeholder item
         item = Item(
             spotify_id=spotify_id,
             item_type=item_type,
             status="crawling",
-            group=req.group,
-            user_id=current_user.id,
+            group=requested_group,
+            user_id=target_user_id,
         )
         db.add(item)
         await db.flush()
@@ -83,6 +124,8 @@ async def crawl_batch(
     """Start crawl jobs for multiple Spotify URLs."""
     job_ids = []
     background_jobs: list[tuple[str, str, str]] = []
+    target_user_id = await _resolve_target_user_id(db, current_user, req.target_user_id)
+    requested_group = (req.group or "").strip() or None
 
     for url in req.urls:
         parsed = parse_spotify_url(url)
@@ -95,13 +138,29 @@ async def crawl_batch(
         existing = await db.execute(select(Item).where(Item.spotify_id == spotify_id))
         item = existing.scalar_one_or_none()
 
-        if not item:
+        if item:
+            if current_user.role != "admin" and item.user_id and item.user_id != current_user.id:
+                # Skip links that belong to another user for non-admin callers.
+                continue
+
+            if req.target_user_id is not None and current_user.role == "admin":
+                item.user_id = target_user_id
+            elif item.user_id is None:
+                item.user_id = target_user_id
+
+            if req.group is not None:
+                item.group = requested_group
+
+            item.status = "crawling"
+            item.error_code = None
+            item.error_message = None
+        else:
             item = Item(
                 spotify_id=spotify_id,
                 item_type=item_type,
                 status="crawling",
-                group=req.group,
-                user_id=current_user.id,
+                group=requested_group,
+                user_id=target_user_id,
             )
             db.add(item)
             await db.flush()

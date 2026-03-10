@@ -1,5 +1,7 @@
 """Crawl request/response schemas."""
 
+import uuid
+
 from pydantic import BaseModel
 
 
@@ -8,6 +10,7 @@ class CrawlRequest(BaseModel):
 
     url: str
     group: str | None = None
+    target_user_id: uuid.UUID | None = None
 
 
 class CrawlBatchRequest(BaseModel):
@@ -15,6 +18,7 @@ class CrawlBatchRequest(BaseModel):
 
     urls: list[str]
     group: str | None = None
+    target_user_id: uuid.UUID | None = None
 
 
 class CrawlResponse(BaseModel):

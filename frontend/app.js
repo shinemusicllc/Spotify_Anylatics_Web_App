@@ -281,17 +281,17 @@ class SpotiCheckAPI {
         return this._fetch(`/items/group?${qs.toString()}`, { method: 'PATCH' });
     }
 
-    crawl(url, group = null) {
+    crawl(url, group = null, targetUserId = null) {
         return this._fetch('/crawl', {
             method: 'POST',
-            body: JSON.stringify({ url, group }),
+            body: JSON.stringify({ url, group, target_user_id: targetUserId || null }),
         });
     }
 
-    crawlBatch(urls, group = null) {
+    crawlBatch(urls, group = null, targetUserId = null) {
         return this._fetch('/crawl/batch', {
             method: 'POST',
-            body: JSON.stringify({ urls, group }),
+            body: JSON.stringify({ urls, group, target_user_id: targetUserId || null }),
         });
     }
 }
@@ -488,6 +488,31 @@ function getCurrentUserIdentity() {
         id: user?.id ? String(user.id) : null,
         name: user ? (user.display_name || user.username || 'User') : 'User',
         avatar: user?.avatar || null,
+    };
+}
+
+function getUserIdentityById(userId) {
+    const currentIdentity = getCurrentUserIdentity();
+    const targetId = userId ? String(userId) : '';
+    if (!targetId || String(currentIdentity.id || '') === targetId) {
+        return currentIdentity;
+    }
+
+    const match = (state.adminUserList || []).find((user) => (
+        String(user.id || user._id || '') === targetId
+    ));
+
+    if (!match) {
+        return {
+            ...currentIdentity,
+            id: targetId,
+        };
+    }
+
+    return {
+        id: targetId,
+        name: match.display_name || match.username || targetId,
+        avatar: match.avatar || null,
     };
 }
 
@@ -1578,18 +1603,26 @@ function populateGroupSelect() {
     for (var i = 0; i < state.groups.length; i++) {
         var g = state.groups[i];
         if (g.id === ALL_GROUP_ID) continue;
-        options.push({value: g.id, label: g.name});
+        options.push({value: g.id, label: g.displayName || g.name});
+    }
+
+    var selectedValue = GROUP_SELECT_ALL;
+    if (state.activeGroup && state.activeGroup !== ALL_GROUP_ID) {
+        var hasActive = options.some(function(opt) {
+            return String(opt.value) === String(state.activeGroup);
+        });
+        if (hasActive) selectedValue = state.activeGroup;
     }
 
     // Check if dropdown already exists
     var existing = document.getElementById('modal-group-select-dropdown');
     if (existing) {
-        updateCustomDropdownOptions('modal-group-select-dropdown', options, GROUP_SELECT_ALL);
+        updateCustomDropdownOptions('modal-group-select-dropdown', options, selectedValue);
     } else {
         var dd = createCustomDropdown({
             id: 'modal-group-select',
             options: options,
-            selected: GROUP_SELECT_ALL,
+            selected: selectedValue,
             cssClass: 'dropdown-modal'
         });
         wrap.innerHTML = '';
@@ -1597,26 +1630,58 @@ function populateGroupSelect() {
     }
 }
 
-function resolveSelectedGroup() {
+function resolveSelectedGroupContext() {
     var dd = document.getElementById('modal-group-select-dropdown');
     var picked = normalizeGroupName(dd ? dd.getAttribute('data-value') : null);
-    if (!picked || picked.toLowerCase() === GROUP_SELECT_ALL.toLowerCase()) return null;
+    var currentUser = getAuthUser();
+    var adminTargetUserId = null;
+    if (currentUser?.role === 'admin' && state.adminFilterUserId) {
+        adminTargetUserId = String(state.adminFilterUserId);
+    }
+    if (!picked || picked.toLowerCase() === GROUP_SELECT_ALL.toLowerCase()) {
+        return {
+            group: null,
+            targetUserId: adminTargetUserId,
+        };
+    }
 
     // In admin all-users mode, dropdown values may be composite ids (userId::groupName).
     // Always resolve to the raw group name before sending to backend.
+    var resolvedGroup = null;
+    var resolvedTargetUserId = adminTargetUserId;
     var entry = getGroupEntryById(picked);
     if (entry && entry.id !== ALL_GROUP_ID) {
         var nameFromEntry = normalizeGroupName(entry.name);
-        if (nameFromEntry) return nameFromEntry;
+        if (nameFromEntry) resolvedGroup = nameFromEntry;
+        if (currentUser?.role === 'admin' && entry.ownerUserId) {
+            resolvedTargetUserId = String(entry.ownerUserId);
+        }
     }
 
-    var parsed = parseGroupEntryId(picked);
-    var parsedName = normalizeGroupName(parsed ? parsed.name : '');
-    if (parsedName && parsedName.toLowerCase() !== ALL_GROUP_ID) return parsedName;
+    if (!resolvedGroup) {
+        var parsed = parseGroupEntryId(picked);
+        var parsedName = normalizeGroupName(parsed ? parsed.name : '');
+        if (parsedName && parsedName.toLowerCase() !== ALL_GROUP_ID) {
+            resolvedGroup = parsedName;
+            if (currentUser?.role === 'admin' && parsed?.ownerUserId) {
+                resolvedTargetUserId = String(parsed.ownerUserId);
+            }
+        }
+    }
 
     // Fallback for non-composite ids
-    if (picked.toLowerCase() !== ALL_GROUP_ID) return picked;
-    return null;
+    if (!resolvedGroup && picked.toLowerCase() !== ALL_GROUP_ID) {
+        resolvedGroup = picked;
+    }
+
+    return {
+        group: resolvedGroup || null,
+        targetUserId: currentUser?.role === 'admin' ? (resolvedTargetUserId || null) : null,
+    };
+}
+
+function resolveSelectedGroup() {
+    return resolveSelectedGroupContext().group;
 }
 
 function handleCreateGroup(rawName) {
@@ -2508,11 +2573,12 @@ async function submitSingle() {
         return;
     }
 
-    const group = resolveSelectedGroup();
-    const currentIdentity = getCurrentUserIdentity();
+    const selectedGroup = resolveSelectedGroupContext();
+    const group = selectedGroup.group;
+    const currentIdentity = getUserIdentityById(selectedGroup.targetUserId);
 
     try {
-        const result = await api.crawl(url, group);
+        const result = await api.crawl(url, group, selectedGroup.targetUserId);
         const jobId = result?.job_id;
         if (!jobId) {
             throw new Error('Backend did not return job_id');
@@ -2583,11 +2649,12 @@ async function submitBatch() {
         return;
     }
 
-    const group = resolveSelectedGroup();
-    const currentIdentity = getCurrentUserIdentity();
+    const selectedGroup = resolveSelectedGroupContext();
+    const group = selectedGroup.group;
+    const currentIdentity = getUserIdentityById(selectedGroup.targetUserId);
 
     try {
-        const result = await api.crawlBatch(urls, group);
+        const result = await api.crawlBatch(urls, group, selectedGroup.targetUserId);
         showToast(`Added ${urls.length} links — crawling started`, 'success');
 
         const now = new Date().toISOString();
