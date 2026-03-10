@@ -919,6 +919,25 @@ function normalizeGroupName(name) {
     return String(name || '').trim();
 }
 
+function splitLegacyGroupName(name) {
+    const raw = normalizeGroupName(name);
+    if (!raw) return { name: '', ownerUserId: null };
+    const compositeIndex = raw.indexOf('::');
+    if (compositeIndex <= 0) {
+        return { name: raw, ownerUserId: null };
+    }
+    const ownerUserId = normalizeGroupName(raw.slice(0, compositeIndex));
+    const groupName = normalizeGroupName(raw.slice(compositeIndex + 2));
+    if (!ownerUserId || !groupName || !isUuidLike(ownerUserId)) {
+        return { name: raw, ownerUserId: null };
+    }
+    return { name: groupName, ownerUserId };
+}
+
+function normalizeStoredGroupName(name) {
+    return splitLegacyGroupName(name).name;
+}
+
 function escapeAttrSelectorValue(value) {
     const input = String(value || '');
     if (window.CSS && typeof window.CSS.escape === 'function') {
@@ -934,7 +953,7 @@ function loadCustomGroups() {
         const parsed = raw ? JSON.parse(raw) : [];
         if (!Array.isArray(parsed)) return [];
         return parsed
-            .map(normalizeGroupName)
+            .map(normalizeStoredGroupName)
             .filter(Boolean);
     } catch {
         return [];
@@ -945,13 +964,13 @@ function getGroupsFromUserRecord(userRecord) {
     if (!userRecord) return [];
     const raw = userRecord.custom_groups;
     if (Array.isArray(raw)) {
-        return raw.map(normalizeGroupName).filter(Boolean);
+        return raw.map(normalizeStoredGroupName).filter(Boolean);
     }
     if (typeof raw === 'string' && raw.trim()) {
         try {
             const parsed = JSON.parse(raw);
             if (Array.isArray(parsed)) {
-                return parsed.map(normalizeGroupName).filter(Boolean);
+                return parsed.map(normalizeStoredGroupName).filter(Boolean);
             }
         } catch {
             return [];
@@ -966,12 +985,12 @@ function getOwnerCustomGroups(ownerUserId) {
         const user = (state.adminUserList || []).find((u) => String(u.id || u._id || '') === ownerId);
         return getGroupsFromUserRecord(user);
     }
-    return (state.customGroups || []).map(normalizeGroupName).filter(Boolean);
+    return (state.customGroups || []).map(normalizeStoredGroupName).filter(Boolean);
 }
 
 function setOwnerCustomGroups(ownerUserId, groups) {
     const ownerId = ownerUserId ? String(ownerUserId) : '';
-    const cleaned = Array.from(new Set((groups || []).map(normalizeGroupName).filter(Boolean)));
+    const cleaned = Array.from(new Set((groups || []).map(normalizeStoredGroupName).filter(Boolean)));
     if (isAdminAllUsersMode() && ownerId) {
         (state.adminUserList || []).forEach((u) => {
             if (String(u.id || u._id || '') === ownerId) {
@@ -1011,7 +1030,7 @@ async function syncGroupsFromServer(targetUserId) {
             return;
         }
         var data = await res.json();
-        var serverGroups = (data.groups || []).map(normalizeGroupName).filter(Boolean);
+        var serverGroups = (data.groups || []).map(normalizeStoredGroupName).filter(Boolean);
 
         if (targetUserId) {
             // Admin viewing another user's groups
@@ -1019,7 +1038,7 @@ async function syncGroupsFromServer(targetUserId) {
         } else {
             // Own groups — server is source of truth
             // But if server is empty and local has groups, push local to server (first sync)
-            var localGroups = (state.customGroups || []).filter(Boolean);
+            var localGroups = (state.customGroups || []).map(normalizeStoredGroupName).filter(Boolean);
             if (serverGroups.length === 0 && localGroups.length > 0) {
                 // First time sync: upload local groups to server
                 state.customGroups = localGroups;
@@ -1063,7 +1082,7 @@ async function saveGroupsToServer(groups, targetUserId) {
 function saveCustomGroups() {
     const cleaned = Array.from(new Set(
         (state.customGroups || [])
-            .map(normalizeGroupName)
+            .map(normalizeStoredGroupName)
             .filter(Boolean)
     ));
     state.customGroups = cleaned;
@@ -1092,7 +1111,7 @@ function isAdminAllUsersMode() {
 }
 
 function buildGroupEntryId(groupName, ownerUserId = null) {
-    const normalizedName = normalizeGroupName(groupName);
+    const normalizedName = normalizeStoredGroupName(groupName);
     const normalizedOwner = ownerUserId ? String(ownerUserId) : '';
     if (!isAdminAllUsersMode() || !normalizedOwner) {
         return normalizedName;
@@ -1111,20 +1130,26 @@ function parseGroupEntryId(groupId) {
     }
     const compositeIndex = raw.indexOf('::');
     if (compositeIndex === -1) {
-        return { id: raw, name: raw, ownerUserId: null };
+        return { id: raw, name: normalizeStoredGroupName(raw), ownerUserId: null };
+    }
+    const ownerUserId = normalizeGroupName(raw.slice(0, compositeIndex));
+    const parsedName = normalizeStoredGroupName(raw.slice(compositeIndex + 2));
+    if (!ownerUserId || !parsedName || !isUuidLike(ownerUserId)) {
+        return { id: raw, name: normalizeStoredGroupName(raw), ownerUserId: null };
     }
     return {
         id: raw,
-        ownerUserId: raw.slice(0, compositeIndex) || null,
-        name: raw.slice(compositeIndex + 2) || raw,
+        ownerUserId: ownerUserId,
+        name: parsedName,
     };
 }
 
 function doesItemMatchGroupEntry(item, groupEntry) {
     if (!groupEntry || groupEntry.id === ALL_GROUP_ID) return true;
-    if (normalizeGroupName(item.group) !== normalizeGroupName(groupEntry.name)) return false;
+    const itemParsed = splitLegacyGroupName(item.group);
+    if (normalizeStoredGroupName(itemParsed.name) !== normalizeStoredGroupName(groupEntry.name)) return false;
     if (!groupEntry.ownerUserId) return true;
-    return String(item.user_id || '') === String(groupEntry.ownerUserId);
+    return String(item.user_id || itemParsed.ownerUserId || '') === String(groupEntry.ownerUserId);
 }
 
 function updateGroupHeader() {
@@ -1220,22 +1245,28 @@ function moveCustomGroupBefore(draggedGroupId, targetGroupId, placement = 'befor
     if (!dragged || !target || dragged === target) return false;
     if (dragged.toLowerCase() === ALL_GROUP_ID || target.toLowerCase() === ALL_GROUP_ID) return false;
 
-    const current = Array.from(new Set((state.customGroups || []).map(normalizeGroupName).filter(Boolean)));
+    const draggedEntry = getGroupEntryById(dragged) || parseGroupEntryId(dragged);
+    const targetEntry = getGroupEntryById(target) || parseGroupEntryId(target);
+    const draggedGroupName = normalizeStoredGroupName(draggedEntry?.name || dragged);
+    const targetGroupName = normalizeStoredGroupName(targetEntry?.name || target);
+    if (!draggedGroupName || !targetGroupName || draggedGroupName.toLowerCase() === targetGroupName.toLowerCase()) return false;
+
+    const current = Array.from(new Set((state.customGroups || []).map(normalizeStoredGroupName).filter(Boolean)));
     const next = current.slice();
 
-    if (!next.some((name) => name.toLowerCase() === dragged.toLowerCase())) {
-        next.push(dragged);
+    if (!next.some((name) => name.toLowerCase() === draggedGroupName.toLowerCase())) {
+        next.push(draggedGroupName);
     }
-    if (!next.some((name) => name.toLowerCase() === target.toLowerCase())) {
-        next.push(target);
+    if (!next.some((name) => name.toLowerCase() === targetGroupName.toLowerCase())) {
+        next.push(targetGroupName);
     }
 
-    const draggedIndex = next.findIndex((name) => name.toLowerCase() === dragged.toLowerCase());
-    const [draggedName] = next.splice(draggedIndex, 1);
-    const targetIndex = next.findIndex((name) => name.toLowerCase() === target.toLowerCase());
+    const draggedIndex = next.findIndex((name) => name.toLowerCase() === draggedGroupName.toLowerCase());
+    const [movedName] = next.splice(draggedIndex, 1);
+    const targetIndex = next.findIndex((name) => name.toLowerCase() === targetGroupName.toLowerCase());
     if (targetIndex === -1) return false;
     const insertIndex = placement === 'after' ? targetIndex + 1 : targetIndex;
-    next.splice(insertIndex, 0, draggedName);
+    next.splice(insertIndex, 0, movedName);
 
     state.customGroups = next;
     saveCustomGroups();
@@ -1356,7 +1387,7 @@ function getScopedGroupOwnerUserId() {
 }
 
 function getAdminGroupBaseName(groupName, ownerLabel = '') {
-    const raw = normalizeGroupName(groupName);
+    const raw = normalizeStoredGroupName(groupName);
     if (!raw) return 'Group';
     if (isUuidLike(raw)) return 'Group';
     const prefixed = ownerLabel ? `${ownerLabel} - ` : '';
@@ -1377,7 +1408,7 @@ function getAdminGroupDisplayName(groupName, ownerUserId = null) {
         ownerLabel = getAdminUserLabelById(state.adminFilterUserId) || getCurrentUserLabel();
     } else if (ownerUserId) {
         ownerLabel = getAdminUserLabelById(ownerUserId) || getCurrentUserLabel();
-    } else if ((state.customGroups || []).some((name) => normalizeGroupName(name) === normalizeGroupName(groupName))) {
+    } else if ((state.customGroups || []).some((name) => normalizeStoredGroupName(name) === normalizeStoredGroupName(groupName))) {
         ownerLabel = getCurrentUserLabel();
     } else {
         ownerLabel = getCurrentUserLabel();
@@ -1403,15 +1434,17 @@ function rebuildGroups() {
     const counts = new Map();
     const encountered = [];
     for (const item of state.items) {
-        const group = normalizeGroupName(item.group);
+        const parsedItemGroup = splitLegacyGroupName(item.group);
+        const group = normalizeStoredGroupName(parsedItemGroup.name);
         if (!group) continue;
         if (group.toLowerCase() === ALL_GROUP_ID) continue;
-        const entryId = buildGroupEntryId(group, item.user_id || null);
+        const ownerUserId = item.user_id ? String(item.user_id) : (parsedItemGroup.ownerUserId || null);
+        const entryId = buildGroupEntryId(group, ownerUserId);
         if (!counts.has(entryId)) {
             encountered.push({
                 id: entryId,
                 name: group,
-                ownerUserId: item.user_id ? String(item.user_id) : null,
+                ownerUserId: ownerUserId,
             });
         }
         counts.set(entryId, (counts.get(entryId) || 0) + 1);
@@ -1422,9 +1455,12 @@ function rebuildGroups() {
     const seen = new Set();
     const pushUnique = (rawEntry) => {
         const isEntryObject = rawEntry && typeof rawEntry === 'object';
-        const name = normalizeGroupName(isEntryObject ? rawEntry.name : rawEntry);
+        const parsed = splitLegacyGroupName(isEntryObject ? rawEntry.name : rawEntry);
+        const name = normalizeStoredGroupName(parsed.name);
         if (!name || name.toLowerCase() === ALL_GROUP_ID) return;
-        const ownerUserId = isEntryObject && rawEntry.ownerUserId ? String(rawEntry.ownerUserId) : null;
+        const ownerUserId = isEntryObject && rawEntry.ownerUserId
+            ? String(rawEntry.ownerUserId)
+            : (parsed.ownerUserId || null);
         const id = isEntryObject
             ? normalizeGroupName(rawEntry.id || buildGroupEntryId(name, ownerUserId))
             : normalizeGroupName(name);
@@ -1440,7 +1476,7 @@ function rebuildGroups() {
             const ownerUserId = String(user.id || user._id || '');
             if (!ownerUserId) return;
             getGroupsFromUserRecord(user).forEach((rawName) => {
-                const normalized = normalizeGroupName(rawName);
+                const normalized = normalizeStoredGroupName(rawName);
                 pushUnique({
                     id: buildGroupEntryId(normalized, ownerUserId),
                     name: normalized,
@@ -1451,7 +1487,7 @@ function rebuildGroups() {
     } else {
         const scopedOwnerUserId = getScopedGroupOwnerUserId();
         (state.customGroups || []).forEach((rawName) => {
-            const normalized = normalizeGroupName(rawName);
+            const normalized = normalizeStoredGroupName(rawName);
             pushUnique({
                 id: buildGroupEntryId(normalized, scopedOwnerUserId),
                 name: normalized,
@@ -1651,7 +1687,7 @@ function resolveSelectedGroupContext() {
     var resolvedTargetUserId = adminTargetUserId;
     var entry = getGroupEntryById(picked);
     if (entry && entry.id !== ALL_GROUP_ID) {
-        var nameFromEntry = normalizeGroupName(entry.name);
+        var nameFromEntry = normalizeStoredGroupName(entry.name);
         if (nameFromEntry) resolvedGroup = nameFromEntry;
         if (currentUser?.role === 'admin' && entry.ownerUserId) {
             resolvedTargetUserId = String(entry.ownerUserId);
@@ -1660,7 +1696,7 @@ function resolveSelectedGroupContext() {
 
     if (!resolvedGroup) {
         var parsed = parseGroupEntryId(picked);
-        var parsedName = normalizeGroupName(parsed ? parsed.name : '');
+        var parsedName = normalizeStoredGroupName(parsed ? parsed.name : '');
         if (parsedName && parsedName.toLowerCase() !== ALL_GROUP_ID) {
             resolvedGroup = parsedName;
             if (currentUser?.role === 'admin' && parsed?.ownerUserId) {
@@ -1736,9 +1772,9 @@ function handleDeleteGroup(rawGroupId) {
     if (!confirmed) return;
 
     const ownerUserId = target?.ownerUserId ? String(target.ownerUserId) : getScopedGroupOwnerUserId();
-    const groupKey = normalizeGroupName(target?.name || groupId).toLowerCase();
+    const groupKey = normalizeStoredGroupName(target?.name || groupId).toLowerCase();
     const nextGroups = getOwnerCustomGroups(ownerUserId).filter((name) => {
-        const normalized = normalizeGroupName(name);
+        const normalized = normalizeStoredGroupName(name);
         return normalized && normalized.toLowerCase() !== groupKey;
     });
     if (isAdminAllUsersMode() && ownerUserId) {
@@ -1750,7 +1786,7 @@ function handleDeleteGroup(rawGroupId) {
     }
 
     state.items = state.items.map((item) => {
-        const itemGroup = normalizeGroupName(item.group);
+        const itemGroup = normalizeStoredGroupName(item.group);
         if (!itemGroup || itemGroup.toLowerCase() !== groupKey) return item;
         if (target?.ownerUserId && String(item.user_id || '') !== String(target.ownerUserId)) return item;
         return { ...item, group: null };
@@ -1855,7 +1891,7 @@ function handleRenameGroup(rawGroupId, rawName, opts = {}) {
         return;
     }
 
-    const oldKey = normalizeGroupName(target.name).toLowerCase();
+    const oldKey = normalizeStoredGroupName(target.name).toLowerCase();
     const sameByCaseInsensitive = nextName.toLowerCase() === oldKey;
     const duplicate = state.groups.find((g) => (
         normalizeGroupName(g.name).toLowerCase() === nextName.toLowerCase()
@@ -1871,7 +1907,7 @@ function handleRenameGroup(rawGroupId, rawName, opts = {}) {
         const oldName = target.name;
         const ownerUserId = target?.ownerUserId ? String(target.ownerUserId) : getScopedGroupOwnerUserId();
         const renamedGroups = getOwnerCustomGroups(ownerUserId).map((raw) => {
-            const n = normalizeGroupName(raw);
+            const n = normalizeStoredGroupName(raw);
             if (n.toLowerCase() !== oldKey) return n;
             return nextName;
         });
@@ -1884,7 +1920,7 @@ function handleRenameGroup(rawGroupId, rawName, opts = {}) {
         }
 
         state.items = state.items.map((item) => {
-            const itemGroup = normalizeGroupName(item.group);
+            const itemGroup = normalizeStoredGroupName(item.group);
             if (itemGroup.toLowerCase() !== oldKey) return item;
             if (target?.ownerUserId && String(item.user_id || '') !== String(target.ownerUserId)) return item;
             return { ...item, group: nextName };
