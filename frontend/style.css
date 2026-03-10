@@ -709,7 +709,12 @@ h3 {
 /* List row sizing/typography locked to final3.html */
 .list-cover-image {
   width: 70px;
+  min-width: 70px;
+  max-width: 70px;
   height: 70px;
+  min-height: 70px;
+  max-height: 70px;
+  flex: 0 0 70px;
   border-radius: 0.5rem;
   object-fit: cover;
   box-shadow: none;
@@ -900,6 +905,10 @@ h3 {
 
 .list-cover-trigger {
   display: inline-flex;
+  flex: 0 0 70px;
+  width: 70px;
+  min-width: 70px;
+  height: 70px;
   padding: 0;
   border: none;
   background: transparent;
