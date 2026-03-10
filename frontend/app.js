@@ -16,6 +16,7 @@ const CONFIG = {
     SEARCH_DEBOUNCE: 300,
     DRAG_SCROLL_EDGE: 72,
     DRAG_SCROLL_MAX_SPEED: 22,
+    BACKGROUND_SYNC_INTERVAL: 12000,
 };
 const GROUP_STORAGE_KEY = 'spoticheck_custom_groups_v1';
 const ROW_ORDER_STORAGE_KEY = 'spoticheck_row_order_v1';
@@ -213,6 +214,8 @@ const state = {
     columnBudget: null,
     columnWidths: { ...DEFAULT_COLUMN_WIDTHS },
     uiPrefSaveTimer: null,
+    remoteSyncTimer: null,
+    remoteSyncInFlight: false,
 };
 
 // ═══════════════════════════════════════════════════════════════════
@@ -3031,6 +3034,41 @@ async function loadData(opts = {}) {
 // HERO IMAGE
 // ═══════════════════════════════════════════════════════════════════
 
+async function runBackgroundSync(opts = {}) {
+    const force = Boolean(opts?.force);
+    if (state.remoteSyncInFlight) return;
+    if (!getAuthToken()) return;
+    if (!force && document.hidden) return;
+    if (!force && state.pendingJobs.size > 0) return;
+    if (!force && state.currentView && state.currentView !== 'linkchecker') return;
+
+    state.remoteSyncInFlight = true;
+    try {
+        await syncGroupsFromServer(state.adminFilterUserId || null);
+        await loadData({ preserveScroll: true });
+    } catch (err) {
+        console.warn('[Background Sync] Failed:', err.message);
+    } finally {
+        state.remoteSyncInFlight = false;
+    }
+}
+
+function startBackgroundSync() {
+    if (state.remoteSyncTimer) return;
+    state.remoteSyncTimer = setInterval(() => {
+        runBackgroundSync();
+    }, CONFIG.BACKGROUND_SYNC_INTERVAL);
+
+    document.addEventListener('visibilitychange', () => {
+        if (!document.hidden) {
+            runBackgroundSync({ force: true });
+        }
+    });
+    window.addEventListener('focus', () => {
+        runBackgroundSync({ force: true });
+    });
+}
+
 function updateHeroImage() {
     const hero = document.querySelector('.playlist-hero');
     if (!hero) return;
@@ -4284,7 +4322,9 @@ document.addEventListener('DOMContentLoaded', async () => {
         // Update hero image after data is rendered
         setTimeout(updateHeroImage, 100);
         // Sync groups from server
-        syncGroupsFromServer();
+        syncGroupsFromServer(state.adminFilterUserId || null);
+        // Keep remote updates (from other users/tabs) in sync without manual refresh.
+        startBackgroundSync();
     });
 
     // Keep "Checked" relative times live without page reload.
