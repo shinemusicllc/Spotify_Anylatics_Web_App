@@ -55,6 +55,14 @@ def _public_email(email: str | None) -> str | None:
 
 
 def _user_response(user: User) -> UserResponse:
+    try:
+        custom_groups = json.loads(user.custom_groups) if user.custom_groups else []
+    except (json.JSONDecodeError, TypeError):
+        custom_groups = []
+    if not isinstance(custom_groups, list):
+        custom_groups = []
+    custom_groups = [str(g).strip() for g in custom_groups if str(g).strip()]
+
     return UserResponse(
         id=str(user.id),
         username=user.username,
@@ -65,6 +73,7 @@ def _user_response(user: User) -> UserResponse:
         created_at=user.created_at.isoformat() if user.created_at else None,
         last_login=user.last_login.isoformat() if user.last_login else None,
         avatar=user.avatar,
+        custom_groups=custom_groups,
     )
 
 

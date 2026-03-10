@@ -913,6 +913,58 @@ function loadCustomGroups() {
     }
 }
 
+function getGroupsFromUserRecord(userRecord) {
+    if (!userRecord) return [];
+    const raw = userRecord.custom_groups;
+    if (Array.isArray(raw)) {
+        return raw.map(normalizeGroupName).filter(Boolean);
+    }
+    if (typeof raw === 'string' && raw.trim()) {
+        try {
+            const parsed = JSON.parse(raw);
+            if (Array.isArray(parsed)) {
+                return parsed.map(normalizeGroupName).filter(Boolean);
+            }
+        } catch {
+            return [];
+        }
+    }
+    return [];
+}
+
+function getOwnerCustomGroups(ownerUserId) {
+    const ownerId = ownerUserId ? String(ownerUserId) : '';
+    if (isAdminAllUsersMode() && ownerId) {
+        const user = (state.adminUserList || []).find((u) => String(u.id || u._id || '') === ownerId);
+        return getGroupsFromUserRecord(user);
+    }
+    return (state.customGroups || []).map(normalizeGroupName).filter(Boolean);
+}
+
+function setOwnerCustomGroups(ownerUserId, groups) {
+    const ownerId = ownerUserId ? String(ownerUserId) : '';
+    const cleaned = Array.from(new Set((groups || []).map(normalizeGroupName).filter(Boolean)));
+    if (isAdminAllUsersMode() && ownerId) {
+        (state.adminUserList || []).forEach((u) => {
+            if (String(u.id || u._id || '') === ownerId) {
+                u.custom_groups = cleaned.slice();
+            }
+        });
+        _adminUsersCache = (_adminUsersCache || []).map((u) => {
+            if (String(u.id || u._id || '') !== ownerId) return u;
+            return { ...u, custom_groups: cleaned.slice() };
+        });
+        const currentUser = getAuthUser();
+        if (currentUser && String(currentUser.id || '') === ownerId) {
+            state.customGroups = cleaned.slice();
+            localStorage.setItem(getUserGroupStorageKey(), JSON.stringify(cleaned));
+        }
+        return cleaned;
+    }
+    state.customGroups = cleaned.slice();
+    return cleaned;
+}
+
 async function syncGroupsFromServer(targetUserId) {
     try {
         var token = getAuthToken();
@@ -987,8 +1039,11 @@ function saveCustomGroups() {
             .filter(Boolean)
     ));
     state.customGroups = cleaned;
-    // If admin is filtering another user, don't save to own localStorage
     var currentUser = getAuthUser();
+    if (currentUser?.role === 'admin' && isAdminAllUsersMode() && currentUser.id) {
+        setOwnerCustomGroups(currentUser.id, cleaned);
+    }
+    // If admin is filtering another user, don't save to own localStorage
     var filteringOther = state.adminFilterUserId && currentUser && currentUser.role === 'admin' && state.adminFilterUserId !== currentUser.id;
     if (!filteringOther) {
         localStorage.setItem(getUserGroupStorageKey(), JSON.stringify(cleaned));
@@ -1306,9 +1361,9 @@ function getAdminGroupDisplayName(groupName, ownerUserId = null) {
 
 function canManageGroupEntry(groupEntry) {
     if (!groupEntry || groupEntry.id === ALL_GROUP_ID) return false;
-    if (!isAdminAllUsersMode()) return true;
     const currentUser = getAuthUser();
-    return Boolean(currentUser?.id && String(groupEntry.ownerUserId || '') === String(currentUser.id));
+    if (currentUser?.role === 'admin') return true;
+    return true;
 }
 
 function rebuildGroups() {
@@ -1352,15 +1407,30 @@ function rebuildGroups() {
     };
 
     // Follow user-defined order first.
-    const scopedOwnerUserId = getScopedGroupOwnerUserId();
-    (state.customGroups || []).forEach((rawName) => {
-        const normalized = normalizeGroupName(rawName);
-        pushUnique({
-            id: buildGroupEntryId(normalized, scopedOwnerUserId),
-            name: normalized,
-            ownerUserId: scopedOwnerUserId,
+    if (isAdminAllUsersMode()) {
+        (state.adminUserList || []).forEach((user) => {
+            const ownerUserId = String(user.id || user._id || '');
+            if (!ownerUserId) return;
+            getGroupsFromUserRecord(user).forEach((rawName) => {
+                const normalized = normalizeGroupName(rawName);
+                pushUnique({
+                    id: buildGroupEntryId(normalized, ownerUserId),
+                    name: normalized,
+                    ownerUserId: ownerUserId,
+                });
+            });
         });
-    });
+    } else {
+        const scopedOwnerUserId = getScopedGroupOwnerUserId();
+        (state.customGroups || []).forEach((rawName) => {
+            const normalized = normalizeGroupName(rawName);
+            pushUnique({
+                id: buildGroupEntryId(normalized, scopedOwnerUserId),
+                name: normalized,
+                ownerUserId: scopedOwnerUserId,
+            });
+        });
+    }
 
     // Then append any groups discovered from data but not explicitly ordered yet.
     encountered.forEach(pushUnique);
@@ -1582,12 +1652,19 @@ function handleDeleteGroup(rawGroupId) {
     const confirmed = window.confirm(`Delete group "${groupName}"?\nAll links in this group will move to All Links.`);
     if (!confirmed) return;
 
+    const ownerUserId = target?.ownerUserId ? String(target.ownerUserId) : getScopedGroupOwnerUserId();
     const groupKey = normalizeGroupName(target?.name || groupId).toLowerCase();
-    state.customGroups = (state.customGroups || []).filter((name) => {
+    const nextGroups = getOwnerCustomGroups(ownerUserId).filter((name) => {
         const normalized = normalizeGroupName(name);
         return normalized && normalized.toLowerCase() !== groupKey;
     });
-    saveCustomGroups();
+    if (isAdminAllUsersMode() && ownerUserId) {
+        setOwnerCustomGroups(ownerUserId, nextGroups);
+        saveGroupsToServer(nextGroups, ownerUserId);
+    } else {
+        state.customGroups = nextGroups;
+        saveCustomGroups();
+    }
 
     state.items = state.items.map((item) => {
         const itemGroup = normalizeGroupName(item.group);
@@ -1595,7 +1672,7 @@ function handleDeleteGroup(rawGroupId) {
         if (target?.ownerUserId && String(item.user_id || '') !== String(target.ownerUserId)) return item;
         return { ...item, group: null };
     });
-    syncGroupItemsToServer(target?.name || groupName, '', target?.ownerUserId || null);
+    syncGroupItemsToServer(target?.name || groupName, '', ownerUserId || null);
 
     if ((state.activeGroup || '').toLowerCase() === groupId.toLowerCase()) {
         state.activeGroup = ALL_GROUP_ID;
@@ -1709,12 +1786,19 @@ function handleRenameGroup(rawGroupId, rawName, opts = {}) {
 
     if (!sameByCaseInsensitive || nextName !== target.name) {
         const oldName = target.name;
-        state.customGroups = (state.customGroups || []).map((raw) => {
+        const ownerUserId = target?.ownerUserId ? String(target.ownerUserId) : getScopedGroupOwnerUserId();
+        const renamedGroups = getOwnerCustomGroups(ownerUserId).map((raw) => {
             const n = normalizeGroupName(raw);
             if (n.toLowerCase() !== oldKey) return n;
             return nextName;
         });
-        saveCustomGroups();
+        if (isAdminAllUsersMode() && ownerUserId) {
+            setOwnerCustomGroups(ownerUserId, renamedGroups);
+            saveGroupsToServer(renamedGroups, ownerUserId);
+        } else {
+            state.customGroups = renamedGroups;
+            saveCustomGroups();
+        }
 
         state.items = state.items.map((item) => {
             const itemGroup = normalizeGroupName(item.group);
@@ -1726,7 +1810,7 @@ function handleRenameGroup(rawGroupId, rawName, opts = {}) {
         if (normalizeGroupName(state.activeGroup).toLowerCase() === normalizeGroupName(target.id).toLowerCase()) {
             state.activeGroup = buildGroupEntryId(nextName, target.ownerUserId || null);
         }
-        syncGroupItemsToServer(oldName, nextName, target.ownerUserId || null);
+        syncGroupItemsToServer(oldName, nextName, ownerUserId || null);
     }
 
     state.renamingGroupId = null;
@@ -2913,6 +2997,9 @@ async function loadData(opts = {}) {
     try {
         const params = {};
         const currentUser = getAuthUser();
+        if (currentUser?.role === 'admin') {
+            await _fetchAdminUsers({ preferCache: Boolean(state.adminFilterUserId) });
+        }
         if (currentUser?.role === 'admin' && state.adminFilterUserId) {
             params.user_id = state.adminFilterUserId;
         }

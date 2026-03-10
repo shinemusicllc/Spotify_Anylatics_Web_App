@@ -25,6 +25,7 @@ class UserResponse(BaseModel):
     created_at: str | None = None
     last_login: str | None = None
     avatar: str | None = None
+    custom_groups: list[str] | None = None
 
     model_config = {"from_attributes": True}
 
