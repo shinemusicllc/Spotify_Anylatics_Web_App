@@ -977,6 +977,15 @@ h3 {
   font-weight: 500;
 }
 
+.custom-grid-row:hover .checked-stack {
+  align-items: center;
+}
+
+.custom-grid-row:hover .checked-status {
+  justify-content: center;
+  text-align: center;
+}
+
 .metric-stack {
   display: flex;
   flex-direction: column;
