@@ -269,6 +269,9 @@ class SpotiCheckAPI {
         return this._fetch(`/items/${type}/${id}${suffix}`);
     }
     getJob(jobId)         { return this._fetch(`/jobs/${jobId}`); }
+    deleteItemById(itemId) {
+        return this._fetch(`/items-by-id/${itemId}`, { method: 'DELETE' });
+    }
     deleteItem(type, id, userId = null) {
         const qs = new URLSearchParams();
         if (userId) qs.set('user_id', String(userId));
@@ -291,17 +294,22 @@ class SpotiCheckAPI {
         return this._fetch(`/items/group?${qs.toString()}`, { method: 'PATCH' });
     }
 
-    crawl(url, group = null, targetUserId = null) {
+    crawl(url, group = null, targetUserId = null, itemId = null) {
         return this._fetch('/crawl', {
             method: 'POST',
-            body: JSON.stringify({ url, group, target_user_id: targetUserId || null }),
+            body: JSON.stringify({ url, group, target_user_id: targetUserId || null, item_id: itemId || null }),
         });
     }
 
-    crawlBatch(urls, group = null, targetUserId = null) {
+    crawlBatch(urls, group = null, targetUserId = null, itemIds = null) {
         return this._fetch('/crawl/batch', {
             method: 'POST',
-            body: JSON.stringify({ urls, group, target_user_id: targetUserId || null }),
+            body: JSON.stringify({
+                urls,
+                group,
+                target_user_id: targetUserId || null,
+                item_ids: Array.isArray(itemIds) ? itemIds : null,
+            }),
         });
     }
 }
@@ -489,6 +497,7 @@ function debounce(fn, ms) {
 }
 
 function itemKey(item) {
+    if (item?.id) return String(item.id);
     return `${item?.type || ''}:${item?.spotify_id || ''}:${item?.user_id ? String(item.user_id) : ''}`;
 }
 
@@ -524,16 +533,6 @@ function getUserIdentityById(userId) {
         name: match.display_name || match.username || targetId,
         avatar: match.avatar || null,
     };
-}
-
-function findOwnedItemIndex(type, spotifyId, ownerUserId = null) {
-    const ownerId = ownerUserId ? String(ownerUserId) : null;
-    return state.items.findIndex((item) => {
-        if (item.type !== type || item.spotify_id !== spotifyId) return false;
-        if (!ownerId) return true;
-        const itemOwnerId = item.user_id ? String(item.user_id) : '';
-        return itemOwnerId === ownerId;
-    });
 }
 
 function loadPersistedRowOrder() {
@@ -2433,10 +2432,18 @@ async function handleDeleteItem(item) {
 
     try {
         if (state.apiOnline) {
-            await api.deleteItem(item.type, item.spotify_id, item.user_id || null);
+            if (item.id && !String(item.id).startsWith('temp-')) {
+                await api.deleteItemById(item.id);
+            } else {
+                await api.deleteItem(item.type, item.spotify_id, item.user_id || null);
+            }
         }
+        syncGroupUI(true);
+        renderList({ preserveScroll: true });
         showToast(`Deleted: ${label}`, 'success');
     } catch (e) {
+        syncGroupUI(true);
+        renderList({ preserveScroll: true });
         showToast(`Deleted local only: ${label} (${e.message})`, 'info');
     }
 }
@@ -2453,6 +2460,10 @@ function markItemAsRefreshing(item, nowIso) {
 
 async function handleRefreshItem(item) {
     if (!item) return;
+    if (item.id && String(item.id).startsWith('temp-')) {
+        showToast('Link này đang crawl, đợi hoàn tất rồi refresh lại', 'info');
+        return;
+    }
     if (!state.apiOnline) {
         showToast('API offline, cannot refresh this row', 'info');
         return;
@@ -2469,7 +2480,7 @@ async function handleRefreshItem(item) {
     try {
         const currentUser = getAuthUser();
         const targetUserId = currentUser?.role === 'admin' ? (item.user_id || null) : null;
-        const result = await api.crawl(url, item.group || null, targetUserId);
+        const result = await api.crawl(url, item.group || null, targetUserId, item.id);
         const jobId = result?.job_id;
         if (!jobId) {
             throw new Error('Backend did not return job_id');
@@ -2537,8 +2548,14 @@ async function refreshAllItems() {
         return;
     }
 
+    const refreshableItems = targetItems.filter((item) => !(item.id && String(item.id).startsWith('temp-')));
+    if (refreshableItems.length === 0) {
+        showToast('No stable links to refresh right now', 'info');
+        return;
+    }
+
     const now = new Date().toISOString();
-    const targetKeys = new Set(targetItems.map((item) => itemKey(item)));
+    const targetKeys = new Set(refreshableItems.map((item) => itemKey(item)));
     state.items = state.items.map((item) => (
         targetKeys.has(itemKey(item)) ? markItemAsRefreshing(item, now) : item
     ));
@@ -2548,7 +2565,7 @@ async function refreshAllItems() {
         const currentUser = getAuthUser();
         const isAdmin = currentUser?.role === 'admin';
         const groupedByOwner = new Map();
-        targetItems.forEach((item) => {
+        refreshableItems.forEach((item) => {
             const ownerId = isAdmin && item.user_id ? String(item.user_id) : '';
             if (!groupedByOwner.has(ownerId)) {
                 groupedByOwner.set(ownerId, { ownerId: ownerId || null, urls: [], itemIds: [] });
@@ -2560,7 +2577,12 @@ async function refreshAllItems() {
 
         const batchResponses = await Promise.all(
             Array.from(groupedByOwner.values()).map(async (bucket) => {
-                const response = await api.crawlBatch(bucket.urls, null, isAdmin ? bucket.ownerId : null);
+                const response = await api.crawlBatch(
+                    bucket.urls,
+                    null,
+                    isAdmin ? bucket.ownerId : null,
+                    bucket.itemIds
+                );
                 return { bucket, response };
             })
         );
@@ -2587,7 +2609,7 @@ async function refreshAllItems() {
         startPolling();
         renderList({ preserveScroll: true });
         const scopeLabel = useSelectionScope ? 'selected links' : 'links';
-        showToast(`Refresh started for ${jobIds.length || targetItems.length} ${scopeLabel}`, 'success');
+        showToast(`Refresh started for ${jobIds.length || refreshableItems.length} ${scopeLabel}`, 'success');
     } catch (e) {
         state.batchRefresh = null;
         await loadData({ preserveScroll: true });
@@ -2657,37 +2679,25 @@ async function submitSingle() {
         showToast(`Added ${parsed.type}: crawling started`, 'success');
 
         const now = new Date().toISOString();
-        const existingIdx = findOwnedItemIndex(parsed.type, parsed.id, currentIdentity.id);
-
-        if (existingIdx >= 0) {
-            state.items[existingIdx] = {
-                ...state.items[existingIdx],
-                status: 'crawling',
-                error_code: null,
-                error_message: null,
-                last_checked: now,
-            };
-            state.pendingJobToItem.set(jobId, state.items[existingIdx].id);
-        } else {
-            const newItem = {
-                id: `temp-${jobId}`,
-                spotify_id: parsed.id,
-                type: parsed.type,
-                name: `Loading ${parsed.type}...`,
-                status: 'crawling',
-                group: group,
-                last_checked: now,
-                user_id: currentIdentity.id,
-                user_name: currentIdentity.name,
-                user_avatar: currentIdentity.avatar,
-            };
-            state.items.unshift(newItem);
-            state.pendingJobToItem.set(jobId, newItem.id);
-            persistCurrentItemOrder();
-        }
+        const newItem = {
+            id: `temp-${jobId}`,
+            spotify_id: parsed.id,
+            type: parsed.type,
+            name: `Loading ${parsed.type}...`,
+            status: 'crawling',
+            group: group,
+            last_checked: now,
+            user_id: currentIdentity.id,
+            user_name: currentIdentity.name,
+            user_avatar: currentIdentity.avatar,
+        };
+        state.items.unshift(newItem);
+        state.pendingJobToItem.set(jobId, newItem.id);
+        persistCurrentItemOrder();
 
         state.pendingJobs.add(jobId);
         startPolling();
+        syncGroupUI(true);
         renderList();
         closeModal();
     } catch (e) {
@@ -2722,41 +2732,28 @@ async function submitBatch() {
         const now = new Date().toISOString();
         let mappedJobs = 0;
 
-        // Mark existing rows as crawling or add placeholders
+        // Create a placeholder row for every submitted URL.
         urls.forEach((url, i) => {
             const parsed = parseSpotifyUrl(url);
             if (!parsed) return;
             const jobId = result.job_ids?.[i];
             if (!jobId) return;
 
-            const ownedIdx = findOwnedItemIndex(parsed.type, parsed.id, currentIdentity.id);
-
-            if (ownedIdx >= 0) {
-                state.items[ownedIdx] = {
-                    ...state.items[ownedIdx],
-                    status: 'crawling',
-                    error_code: null,
-                    error_message: null,
-                    last_checked: now,
-                };
-                state.pendingJobToItem.set(jobId, state.items[ownedIdx].id);
-            } else {
-                const newItem = {
-                    id: `temp-${jobId}`,
-                    spotify_id: parsed.id,
-                    type: parsed.type,
-                    name: `Loading ${parsed.type}...`,
-                    status: 'crawling',
-                    group: group,
-                    last_checked: now,
-                    user_id: currentIdentity.id,
-                    user_name: currentIdentity.name,
-                    user_avatar: currentIdentity.avatar,
-                };
-                state.items.unshift(newItem);
-                state.pendingJobToItem.set(jobId, newItem.id);
-                persistCurrentItemOrder();
-            }
+            const newItem = {
+                id: `temp-${jobId}`,
+                spotify_id: parsed.id,
+                type: parsed.type,
+                name: `Loading ${parsed.type}...`,
+                status: 'crawling',
+                group: group,
+                last_checked: now,
+                user_id: currentIdentity.id,
+                user_name: currentIdentity.name,
+                user_avatar: currentIdentity.avatar,
+            };
+            state.items.unshift(newItem);
+            state.pendingJobToItem.set(jobId, newItem.id);
+            persistCurrentItemOrder();
 
             state.pendingJobs.add(jobId);
             mappedJobs += 1;
@@ -2768,6 +2765,7 @@ async function submitBatch() {
         }
 
         startPolling();
+        syncGroupUI(true);
         renderList();
         closeModal();
     } catch (e) {

@@ -11,7 +11,6 @@ from sqlalchemy import (
     Text,
     Index,
     ForeignKey,
-    UniqueConstraint,
 )
 from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import Mapped, mapped_column
@@ -74,10 +73,4 @@ class Item(Base):
     __table_args__ = (
         Index("ix_items_type_status", "item_type", "status"),
         Index("ix_items_user_type_spotify", "user_id", "item_type", "spotify_id"),
-        UniqueConstraint(
-            "user_id",
-            "item_type",
-            "spotify_id",
-            name="uq_items_user_type_spotify",
-        ),
     )

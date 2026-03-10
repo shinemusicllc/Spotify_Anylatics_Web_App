@@ -460,6 +460,34 @@ async def delete_item(
     return {"ok": True, "deleted": 1}
 
 
+@router.delete("/items-by-id/{item_id}")
+async def delete_item_by_id(
+    item_id: str,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """Delete a single item by row id (safe when duplicate links exist)."""
+    try:
+        item_uuid = uuid.UUID(str(item_id))
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail="Invalid item_id") from exc
+
+    result = await db.execute(select(Item).where(Item.id == item_uuid))
+    item = result.scalar_one_or_none()
+    if not item:
+        raise HTTPException(status_code=404, detail="Item not found")
+
+    if current_user.role != "admin" and item.user_id != current_user.id:
+        raise HTTPException(status_code=403, detail="Not authorized to delete this item")
+
+    await db.execute(delete(MetricsSnapshot).where(MetricsSnapshot.item_id == item.id))
+    await db.execute(delete(CrawlJob).where(CrawlJob.item_id == item.id))
+    await db.delete(item)
+    await _delete_raw_if_unreferenced(db, [item.spotify_id], excluded_item_ids=[item.id])
+    await db.commit()
+    return {"ok": True, "deleted": 1}
+
+
 @router.delete("/items")
 async def clear_items(
     group: str | None = Query(None, description="Optional group to clear"),

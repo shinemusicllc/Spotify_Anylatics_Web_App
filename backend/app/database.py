@@ -132,9 +132,37 @@ async def init_db():
         """,
         "DROP INDEX IF EXISTS items_spotify_id_key",
         "DROP INDEX IF EXISTS uq_items_spotify_id",
+        """
+        DO $$
+        DECLARE rec RECORD;
+        BEGIN
+            FOR rec IN
+                SELECT tc.constraint_name
+                FROM information_schema.table_constraints tc
+                JOIN information_schema.key_column_usage kcu
+                    ON tc.constraint_name = kcu.constraint_name
+                    AND tc.table_schema = kcu.table_schema
+                    AND tc.table_name = kcu.table_name
+                WHERE tc.table_schema = current_schema()
+                  AND tc.table_name = 'items'
+                  AND tc.constraint_type = 'UNIQUE'
+                GROUP BY tc.constraint_name
+                HAVING COUNT(*) = 3
+                   AND bool_and(kcu.column_name IN ('user_id', 'item_type', 'spotify_id'))
+            LOOP
+                EXECUTE format(
+                    'ALTER TABLE %I.%I DROP CONSTRAINT IF EXISTS %I',
+                    current_schema(),
+                    'items',
+                    rec.constraint_name
+                );
+            END LOOP;
+        END $$;
+        """,
+        "DROP INDEX IF EXISTS uq_items_user_type_spotify",
+        "DROP INDEX IF EXISTS items_user_id_item_type_spotify_id_key",
         "CREATE INDEX IF NOT EXISTS ix_items_spotify_id ON items(spotify_id)",
         "CREATE INDEX IF NOT EXISTS ix_items_user_type_spotify ON items(user_id, item_type, spotify_id)",
-        "CREATE UNIQUE INDEX IF NOT EXISTS uq_items_user_type_spotify ON items(user_id, item_type, spotify_id)",
         "ALTER TABLE crawl_jobs ADD COLUMN IF NOT EXISTS user_id UUID REFERENCES users(id)",
         "CREATE INDEX IF NOT EXISTS ix_crawl_jobs_user_id ON crawl_jobs(user_id)",
         "ALTER TABLE users ADD COLUMN IF NOT EXISTS avatar TEXT",

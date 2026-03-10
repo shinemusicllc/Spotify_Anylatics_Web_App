@@ -41,6 +41,31 @@ async def _resolve_target_user_id(
     return target_user.id
 
 
+async def _resolve_refresh_item(
+    db: AsyncSession,
+    current_user: User,
+    item_id: uuid.UUID,
+    target_user_id: uuid.UUID | None,
+    expected_type: str,
+    expected_spotify_id: str,
+) -> Item:
+    item_result = await db.execute(select(Item).where(Item.id == item_id))
+    item = item_result.scalar_one_or_none()
+    if not item:
+        raise HTTPException(status_code=404, detail="Item not found for refresh")
+
+    if current_user.role != "admin" and item.user_id != current_user.id:
+        raise HTTPException(status_code=403, detail="Not authorized to refresh this item")
+
+    if target_user_id and item.user_id != target_user_id:
+        raise HTTPException(status_code=400, detail="target_user_id does not match item owner")
+
+    if item.item_type != expected_type or item.spotify_id != expected_spotify_id:
+        raise HTTPException(status_code=400, detail="item_id does not match URL")
+
+    return item
+
+
 @router.post("/crawl", response_model=CrawlResponse)
 async def crawl(
     req: CrawlRequest,
@@ -56,26 +81,18 @@ async def crawl(
     target_user_id = await _resolve_target_user_id(db, current_user, req.target_user_id)
     requested_group = (req.group or "").strip() or None
 
-    # Check if item already exists for the selected owner only.
-    existing = await db.execute(
-        select(Item).where(
-            Item.spotify_id == spotify_id,
-            Item.item_type == item_type,
-            Item.user_id == target_user_id,
+    if req.item_id:
+        item = await _resolve_refresh_item(
+            db=db,
+            current_user=current_user,
+            item_id=req.item_id,
+            target_user_id=target_user_id,
+            expected_type=item_type,
+            expected_spotify_id=spotify_id,
         )
-    )
-    item = existing.scalar_one_or_none()
-
-    if item:
-        # Respect explicit group selection in add-link modal.
         if req.group is not None:
             item.group = requested_group
-
-        item.status = "crawling"
-        item.error_code = None
-        item.error_message = None
     else:
-        # Create placeholder item
         item = Item(
             spotify_id=spotify_id,
             item_type=item_type,
@@ -85,6 +102,9 @@ async def crawl(
         )
         db.add(item)
         await db.flush()
+    item.status = "crawling"
+    item.error_code = None
+    item.error_message = None
 
     # Create crawl job
     job = CrawlJob(
@@ -119,31 +139,28 @@ async def crawl_batch(
     background_jobs: list[tuple[str, str, str]] = []
     target_user_id = await _resolve_target_user_id(db, current_user, req.target_user_id)
     requested_group = (req.group or "").strip() or None
+    if req.item_ids is not None and len(req.item_ids) != len(req.urls):
+        raise HTTPException(status_code=400, detail="item_ids must align with urls length")
+    item_ids = req.item_ids if req.item_ids is not None else [None] * len(req.urls)
 
-    for url in req.urls:
+    for idx, url in enumerate(req.urls):
         parsed = parse_spotify_url(url)
         if not parsed:
             continue  # Skip invalid URLs
 
         item_type, spotify_id = parsed
-
-        # Check existing for the selected owner only.
-        existing = await db.execute(
-            select(Item).where(
-                Item.spotify_id == spotify_id,
-                Item.item_type == item_type,
-                Item.user_id == target_user_id,
+        refresh_item_id = item_ids[idx] if idx < len(item_ids) else None
+        if refresh_item_id:
+            item = await _resolve_refresh_item(
+                db=db,
+                current_user=current_user,
+                item_id=refresh_item_id,
+                target_user_id=target_user_id,
+                expected_type=item_type,
+                expected_spotify_id=spotify_id,
             )
-        )
-        item = existing.scalar_one_or_none()
-
-        if item:
             if req.group is not None:
                 item.group = requested_group
-
-            item.status = "crawling"
-            item.error_code = None
-            item.error_message = None
         else:
             item = Item(
                 spotify_id=spotify_id,
@@ -154,6 +171,9 @@ async def crawl_batch(
             )
             db.add(item)
             await db.flush()
+        item.status = "crawling"
+        item.error_code = None
+        item.error_message = None
 
         job = CrawlJob(
             item_id=item.id,
