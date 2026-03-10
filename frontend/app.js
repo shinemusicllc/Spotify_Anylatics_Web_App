@@ -76,6 +76,7 @@ const RESIZABLE_COLUMN_KEYS = Object.freeze([
     'artistFollowers',
     'artistListeners',
     'trackViews',
+    'checked',
 ]);
 
 function getUserGroupStorageKey() {
@@ -494,10 +495,6 @@ function loadPersistedColumnWidths() {
         const parsed = raw ? JSON.parse(raw) : {};
         const widths = { ...DEFAULT_COLUMN_WIDTHS };
         Object.keys(DEFAULT_COLUMN_WIDTHS).forEach((key) => {
-            if (key === 'checked') {
-                widths[key] = DEFAULT_COLUMN_WIDTHS[key];
-                return;
-            }
             widths[key] = clampColumnWidth(key, parsed?.[key]);
         });
         return rebalanceColumnWidths(widths);
@@ -591,7 +588,7 @@ function rebalanceColumnWidths(sourceWidths, preferredKey = null) {
 }
 
 function setColumnWidth(key, width, persist = false) {
-    if (!(key in DEFAULT_COLUMN_WIDTHS) || key === 'checked') return;
+    if (!(key in DEFAULT_COLUMN_WIDTHS)) return;
     const nextWidths = {
         ...state.columnWidths,
         [key]: clampColumnWidth(key, width),
@@ -1640,6 +1637,7 @@ function setupColumnResizers() {
         handle.addEventListener('pointerdown', (event) => {
             const key = handle.dataset.colKey;
             if (!key || !(key in DEFAULT_COLUMN_WIDTHS)) return;
+            const resizeEdge = handle.dataset.resizeEdge === 'start' ? 'start' : 'end';
 
             event.preventDefault();
             event.stopPropagation();
@@ -1649,7 +1647,10 @@ function setupColumnResizers() {
             document.body.classList.add('column-resizing');
 
             const onMove = (moveEvent) => {
-                const nextWidth = startWidth + (moveEvent.clientX - startX);
+                const delta = moveEvent.clientX - startX;
+                const nextWidth = resizeEdge === 'start'
+                    ? startWidth - delta
+                    : startWidth + delta;
                 setColumnWidth(key, nextWidth);
             };
 
