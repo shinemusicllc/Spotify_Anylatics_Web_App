@@ -874,7 +874,7 @@ function saveCustomGroups() {
 function getActiveGroupName() {
     if (state.activeGroup === ALL_GROUP_ID) return ALL_GROUP_LABEL;
     const match = state.groups.find((g) => g.id === state.activeGroup);
-    return match?.name || state.activeGroup;
+    return match?.displayName || match?.name || state.activeGroup;
 }
 
 function updateGroupHeader() {
@@ -1076,6 +1076,41 @@ function updateDragAutoScroll(container, clientY) {
     ensureDragAutoScroll();
 }
 
+function getAdminUserLabelById(userId) {
+    if (!userId) return '';
+    const match = (state.adminUserList || []).find((user) => String(user.id || user._id || '') === String(userId));
+    return (match && (match.display_name || match.username)) || '';
+}
+
+function getAdminGroupDisplayName(groupName) {
+    const currentUser = getAuthUser();
+    if (currentUser?.role !== 'admin' || !groupName || groupName === ALL_GROUP_LABEL) {
+        return groupName;
+    }
+
+    const matchingItems = state.items.filter((item) => normalizeGroupName(item.group) === groupName);
+    const uniqueUserIds = Array.from(new Set(
+        matchingItems
+            .map((item) => item.user_id ? String(item.user_id) : '')
+            .filter(Boolean)
+    ));
+
+    if (!uniqueUserIds.length) {
+        if (state.adminFilterUserId) {
+            const filteredUserLabel = getAdminUserLabelById(state.adminFilterUserId);
+            return filteredUserLabel ? `${filteredUserLabel} - ${groupName}` : groupName;
+        }
+        return groupName;
+    }
+
+    const primaryLabel = getAdminUserLabelById(uniqueUserIds[0]) || uniqueUserIds[0];
+    if (!primaryLabel) return groupName;
+    if (uniqueUserIds.length === 1) {
+        return `${primaryLabel} - ${groupName}`;
+    }
+    return `${primaryLabel} +${uniqueUserIds.length - 1} - ${groupName}`;
+}
+
 function rebuildGroups() {
     const counts = new Map();
     const encountered = [];
@@ -1119,6 +1154,7 @@ function rebuildGroups() {
         groups.push({
             id: name,
             name,
+            displayName: getAdminGroupDisplayName(name),
             count: counts.get(name) || 0,
         });
     }
@@ -1137,7 +1173,7 @@ function renderGroups() {
     const groups = state.groups.filter((g) => {
         if (g.id === ALL_GROUP_ID) return true;
         if (!q) return true;
-        return g.name.toLowerCase().includes(q);
+        return (g.displayName || g.name).toLowerCase().includes(q);
     });
 
     const groupButtons = groups.map((g) => {
@@ -1164,7 +1200,7 @@ function renderGroups() {
                             value="${escapeHtml(g.name)}"
                             class="w-full bg-white/5 border border-primary/50 rounded-lg px-2 py-1 text-[14px] font-semibold text-white focus:outline-none focus:border-primary"
                         >`
-                        : `<span class="text-[14px] font-semibold truncate" data-role="group-name" data-group-id="${escapeHtml(g.id)}">${escapeHtml(g.name)}</span>`
+                        : `<span class="text-[14px] font-semibold truncate" data-role="group-name" data-group-id="${escapeHtml(g.id)}">${escapeHtml(g.displayName || g.name)}</span>`
                     }
                 </div>
                 <div class="group-item-actions flex items-center gap-2">
