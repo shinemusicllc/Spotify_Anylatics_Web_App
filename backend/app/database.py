@@ -1,5 +1,7 @@
 """SQLAlchemy async engine & session factory."""
 
+import logging
+
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 from sqlalchemy.orm import DeclarativeBase
@@ -27,6 +29,7 @@ def _normalize_database_url(raw_url: str) -> str:
 
 
 DATABASE_URL = _normalize_database_url(settings.DATABASE_URL)
+logger = logging.getLogger(__name__)
 
 engine = create_async_engine(
     DATABASE_URL,
@@ -105,31 +108,30 @@ async def init_db():
         DECLARE rec RECORD;
         BEGIN
             FOR rec IN
-                SELECT i.relname AS index_name
-                FROM pg_index x
-                JOIN pg_class i ON i.oid = x.indexrelid
-                JOIN pg_class t ON t.oid = x.indrelid
-                JOIN pg_namespace n ON n.oid = t.relnamespace
-                WHERE t.relname = 'items'
-                  AND n.nspname = current_schema()
-                  AND x.indisunique = TRUE
-                  AND x.indnatts = 1
-                  AND EXISTS (
-                        SELECT 1
-                        FROM pg_attribute a
-                        WHERE a.attrelid = t.oid
-                          AND a.attnum = (x.indkey::smallint[])[1]
-                          AND a.attname = 'spotify_id'
-                  )
+                SELECT tc.constraint_name
+                FROM information_schema.table_constraints tc
+                JOIN information_schema.key_column_usage kcu
+                    ON tc.constraint_name = kcu.constraint_name
+                    AND tc.table_schema = kcu.table_schema
+                    AND tc.table_name = kcu.table_name
+                WHERE tc.table_schema = current_schema()
+                  AND tc.table_name = 'items'
+                  AND tc.constraint_type = 'UNIQUE'
+                GROUP BY tc.constraint_name
+                HAVING bool_or(kcu.column_name = 'spotify_id')
+                   AND NOT bool_or(kcu.column_name = 'user_id')
             LOOP
                 EXECUTE format(
-                    'DROP INDEX IF EXISTS %I.%I',
+                    'ALTER TABLE %I.%I DROP CONSTRAINT IF EXISTS %I',
                     current_schema(),
-                    rec.index_name
+                    'items',
+                    rec.constraint_name
                 );
             END LOOP;
         END $$;
         """,
+        "DROP INDEX IF EXISTS items_spotify_id_key",
+        "DROP INDEX IF EXISTS uq_items_spotify_id",
         "CREATE INDEX IF NOT EXISTS ix_items_spotify_id ON items(spotify_id)",
         "CREATE INDEX IF NOT EXISTS ix_items_user_type_spotify ON items(user_id, item_type, spotify_id)",
         "CREATE UNIQUE INDEX IF NOT EXISTS uq_items_user_type_spotify ON items(user_id, item_type, spotify_id)",
@@ -144,5 +146,5 @@ async def init_db():
         try:
             async with engine.begin() as conn:
                 await conn.execute(text(sql))
-        except Exception:
-            pass
+        except Exception as ex:
+            logger.warning("DB migration step failed: %s | sql=%s", ex, sql.strip().splitlines()[0])
