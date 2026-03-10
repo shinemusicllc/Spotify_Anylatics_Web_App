@@ -73,6 +73,14 @@ async def _consume_scrape_task(task: asyncio.Task | None, label: str) -> dict[st
         return None
 
 
+def _cancel_scrape_task(task: asyncio.Task | None) -> None:
+    if task is None:
+        return
+    if task.done():
+        return
+    task.cancel()
+
+
 async def _apply_track_playwright_fallback(
     track_id: str,
     result: dict[str, Any],
@@ -85,7 +93,7 @@ async def _apply_track_playwright_fallback(
 
     needs_playcount = result.get("playcount") is None
     needs_duration = result.get("duration_ms") is None
-    should_compare_visible_playcount = scraped_data is not None or settings.PLAYWRIGHT_ENABLE_FALLBACK
+    should_compare_visible_playcount = bool(settings.PLAYWRIGHT_COMPARE_VISIBLE_PLAYCOUNT)
     if not (needs_playcount or needs_duration or should_compare_visible_playcount):
         return result
 
@@ -585,7 +593,14 @@ async def query_artist(artist_id: str) -> dict[str, Any] | None:
 
     pathfinder = await _fetch_artist_via_pathfinder(artist_id)
     if pathfinder is not None:
-        if not settings.PLAYWRIGHT_INLINE_FALLBACK:
+        needs_playwright = (
+            pathfinder.get("name") in (None, "")
+            or pathfinder.get("owner_name") in (None, "")
+            or pathfinder.get("monthly_listeners") is None
+            or pathfinder.get("followers") is None
+        )
+        if not settings.PLAYWRIGHT_INLINE_FALLBACK or not needs_playwright:
+            _cancel_scrape_task(playwright_task)
             return pathfinder
         scraped = await _consume_scrape_task(playwright_task, "artist")
         return await _apply_artist_playwright_fallback(artist_id, pathfinder, scraped)
@@ -604,7 +619,14 @@ async def query_artist(artist_id: str) -> dict[str, Any] | None:
             "playcount": None,
             "total_plays": None,
         }
-        if not settings.PLAYWRIGHT_INLINE_FALLBACK:
+        needs_playwright = (
+            result.get("name") in (None, "")
+            or result.get("owner_name") in (None, "")
+            or result.get("monthly_listeners") is None
+            or result.get("followers") is None
+        )
+        if not settings.PLAYWRIGHT_INLINE_FALLBACK or not needs_playwright:
+            _cancel_scrape_task(playwright_task)
             return result
         scraped = await _consume_scrape_task(playwright_task, "artist")
         return await _apply_artist_playwright_fallback(artist_id, result, scraped)
@@ -615,7 +637,14 @@ async def query_artist(artist_id: str) -> dict[str, Any] | None:
         fallback["playcount"] = None
         fallback["total_plays"] = None
         fallback["crawl_mode"] = "oembed"
-        if not settings.PLAYWRIGHT_INLINE_FALLBACK:
+        needs_playwright = (
+            fallback.get("name") in (None, "")
+            or fallback.get("owner_name") in (None, "")
+            or fallback.get("monthly_listeners") is None
+            or fallback.get("followers") is None
+        )
+        if not settings.PLAYWRIGHT_INLINE_FALLBACK or not needs_playwright:
+            _cancel_scrape_task(playwright_task)
             return fallback
         scraped = await _consume_scrape_task(playwright_task, "artist")
         return await _apply_artist_playwright_fallback(artist_id, fallback, scraped)
@@ -663,7 +692,13 @@ async def get_track(track_id: str) -> dict[str, Any] | None:
                 }
             return pathfinder
 
-        if not settings.PLAYWRIGHT_INLINE_FALLBACK:
+        needs_playwright = (
+            pathfinder.get("name") in (None, "")
+            or pathfinder.get("duration_ms") is None
+            or pathfinder.get("playcount") is None
+        )
+        if not settings.PLAYWRIGHT_INLINE_FALLBACK or not needs_playwright:
+            _cancel_scrape_task(playwright_task)
             return pathfinder
         scraped = await _consume_scrape_task(playwright_task, "track")
         return await _apply_track_playwright_fallback(track_id, pathfinder, scraped)
@@ -694,7 +729,13 @@ async def get_track(track_id: str) -> dict[str, Any] | None:
             "crawl_mode": "webapi_track",
         }
 
-        if not settings.PLAYWRIGHT_INLINE_FALLBACK:
+        needs_playwright = (
+            webapi_result.get("name") in (None, "")
+            or webapi_result.get("duration_ms") is None
+            or webapi_result.get("playcount") is None
+        )
+        if not settings.PLAYWRIGHT_INLINE_FALLBACK or not needs_playwright:
+            _cancel_scrape_task(playwright_task)
             return webapi_result
         scraped = await _consume_scrape_task(playwright_task, "track")
         return await _apply_track_playwright_fallback(track_id, webapi_result, scraped)
@@ -702,7 +743,13 @@ async def get_track(track_id: str) -> dict[str, Any] | None:
     fallback = await _fallback_oembed("track", track_id)
     if fallback:
         fallback["crawl_mode"] = "oembed"
-        if not settings.PLAYWRIGHT_INLINE_FALLBACK:
+        needs_playwright = (
+            fallback.get("name") in (None, "")
+            or fallback.get("duration_ms") is None
+            or fallback.get("playcount") is None
+        )
+        if not settings.PLAYWRIGHT_INLINE_FALLBACK or not needs_playwright:
+            _cancel_scrape_task(playwright_task)
             return fallback
         scraped = await _consume_scrape_task(playwright_task, "track")
         return await _apply_track_playwright_fallback(track_id, fallback, scraped)
@@ -843,7 +890,13 @@ async def fetch_album(album_id: str) -> dict[str, Any] | None:
 
     pathfinder = await _fetch_album_via_pathfinder(album_id)
     if pathfinder is not None:
-        if not settings.PLAYWRIGHT_INLINE_FALLBACK:
+        needs_playwright = (
+            pathfinder.get("name") in (None, "")
+            or pathfinder.get("owner_name") in (None, "")
+            or (pathfinder.get("playcount") is None and pathfinder.get("total_plays") is None)
+        )
+        if not settings.PLAYWRIGHT_INLINE_FALLBACK or not needs_playwright:
+            _cancel_scrape_task(playwright_task)
             return pathfinder
         scraped = await _consume_scrape_task(playwright_task, "album")
         return await _apply_album_playwright_fallback(album_id, pathfinder, scraped)
@@ -863,7 +916,13 @@ async def fetch_album(album_id: str) -> dict[str, Any] | None:
             "total_plays": None,
             "crawl_mode": "webapi_album",
         }
-        if not settings.PLAYWRIGHT_INLINE_FALLBACK:
+        needs_playwright = (
+            result.get("name") in (None, "")
+            or result.get("owner_name") in (None, "")
+            or (result.get("playcount") is None and result.get("total_plays") is None)
+        )
+        if not settings.PLAYWRIGHT_INLINE_FALLBACK or not needs_playwright:
+            _cancel_scrape_task(playwright_task)
             return result
         scraped = await _consume_scrape_task(playwright_task, "album")
         return await _apply_album_playwright_fallback(album_id, result, scraped)
@@ -871,7 +930,13 @@ async def fetch_album(album_id: str) -> dict[str, Any] | None:
     fallback = await _fallback_oembed("album", album_id)
     if fallback:
         fallback["crawl_mode"] = "oembed"
-        if not settings.PLAYWRIGHT_INLINE_FALLBACK:
+        needs_playwright = (
+            fallback.get("name") in (None, "")
+            or fallback.get("owner_name") in (None, "")
+            or (fallback.get("playcount") is None and fallback.get("total_plays") is None)
+        )
+        if not settings.PLAYWRIGHT_INLINE_FALLBACK or not needs_playwright:
+            _cancel_scrape_task(playwright_task)
             return fallback
         scraped = await _consume_scrape_task(playwright_task, "album")
         return await _apply_album_playwright_fallback(album_id, fallback, scraped)

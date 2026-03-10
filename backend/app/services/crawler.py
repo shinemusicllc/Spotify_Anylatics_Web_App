@@ -59,6 +59,7 @@ async def _apply_direct_playwright_fallback(
         merged = dict(data)
 
     had_error = bool(merged.get("error"))
+    already_playwright = "playwright" in str(merged.get("crawl_mode") or "").lower()
     existing = existing or {}
 
     def _clear_error_state() -> None:
@@ -68,6 +69,8 @@ async def _apply_direct_playwright_fallback(
 
     try:
         if item_type == "track":
+            if already_playwright and not had_error:
+                return merged
             existing_has_core = (
                 existing.get("playcount") is not None
                 or existing.get("duration_ms") is not None
@@ -106,6 +109,8 @@ async def _apply_direct_playwright_fallback(
             return merged
 
         if item_type == "artist":
+            if already_playwright and not had_error:
+                return merged
             existing_has_core = (
                 existing.get("monthly_listeners") is not None
                 or existing.get("followers") is not None
@@ -161,6 +166,8 @@ async def _apply_direct_playwright_fallback(
             return merged
 
         if item_type == "album":
+            if already_playwright and not had_error:
+                return merged
             existing_has_core = existing.get("playcount") is not None
             if had_error and settings.PLAYWRIGHT_FAST_FAIL_ERRORS and not existing_has_core:
                 return merged

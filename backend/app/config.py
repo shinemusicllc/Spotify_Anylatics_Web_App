@@ -34,8 +34,10 @@ class Settings(BaseSettings):
     PLAYLIST_PAGE_SIZE: int = 100
     PLAYLIST_MAX_TRACKS: int = 2000
     PLAYWRIGHT_ENABLE_FALLBACK: bool = True
-    PLAYWRIGHT_INLINE_FALLBACK: bool = False
+    PLAYWRIGHT_INLINE_FALLBACK: bool = True
     PLAYWRIGHT_FAST_FAIL_ERRORS: bool = False
+    # Keep this off by default: if True, track flow always re-checks visible playcount via Playwright.
+    PLAYWRIGHT_COMPARE_VISIBLE_PLAYCOUNT: bool = False
     PLAYWRIGHT_TIMEOUT_MS: int = 45000
     PLAYWRIGHT_WAIT_MS: int = 2500
     PLAYWRIGHT_MAX_CONCURRENCY: int = 3
