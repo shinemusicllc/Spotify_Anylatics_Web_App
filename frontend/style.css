@@ -106,82 +106,42 @@ h3 {
 
 /* ── Sidebar ───────────────────────────────────────────────────── */
 #sidebar {
-  transition: width 300ms ease;
-  overflow: hidden;
-}
-#sidebar.collapsed {
   width: 64px;
+  overflow: visible;
 }
-#sidebar.collapsed .sidebar-label {
+#sidebar .sidebar-label {
   display: none;
 }
-#sidebar.collapsed .sidebar-logo-text {
+#sidebar .sidebar-logo-text {
   display: none;
 }
-#sidebar.collapsed .sidebar-user-info {
+#sidebar .sidebar-user-info {
   display: none;
 }
-#sidebar.collapsed .sidebar-header {
-  justify-content: center;
-  padding-left: 0;
-  padding-right: 0;
-}
-#sidebar.collapsed nav {
-  padding-left: 0;
-  padding-right: 0;
-}
-#sidebar.collapsed nav a {
+#sidebar .sidebar-header {
   justify-content: center;
   padding-left: 0;
   padding-right: 0;
   gap: 0;
 }
-#sidebar.collapsed .sidebar-profile {
+#sidebar nav {
+  padding-left: 0;
+  padding-right: 0;
+}
+#sidebar nav a {
+  justify-content: center;
+  padding-left: 0;
+  padding-right: 0;
+  gap: 0;
+}
+#sidebar .sidebar-profile {
   justify-content: center;
   padding-left: 0;
   padding-right: 0;
 }
-#sidebar.collapsed .sidebar-profile-wrap {
+#sidebar .sidebar-profile-wrap {
   justify-content: center;
   padding: 8px 0;
-}
-
-#sidebar.collapsed:hover {
-  width: 240px;
-}
-
-#sidebar.collapsed:hover .sidebar-label,
-#sidebar.collapsed:hover .sidebar-logo-text,
-#sidebar.collapsed:hover .sidebar-user-info {
-  display: block;
-}
-
-#sidebar.collapsed:hover .sidebar-header {
-  justify-content: flex-start;
-  padding-left: 24px;
-  padding-right: 24px;
-}
-
-#sidebar.collapsed:hover nav {
-  padding-left: 12px;
-  padding-right: 12px;
-}
-
-#sidebar.collapsed:hover nav a {
-  justify-content: flex-start;
-  padding-left: 12px;
-  padding-right: 12px;
-  gap: 16px;
-}
-
-#sidebar.collapsed:hover .sidebar-profile {
-  padding-left: 16px;
-  padding-right: 16px;
-}
-
-#sidebar.collapsed:hover .sidebar-profile-wrap {
-  justify-content: flex-start;
-  padding: 8px;
 }
 
 .app-sidebar {
@@ -198,8 +158,42 @@ h3 {
     "opsz" 24;
 }
 
-#sidebar.collapsed nav .material-icons-round {
+#sidebar nav .material-icons-round {
   font-size: 22px;
+}
+
+.sidebar-tooltip-target {
+  position: relative;
+}
+
+.sidebar-tooltip-target::after {
+  content: attr(data-tooltip);
+  position: absolute;
+  left: calc(100% + 12px);
+  top: 50%;
+  transform: translateY(-50%);
+  padding: 8px 12px;
+  border-radius: 12px;
+  background: rgba(10, 14, 19, 0.96);
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  color: #f2f5fb;
+  font-size: 12px;
+  font-weight: 600;
+  letter-spacing: 0.01em;
+  white-space: nowrap;
+  box-shadow: 0 14px 28px rgba(0, 0, 0, 0.32);
+  opacity: 0;
+  pointer-events: none;
+  transition:
+    opacity 140ms ease,
+    transform 140ms ease;
+  z-index: 80;
+}
+
+.sidebar-tooltip-target:hover::after,
+.sidebar-tooltip-target:focus-visible::after {
+  opacity: 1;
+  transform: translateY(-50%) translateX(2px);
 }
 
 /* ── Group Panel ───────────────────────────────────────────────── */
@@ -395,7 +389,7 @@ h3 {
     var(--owner-col) var(--playlist-save-col) var(--playlist-count-col)
     var(--album-count-col) var(--artist-followers-col)
     var(--artist-listeners-col) var(--track-views-col)
-    var(--checked-col);
+    minmax(var(--checked-col), 1fr);
   column-gap: var(--meta-gap);
   align-items: center;
   min-width: 0;
@@ -1407,7 +1401,7 @@ h3 {
   .meta-grid {
     grid-template-columns:
       var(--owner-col) var(--playlist-save-col) var(--artist-followers-col)
-      var(--track-views-col) var(--checked-col);
+      var(--track-views-col) minmax(var(--checked-col), 1fr);
     min-width: calc(
       var(--owner-col) + var(--playlist-save-col) +
         var(--artist-followers-col) + var(--track-views-col) +

@@ -19,7 +19,7 @@ const CONFIG = {
 };
 const GROUP_STORAGE_KEY = 'spoticheck_custom_groups_v1';
 const ROW_ORDER_STORAGE_KEY = 'spoticheck_row_order_v1';
-const COLUMN_WIDTH_STORAGE_KEY = 'spoticheck_column_widths_v2';
+const COLUMN_WIDTH_STORAGE_KEY = 'spoticheck_column_widths_v3';
 const ALL_GROUP_ID = 'all';
 const ALL_GROUP_LABEL = 'All Links';
 const GROUP_SELECT_ALL = '__all__';
@@ -67,6 +67,16 @@ const COLUMN_WIDTH_VAR_MAP = Object.freeze({
     trackViews: '--track-views-col',
     checked: '--checked-col',
 });
+const RESIZABLE_COLUMN_KEYS = Object.freeze([
+    'asset',
+    'owner',
+    'playlistSaves',
+    'playlistCount',
+    'albumCount',
+    'artistFollowers',
+    'artistListeners',
+    'trackViews',
+]);
 
 function getUserGroupStorageKey() {
     const user = getAuthUser();
@@ -129,7 +139,8 @@ function setupAuthUI() {
     if (sidebarProfile && !document.getElementById('btn-logout')) {
         const logoutBtn = document.createElement('button');
         logoutBtn.id = 'btn-logout';
-        logoutBtn.className = 'w-full flex items-center gap-3 px-5 py-2 text-secondary-text hover:text-white transition-colors cursor-pointer';
+        logoutBtn.className = 'sidebar-tooltip-target w-full flex items-center gap-3 px-5 py-2 text-secondary-text hover:text-white transition-colors cursor-pointer';
+        logoutBtn.dataset.tooltip = 'Sign Out';
         logoutBtn.innerHTML = '<span class="material-icons-round text-sm">logout</span><span class="sidebar-label text-sm">Sign Out</span>';
         logoutBtn.onclick = logout;
         sidebarProfile.appendChild(logoutBtn);
@@ -149,7 +160,8 @@ function setupAuthUI() {
         if (nav && !document.getElementById('nav-users')) {
             const usersLink = document.createElement('a');
             usersLink.id = 'nav-users';
-            usersLink.className = 'flex items-center gap-4 px-3 py-3 rounded-lg text-secondary-text hover:text-white transition-colors group cursor-pointer';
+            usersLink.className = 'sidebar-tooltip-target flex items-center gap-4 px-3 py-3 rounded-lg text-secondary-text hover:text-white transition-colors group cursor-pointer';
+            usersLink.dataset.tooltip = 'Users';
             usersLink.href = '#';
             usersLink.innerHTML = '<span class="material-icons-round">group</span><span class="font-medium sidebar-label">Users</span>';
             // Insert before Settings
@@ -488,9 +500,9 @@ function loadPersistedColumnWidths() {
             }
             widths[key] = clampColumnWidth(key, parsed?.[key]);
         });
-        return widths;
+        return rebalanceColumnWidths(widths);
     } catch {
-        return { ...DEFAULT_COLUMN_WIDTHS };
+        return rebalanceColumnWidths({ ...DEFAULT_COLUMN_WIDTHS });
     }
 }
 
@@ -511,12 +523,80 @@ function applyColumnWidths(widths = state.columnWidths) {
     });
 }
 
+function getResizableColumnBudget() {
+    return RESIZABLE_COLUMN_KEYS.reduce((sum, key) => sum + DEFAULT_COLUMN_WIDTHS[key], 0);
+}
+
+function distributeColumnDelta(widths, keys, delta) {
+    let remaining = Math.round(delta);
+    let safety = 0;
+    while (Math.abs(remaining) > 0 && safety < 24) {
+        const direction = Math.sign(remaining);
+        const candidates = keys.filter((key) => {
+            const current = widths[key];
+            return direction > 0
+                ? current < (MAX_COLUMN_WIDTHS[key] ?? current)
+                : current > (MIN_COLUMN_WIDTHS[key] ?? current);
+        });
+        if (!candidates.length) break;
+
+        const totalWeight = candidates.reduce((sum, key) => sum + Math.max(widths[key], 1), 0) || candidates.length;
+        let applied = 0;
+
+        candidates.forEach((key, index) => {
+            const min = MIN_COLUMN_WIDTHS[key] ?? 72;
+            const max = MAX_COLUMN_WIDTHS[key] ?? 900;
+            const current = widths[key];
+            const share = index === candidates.length - 1
+                ? remaining - applied
+                : Math.round((remaining * Math.max(current, 1)) / totalWeight);
+            const next = Math.min(max, Math.max(min, current + share));
+            const actual = next - current;
+            widths[key] = next;
+            applied += actual;
+        });
+
+        if (applied === 0) break;
+        remaining -= applied;
+        safety += 1;
+    }
+
+    return remaining;
+}
+
+function rebalanceColumnWidths(sourceWidths, preferredKey = null) {
+    const widths = { ...sourceWidths, checked: DEFAULT_COLUMN_WIDTHS.checked };
+    RESIZABLE_COLUMN_KEYS.forEach((key) => {
+        widths[key] = clampColumnWidth(key, widths[key]);
+    });
+
+    const budget = getResizableColumnBudget();
+    const current = RESIZABLE_COLUMN_KEYS.reduce((sum, key) => sum + widths[key], 0);
+    let remaining = budget - current;
+
+    const firstPassKeys = preferredKey
+        ? RESIZABLE_COLUMN_KEYS.filter((key) => key !== preferredKey)
+        : [...RESIZABLE_COLUMN_KEYS];
+    remaining = distributeColumnDelta(widths, firstPassKeys, remaining);
+
+    if (Math.abs(remaining) > 0 && preferredKey && RESIZABLE_COLUMN_KEYS.includes(preferredKey)) {
+        remaining = distributeColumnDelta(widths, [preferredKey], remaining);
+    }
+
+    if (Math.abs(remaining) > 0) {
+        distributeColumnDelta(widths, [...RESIZABLE_COLUMN_KEYS], remaining);
+    }
+
+    return widths;
+}
+
 function setColumnWidth(key, width, persist = false) {
     if (!(key in DEFAULT_COLUMN_WIDTHS) || key === 'checked') return;
-    state.columnWidths = {
+    const nextWidths = {
         ...state.columnWidths,
         [key]: clampColumnWidth(key, width),
     };
+    state.columnWidths = rebalanceColumnWidths(nextWidths, key);
     applyColumnWidths(state.columnWidths);
     if (persist) {
         savePersistedColumnWidths(state.columnWidths);
