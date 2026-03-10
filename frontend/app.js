@@ -463,6 +463,25 @@ function itemKey(item) {
     return `${item?.type || ''}:${item?.spotify_id || ''}`;
 }
 
+function getCurrentUserIdentity() {
+    const user = getAuthUser();
+    return {
+        id: user?.id ? String(user.id) : null,
+        name: user ? (user.display_name || user.username || 'User') : 'User',
+        avatar: user?.avatar || null,
+    };
+}
+
+function findOwnedItemIndex(type, spotifyId, ownerUserId = null) {
+    const ownerId = ownerUserId ? String(ownerUserId) : null;
+    return state.items.findIndex((item) => {
+        if (item.type !== type || item.spotify_id !== spotifyId) return false;
+        if (!ownerId) return true;
+        const itemOwnerId = item.user_id ? String(item.user_id) : '';
+        return !itemOwnerId || itemOwnerId === ownerId;
+    });
+}
+
 function loadPersistedRowOrder() {
     try {
         const raw = localStorage.getItem(getUserRowOrderStorageKey());
@@ -2274,6 +2293,7 @@ async function submitSingle() {
     }
 
     const group = resolveSelectedGroup();
+    const currentIdentity = getCurrentUserIdentity();
 
     try {
         const result = await api.crawl(url, group);
@@ -2284,17 +2304,24 @@ async function submitSingle() {
         showToast(`Added ${parsed.type}: crawling started`, 'success');
 
         const now = new Date().toISOString();
-        const existingIdx = state.items.findIndex(
-            (item) => item.type === parsed.type && item.spotify_id === parsed.id
-        );
+        const existingIdx = findOwnedItemIndex(parsed.type, parsed.id, currentIdentity.id);
 
         if (existingIdx >= 0) {
+            const existingOwnerId = state.items[existingIdx].user_id ? String(state.items[existingIdx].user_id) : '';
+            const shouldAttachCurrentUser = !existingOwnerId || existingOwnerId === String(currentIdentity.id || '');
             state.items[existingIdx] = {
                 ...state.items[existingIdx],
                 status: 'crawling',
                 error_code: null,
                 error_message: null,
                 last_checked: now,
+                ...(shouldAttachCurrentUser
+                    ? {
+                        user_id: currentIdentity.id,
+                        user_name: currentIdentity.name,
+                        user_avatar: currentIdentity.avatar,
+                    }
+                    : {}),
             };
             state.pendingJobToItem.set(jobId, state.items[existingIdx].id);
         } else {
@@ -2306,6 +2333,9 @@ async function submitSingle() {
                 status: 'crawling',
                 group: group,
                 last_checked: now,
+                user_id: currentIdentity.id,
+                user_name: currentIdentity.name,
+                user_avatar: currentIdentity.avatar,
             };
             state.items.unshift(newItem);
             state.pendingJobToItem.set(jobId, newItem.id);
@@ -2338,6 +2368,7 @@ async function submitBatch() {
     }
 
     const group = resolveSelectedGroup();
+    const currentIdentity = getCurrentUserIdentity();
 
     try {
         const result = await api.crawlBatch(urls, group);
@@ -2353,19 +2384,26 @@ async function submitBatch() {
             const jobId = result.job_ids?.[i];
             if (!jobId) return;
 
-            const existingIdx = state.items.findIndex(
-                (item) => item.type === parsed.type && item.spotify_id === parsed.id
-            );
+            const ownedIdx = findOwnedItemIndex(parsed.type, parsed.id, currentIdentity.id);
 
-            if (existingIdx >= 0) {
-                state.items[existingIdx] = {
-                    ...state.items[existingIdx],
+            if (ownedIdx >= 0) {
+                const existingOwnerId = state.items[ownedIdx].user_id ? String(state.items[ownedIdx].user_id) : '';
+                const shouldAttachCurrentUser = !existingOwnerId || existingOwnerId === String(currentIdentity.id || '');
+                state.items[ownedIdx] = {
+                    ...state.items[ownedIdx],
                     status: 'crawling',
                     error_code: null,
                     error_message: null,
                     last_checked: now,
+                    ...(shouldAttachCurrentUser
+                        ? {
+                            user_id: currentIdentity.id,
+                            user_name: currentIdentity.name,
+                            user_avatar: currentIdentity.avatar,
+                        }
+                        : {}),
                 };
-                state.pendingJobToItem.set(jobId, state.items[existingIdx].id);
+                state.pendingJobToItem.set(jobId, state.items[ownedIdx].id);
             } else {
                 const newItem = {
                     id: `temp-${jobId}`,
@@ -2375,6 +2413,9 @@ async function submitBatch() {
                     status: 'crawling',
                     group: group,
                     last_checked: now,
+                    user_id: currentIdentity.id,
+                    user_name: currentIdentity.name,
+                    user_avatar: currentIdentity.avatar,
                 };
                 state.items.unshift(newItem);
                 state.pendingJobToItem.set(jobId, newItem.id);
