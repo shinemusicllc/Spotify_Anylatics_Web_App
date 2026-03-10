@@ -389,7 +389,7 @@ h3 {
     var(--owner-col) var(--playlist-save-col) var(--playlist-count-col)
     var(--album-count-col) var(--artist-followers-col)
     var(--artist-listeners-col) var(--track-views-col)
-    minmax(var(--checked-col), 1fr);
+    var(--checked-col);
   column-gap: var(--meta-gap);
   align-items: center;
   min-width: 0;
@@ -1421,7 +1421,7 @@ h3 {
   .meta-grid {
     grid-template-columns:
       var(--owner-col) var(--playlist-save-col) var(--artist-followers-col)
-      var(--track-views-col) minmax(var(--checked-col), 1fr);
+      var(--track-views-col) var(--checked-col);
     min-width: calc(
       var(--owner-col) + var(--playlist-save-col) +
         var(--artist-followers-col) + var(--track-views-col) +

@@ -209,6 +209,7 @@ const state = {
     dragScrollRaf: null,
     dragScrollContainer: null,
     dragScrollSpeed: 0,
+    columnBudget: null,
     columnWidths: { ...DEFAULT_COLUMN_WIDTHS },
 };
 
@@ -520,8 +521,27 @@ function applyColumnWidths(widths = state.columnWidths) {
     });
 }
 
-function getResizableColumnBudget() {
+function getDefaultResizableColumnBudget() {
     return RESIZABLE_COLUMN_KEYS.reduce((sum, key) => sum + DEFAULT_COLUMN_WIDTHS[key], 0);
+}
+
+function getMinResizableColumnBudget() {
+    return RESIZABLE_COLUMN_KEYS.reduce((sum, key) => sum + (MIN_COLUMN_WIDTHS[key] ?? 72), 0);
+}
+
+function getMaxResizableColumnBudget() {
+    return RESIZABLE_COLUMN_KEYS.reduce((sum, key) => sum + (MAX_COLUMN_WIDTHS[key] ?? 900), 0);
+}
+
+function measureAvailableColumnBudget() {
+    const row = document.querySelector('.list-columns-head.custom-grid-row');
+    if (!row) return null;
+    const styles = window.getComputedStyle(row);
+    const paddingLeft = parseFloat(styles.paddingLeft || '0');
+    const paddingRight = parseFloat(styles.paddingRight || '0');
+    const available = row.getBoundingClientRect().width - paddingLeft - paddingRight - 16;
+    if (!Number.isFinite(available) || available <= 0) return null;
+    return Math.round(available);
 }
 
 function distributeColumnDelta(widths, keys, delta) {
@@ -561,13 +581,17 @@ function distributeColumnDelta(widths, keys, delta) {
     return remaining;
 }
 
-function rebalanceColumnWidths(sourceWidths, preferredKey = null) {
+function rebalanceColumnWidths(sourceWidths, preferredKey = null, targetBudget = null) {
     const widths = { ...sourceWidths, checked: DEFAULT_COLUMN_WIDTHS.checked };
     RESIZABLE_COLUMN_KEYS.forEach((key) => {
         widths[key] = clampColumnWidth(key, widths[key]);
     });
 
-    const budget = getResizableColumnBudget();
+    const measuredBudget = targetBudget ?? state.columnBudget ?? measureAvailableColumnBudget() ?? getDefaultResizableColumnBudget();
+    const budget = Math.min(
+        getMaxResizableColumnBudget(),
+        Math.max(getMinResizableColumnBudget(), measuredBudget),
+    );
     const current = RESIZABLE_COLUMN_KEYS.reduce((sum, key) => sum + widths[key], 0);
     let remaining = budget - current;
 
@@ -593,7 +617,22 @@ function setColumnWidth(key, width, persist = false) {
         ...state.columnWidths,
         [key]: clampColumnWidth(key, width),
     };
-    state.columnWidths = rebalanceColumnWidths(nextWidths, key);
+    const budget = state.columnBudget ?? measureAvailableColumnBudget() ?? getDefaultResizableColumnBudget();
+    state.columnWidths = rebalanceColumnWidths(nextWidths, key, budget);
+    applyColumnWidths(state.columnWidths);
+    if (persist) {
+        savePersistedColumnWidths(state.columnWidths);
+    }
+}
+
+function syncColumnWidthsToViewport(persist = false) {
+    const measuredBudget = measureAvailableColumnBudget();
+    if (!measuredBudget) return;
+    state.columnBudget = Math.min(
+        getMaxResizableColumnBudget(),
+        Math.max(getMinResizableColumnBudget(), measuredBudget),
+    );
+    state.columnWidths = rebalanceColumnWidths(state.columnWidths, null, state.columnBudget);
     applyColumnWidths(state.columnWidths);
     if (persist) {
         savePersistedColumnWidths(state.columnWidths);
@@ -3285,6 +3324,8 @@ document.addEventListener('DOMContentLoaded', () => {
     state.columnWidths = loadPersistedColumnWidths();
     applyColumnWidths(state.columnWidths);
     setupColumnResizers();
+    syncColumnWidthsToViewport();
+    window.addEventListener('resize', () => syncColumnWidthsToViewport());
 
     state.customGroups = loadCustomGroups();
     syncGroupUI(true);
