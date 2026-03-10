@@ -30,3 +30,4 @@ class User(Base):
     last_login: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
     avatar: Mapped[str | None] = mapped_column(Text, nullable=True)
     custom_groups: Mapped[str | None] = mapped_column(Text, nullable=True)  # JSON array of group names
+    ui_preferences: Mapped[str | None] = mapped_column(Text, nullable=True)  # JSON object (row_order, column_widths)

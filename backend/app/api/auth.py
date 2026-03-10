@@ -33,6 +33,9 @@ from app.services.auth import (
 
 router = APIRouter(prefix="/auth")
 _INTERNAL_EMAIL_DOMAIN = "users.spoticheck.local"
+_MAX_ROW_ORDER_ITEMS = 5000
+_COLUMN_WIDTH_MIN = 40
+_COLUMN_WIDTH_MAX = 2000
 
 
 def _build_internal_email(username: str) -> str:
@@ -104,6 +107,44 @@ async def register(req: RegisterRequest, db: AsyncSession = Depends(get_db)):
         access_token=token,
         user=_user_response(user),
     )
+
+
+def _sanitize_ui_preferences(raw: dict | None) -> dict:
+    data = raw if isinstance(raw, dict) else {}
+
+    row_order_raw = data.get("row_order")
+    row_order: list[str] = []
+    if isinstance(row_order_raw, list):
+        for value in row_order_raw:
+            s = str(value).strip()
+            if not s:
+                continue
+            row_order.append(s)
+            if len(row_order) >= _MAX_ROW_ORDER_ITEMS:
+                break
+
+    widths_raw = data.get("column_widths")
+    column_widths: dict[str, int] = {}
+    if isinstance(widths_raw, dict):
+        for key, value in widths_raw.items():
+            name = str(key).strip()
+            if not name:
+                continue
+            try:
+                numeric = int(round(float(value)))
+            except (TypeError, ValueError):
+                continue
+            column_widths[name] = max(_COLUMN_WIDTH_MIN, min(_COLUMN_WIDTH_MAX, numeric))
+
+    return {"row_order": row_order, "column_widths": column_widths}
+
+
+def _load_ui_preferences(user: User) -> dict:
+    try:
+        parsed = json.loads(user.ui_preferences) if user.ui_preferences else {}
+    except (json.JSONDecodeError, TypeError):
+        parsed = {}
+    return _sanitize_ui_preferences(parsed)
 
 
 @router.post("/login", response_model=AuthResponse)
@@ -256,6 +297,38 @@ async def delete_avatar(
     current_user.avatar = None
     await db.flush()
     return {"ok": True}
+
+
+# ---------------------------------------------------------------------------
+# UI preferences sync endpoints
+# ---------------------------------------------------------------------------
+
+
+@router.get("/me/preferences")
+async def get_my_preferences(
+    current_user: User = Depends(get_current_user),
+):
+    """Get the current user's UI preferences."""
+    return {"preferences": _load_ui_preferences(current_user)}
+
+
+@router.put("/me/preferences")
+async def save_my_preferences(
+    req: dict,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Save the current user's UI preferences."""
+    incoming = req.get("preferences", {})
+    if incoming is None:
+        incoming = {}
+    if not isinstance(incoming, dict):
+        raise HTTPException(status_code=400, detail="preferences must be an object")
+
+    cleaned = _sanitize_ui_preferences(incoming)
+    current_user.ui_preferences = json.dumps(cleaned)
+    await db.flush()
+    return {"preferences": cleaned}
 
 
 # ---------------------------------------------------------------------------

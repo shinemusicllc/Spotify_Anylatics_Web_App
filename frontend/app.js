@@ -78,6 +78,7 @@ const RESIZABLE_COLUMN_KEYS = Object.freeze([
     'trackViews',
     'checked',
 ]);
+const UI_PREF_SAVE_DEBOUNCE_MS = 700;
 
 function getUserGroupStorageKey() {
     const user = getAuthUser();
@@ -211,6 +212,7 @@ const state = {
     dragScrollSpeed: 0,
     columnBudget: null,
     columnWidths: { ...DEFAULT_COLUMN_WIDTHS },
+    uiPrefSaveTimer: null,
 };
 
 // ═══════════════════════════════════════════════════════════════════
@@ -261,6 +263,13 @@ class SpotiCheckAPI {
     getJob(jobId)         { return this._fetch(`/jobs/${jobId}`); }
     deleteItem(type, id)  { return this._fetch(`/items/${type}/${id}`, { method: 'DELETE' }); }
     clearItems()          { return this._fetch('/items', { method: 'DELETE' }); }
+    getMyPreferences()    { return this._fetch('/auth/me/preferences'); }
+    saveMyPreferences(preferences = {}) {
+        return this._fetch('/auth/me/preferences', {
+            method: 'PUT',
+            body: JSON.stringify({ preferences }),
+        });
+    }
     renameGroup(oldGroup, newGroup, userId = null) {
         const qs = new URLSearchParams();
         qs.set('old_group', String(oldGroup || ''));
@@ -499,9 +508,12 @@ function loadPersistedRowOrder() {
     }
 }
 
-function savePersistedRowOrder(keys) {
+function savePersistedRowOrder(keys, opts = {}) {
     try {
         localStorage.setItem(getUserRowOrderStorageKey(), JSON.stringify(Array.isArray(keys) ? keys : []));
+        if (!opts?.skipServerSync) {
+            queueUiPreferencesSave();
+        }
     } catch {
         // Ignore storage failures.
     }
@@ -530,11 +542,80 @@ function loadPersistedColumnWidths() {
     }
 }
 
-function savePersistedColumnWidths(widths) {
+function savePersistedColumnWidths(widths, opts = {}) {
     try {
         localStorage.setItem(getUserColumnWidthStorageKey(), JSON.stringify(widths));
+        if (!opts?.skipServerSync) {
+            queueUiPreferencesSave();
+        }
     } catch {
         // Ignore storage failures.
+    }
+}
+
+function normalizeUiPreferences(raw) {
+    const prefs = raw && typeof raw === 'object' ? raw : {};
+    const rowOrder = Array.isArray(prefs.row_order)
+        ? prefs.row_order.map((v) => String(v || '').trim()).filter(Boolean)
+        : [];
+    const columnWidths = {};
+    const rawWidths = prefs.column_widths && typeof prefs.column_widths === 'object'
+        ? prefs.column_widths
+        : {};
+    Object.keys(DEFAULT_COLUMN_WIDTHS).forEach((key) => {
+        if (Object.prototype.hasOwnProperty.call(rawWidths, key)) {
+            columnWidths[key] = clampColumnWidth(key, rawWidths[key]);
+        }
+    });
+    return { row_order: rowOrder, column_widths: columnWidths };
+}
+
+async function hydrateUiPreferencesFromServer() {
+    try {
+        if (!getAuthToken()) return;
+        const data = await api.getMyPreferences();
+        const normalized = normalizeUiPreferences(data?.preferences || {});
+        if (Array.isArray(normalized.row_order)) {
+            savePersistedRowOrder(normalized.row_order, { skipServerSync: true });
+        }
+        if (normalized.column_widths && Object.keys(normalized.column_widths).length) {
+            const next = { ...DEFAULT_COLUMN_WIDTHS };
+            Object.keys(DEFAULT_COLUMN_WIDTHS).forEach((key) => {
+                if (Object.prototype.hasOwnProperty.call(normalized.column_widths, key)) {
+                    next[key] = clampColumnWidth(key, normalized.column_widths[key]);
+                }
+            });
+            savePersistedColumnWidths(next, { skipServerSync: true });
+        }
+    } catch (err) {
+        console.warn('[UI Prefs] Load failed:', err.message);
+    }
+}
+
+function queueUiPreferencesSave() {
+    if (state.uiPrefSaveTimer) {
+        clearTimeout(state.uiPrefSaveTimer);
+    }
+    state.uiPrefSaveTimer = setTimeout(() => {
+        state.uiPrefSaveTimer = null;
+        saveUiPreferencesToServer();
+    }, UI_PREF_SAVE_DEBOUNCE_MS);
+}
+
+async function saveUiPreferencesToServer() {
+    try {
+        if (!getAuthToken()) return;
+        const rowOrder = loadPersistedRowOrder();
+        const columnWidths = {};
+        Object.keys(DEFAULT_COLUMN_WIDTHS).forEach((key) => {
+            columnWidths[key] = clampColumnWidth(key, state.columnWidths[key]);
+        });
+        await api.saveMyPreferences({
+            row_order: rowOrder,
+            column_widths: columnWidths,
+        });
+    } catch (err) {
+        console.warn('[UI Prefs] Save failed:', err.message);
     }
 }
 
@@ -3638,9 +3719,10 @@ window.hideAdminUsers = hideAdminUsers;
 // INIT
 // ═══════════════════════════════════════════════════════════════════
 
-document.addEventListener('DOMContentLoaded', () => {
+document.addEventListener('DOMContentLoaded', async () => {
     if (!requireAuth()) return;
     setupAuthUI();
+    await hydrateUiPreferencesFromServer();
     state.columnWidths = loadPersistedColumnWidths();
     applyColumnWidths(state.columnWidths);
     setupColumnResizers();

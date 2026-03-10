@@ -39,3 +39,5 @@ Health check endpoint: `/api/health`
 Notes:
 - `pgAdmin 4` is not required on Railway.
 - You can still use local pgAdmin to connect to Railway PostgreSQL if needed.
+- User data persisted in PostgreSQL includes: links/items, crawl jobs, custom groups, and UI preferences (row order + column widths).
+- No Railway Volume is required for these app data if `DATABASE_URL` points to Railway PostgreSQL.
