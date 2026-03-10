@@ -19,7 +19,7 @@ const CONFIG = {
 };
 const GROUP_STORAGE_KEY = 'spoticheck_custom_groups_v1';
 const ROW_ORDER_STORAGE_KEY = 'spoticheck_row_order_v1';
-const COLUMN_WIDTH_STORAGE_KEY = 'spoticheck_column_widths_v3';
+const COLUMN_WIDTH_STORAGE_KEY = 'spoticheck_column_widths_v4';
 const ALL_GROUP_ID = 'all';
 const ALL_GROUP_LABEL = 'All Links';
 const GROUP_SELECT_ALL = '__all__';
@@ -32,7 +32,7 @@ const DEFAULT_COLUMN_WIDTHS = Object.freeze({
     artistFollowers: 92,
     artistListeners: 104,
     trackViews: 100,
-    checked: 92,
+    checked: 84,
 });
 const MIN_COLUMN_WIDTHS = Object.freeze({
     asset: 320,
@@ -43,7 +43,7 @@ const MIN_COLUMN_WIDTHS = Object.freeze({
     artistFollowers: 84,
     artistListeners: 88,
     trackViews: 88,
-    checked: 88,
+    checked: 72,
 });
 const MAX_COLUMN_WIDTHS = Object.freeze({
     asset: 900,
@@ -54,7 +54,7 @@ const MAX_COLUMN_WIDTHS = Object.freeze({
     artistFollowers: 240,
     artistListeners: 260,
     trackViews: 260,
-    checked: 220,
+    checked: 140,
 });
 const COLUMN_WIDTH_VAR_MAP = Object.freeze({
     asset: '--asset-col',

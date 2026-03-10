@@ -86,7 +86,7 @@ h3 {
   --artist-followers-col: 92px;
   --artist-listeners-col: 104px;
   --track-views-col: 100px;
-  --checked-col: 92px;
+  --checked-col: 84px;
   --meta-grid-width: calc(
     var(--owner-col) + var(--playlist-save-col) + var(--playlist-count-col) +
       var(--album-count-col) + var(--artist-followers-col) +
