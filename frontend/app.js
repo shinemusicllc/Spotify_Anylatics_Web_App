@@ -539,7 +539,16 @@ function measureAvailableColumnBudget() {
     const styles = window.getComputedStyle(row);
     const paddingLeft = parseFloat(styles.paddingLeft || '0');
     const paddingRight = parseFloat(styles.paddingRight || '0');
-    const available = row.getBoundingClientRect().width - paddingLeft - paddingRight - 16;
+    const rootStyles = window.getComputedStyle(document.documentElement);
+    const outerGap = parseFloat(styles.columnGap || styles.gap || '16') || 16;
+    const metaGap = parseFloat(rootStyles.getPropertyValue('--meta-gap') || '12') || 12;
+    const metaColumnCount = RESIZABLE_COLUMN_KEYS.length - 1;
+    const internalMetaGaps = Math.max(0, metaColumnCount - 1) * metaGap;
+    const available = row.getBoundingClientRect().width
+        - paddingLeft
+        - paddingRight
+        - outerGap
+        - internalMetaGaps;
     if (!Number.isFinite(available) || available <= 0) return null;
     return Math.round(available);
 }
