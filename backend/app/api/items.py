@@ -1,9 +1,10 @@
 """Items endpoints — query stored items."""
 
 from collections import defaultdict
+import uuid
 
 from fastapi import APIRouter, Depends, HTTPException, Query
-from sqlalchemy import delete, func, select
+from sqlalchemy import delete, func, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.database import get_db
@@ -347,6 +348,45 @@ async def get_item(
         snapshot_map.get(item.id),
         user_map.get(str(item.user_id)) if item.user_id else None,
     )
+
+
+@router.patch("/items/group")
+async def rename_group(
+    old_group: str = Query(..., description="Current group name"),
+    new_group: str | None = Query(None, description="New group name (empty = clear group)"),
+    user_id: str | None = Query(None, description="Target user (admin only)"),
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """Rename or clear a group for one user and persist item.group in DB."""
+    old_clean = old_group.strip()
+    new_clean = (new_group or "").strip()
+    if not old_clean:
+        raise HTTPException(status_code=400, detail="old_group is required")
+    next_group = new_clean or None
+
+    target_user_id = current_user.id
+    if current_user.role == "admin" and user_id:
+        try:
+            target_user_id = uuid.UUID(str(user_id))
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail="Invalid user_id") from exc
+
+    stmt = (
+        update(Item)
+        .where(Item.user_id == target_user_id)
+        .where(func.lower(Item.group) == old_clean.lower())
+        .values(group=next_group)
+    )
+    result = await db.execute(stmt)
+    await db.commit()
+
+    return {
+        "ok": True,
+        "updated": int(result.rowcount or 0),
+        "old_group": old_clean,
+        "new_group": next_group,
+    }
 
 
 @router.delete("/items/{item_type}/{spotify_id}")

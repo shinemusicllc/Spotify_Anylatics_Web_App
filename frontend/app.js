@@ -261,6 +261,13 @@ class SpotiCheckAPI {
     getJob(jobId)         { return this._fetch(`/jobs/${jobId}`); }
     deleteItem(type, id)  { return this._fetch(`/items/${type}/${id}`, { method: 'DELETE' }); }
     clearItems()          { return this._fetch('/items', { method: 'DELETE' }); }
+    renameGroup(oldGroup, newGroup, userId = null) {
+        const qs = new URLSearchParams();
+        qs.set('old_group', String(oldGroup || ''));
+        qs.set('new_group', String(newGroup || ''));
+        if (userId) qs.set('user_id', String(userId));
+        return this._fetch(`/items/group?${qs.toString()}`, { method: 'PATCH' });
+    }
 
     crawl(url, group = null) {
         return this._fetch('/crawl', {
@@ -1507,6 +1514,7 @@ function handleDeleteGroup(rawGroupId) {
         if (target?.ownerUserId && String(item.user_id || '') !== String(target.ownerUserId)) return item;
         return { ...item, group: null };
     });
+    syncGroupItemsToServer(target?.name || groupName, '', target?.ownerUserId || null);
 
     if ((state.activeGroup || '').toLowerCase() === groupId.toLowerCase()) {
         state.activeGroup = ALL_GROUP_ID;
@@ -1564,6 +1572,17 @@ function cancelRenameGroupFlow() {
     renderGroups();
 }
 
+function syncGroupItemsToServer(oldName, newName, ownerUserId = null) {
+    const oldGroup = normalizeGroupName(oldName);
+    if (!oldGroup) return;
+    const nextGroup = normalizeGroupName(newName);
+    const targetUserId = ownerUserId ? String(ownerUserId) : null;
+    api.renameGroup(oldGroup, nextGroup, targetUserId).catch((err) => {
+        console.warn('[Group Sync] Failed:', err.message);
+        showToast(`Saved locally, server sync failed: ${err.message}`, 'info');
+    });
+}
+
 function handleRenameGroup(rawGroupId, rawName, opts = {}) {
     const groupId = normalizeGroupName(rawGroupId);
     if (!groupId || groupId.toLowerCase() === ALL_GROUP_ID) return;
@@ -1608,6 +1627,7 @@ function handleRenameGroup(rawGroupId, rawName, opts = {}) {
     }
 
     if (!sameByCaseInsensitive || nextName !== target.name) {
+        const oldName = target.name;
         state.customGroups = (state.customGroups || []).map((raw) => {
             const n = normalizeGroupName(raw);
             if (n.toLowerCase() !== oldKey) return n;
@@ -1625,6 +1645,7 @@ function handleRenameGroup(rawGroupId, rawName, opts = {}) {
         if (normalizeGroupName(state.activeGroup).toLowerCase() === normalizeGroupName(target.id).toLowerCase()) {
             state.activeGroup = buildGroupEntryId(nextName, target.ownerUserId || null);
         }
+        syncGroupItemsToServer(oldName, nextName, target.ownerUserId || null);
     }
 
     state.renamingGroupId = null;
