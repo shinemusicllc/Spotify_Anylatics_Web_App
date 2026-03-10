@@ -489,7 +489,7 @@ function debounce(fn, ms) {
 }
 
 function itemKey(item) {
-    return `${item?.type || ''}:${item?.spotify_id || ''}`;
+    return `${item?.type || ''}:${item?.spotify_id || ''}:${item?.user_id ? String(item.user_id) : ''}`;
 }
 
 function getCurrentUserIdentity() {
@@ -2148,6 +2148,7 @@ function renderRow(item) {
     row.dataset.itemId = item.id;
     row.dataset.type = item.type;
     row.dataset.spotifyId = item.spotify_id;
+    row.dataset.userId = item.user_id ? String(item.user_id) : '';
     row.dataset.itemKey = key;
     row.draggable = true;
 
@@ -2465,7 +2466,9 @@ async function handleRefreshItem(item) {
     renderList({ preserveScroll: true });
 
     try {
-        const result = await api.crawl(url, item.group || null);
+        const currentUser = getAuthUser();
+        const targetUserId = currentUser?.role === 'admin' ? (item.user_id || null) : null;
+        const result = await api.crawl(url, item.group || null, targetUserId);
         const jobId = result?.job_id;
         if (!jobId) {
             throw new Error('Backend did not return job_id');
@@ -2541,15 +2544,36 @@ async function refreshAllItems() {
     renderList({ preserveScroll: true });
 
     try {
-        const itemIds = targetItems.map((item) => item.id);
-        const urls = targetItems.map((item) => getSpotifyUrl(item.type, item.spotify_id));
-        const result = await api.crawlBatch(urls);
-        const jobIds = result.job_ids || [];
-        jobIds.forEach((jobId, idx) => {
-            state.pendingJobs.add(jobId);
-            if (itemIds[idx]) {
-                state.pendingJobToItem.set(jobId, itemIds[idx]);
+        const currentUser = getAuthUser();
+        const isAdmin = currentUser?.role === 'admin';
+        const groupedByOwner = new Map();
+        targetItems.forEach((item) => {
+            const ownerId = isAdmin && item.user_id ? String(item.user_id) : '';
+            if (!groupedByOwner.has(ownerId)) {
+                groupedByOwner.set(ownerId, { ownerId: ownerId || null, urls: [], itemIds: [] });
             }
+            const bucket = groupedByOwner.get(ownerId);
+            bucket.urls.push(getSpotifyUrl(item.type, item.spotify_id));
+            bucket.itemIds.push(item.id);
+        });
+
+        const batchResponses = await Promise.all(
+            Array.from(groupedByOwner.values()).map(async (bucket) => {
+                const response = await api.crawlBatch(bucket.urls, null, isAdmin ? bucket.ownerId : null);
+                return { bucket, response };
+            })
+        );
+
+        const jobIds = [];
+        batchResponses.forEach(({ bucket, response }) => {
+            const ids = response?.job_ids || [];
+            jobIds.push(...ids);
+            ids.forEach((jobId, idx) => {
+                state.pendingJobs.add(jobId);
+                if (bucket.itemIds[idx]) {
+                    state.pendingJobToItem.set(jobId, bucket.itemIds[idx]);
+                }
+            });
         });
         state.batchRefresh = {
             active: true,
@@ -2562,7 +2586,7 @@ async function refreshAllItems() {
         startPolling();
         renderList({ preserveScroll: true });
         const scopeLabel = useSelectionScope ? 'selected links' : 'links';
-        showToast(`Refresh started for ${result.count || urls.length} ${scopeLabel}`, 'success');
+        showToast(`Refresh started for ${jobIds.length || targetItems.length} ${scopeLabel}`, 'success');
     } catch (e) {
         state.batchRefresh = null;
         await loadData({ preserveScroll: true });
@@ -2854,17 +2878,8 @@ async function pollJobs() {
                     last_checked: completedAt,
                 };
             } else if (job.result) {
-                const bySpotifyId = state.items.findIndex(i => i.spotify_id === job.result.spotify_id);
-                if (bySpotifyId >= 0) {
-                    state.items[bySpotifyId] = {
-                        ...state.items[bySpotifyId],
-                        ...normalizeJobResult(job.result, state.items[bySpotifyId]),
-                        status: 'active',
-                        last_checked: completedAt,
-                    };
-                } else {
-                    shouldReload = true;
-                }
+                // Avoid owner mix-up when multiple users track the same Spotify ID.
+                shouldReload = true;
             } else {
                 shouldReload = true;
             }
@@ -4252,7 +4267,11 @@ document.addEventListener('DOMContentLoaded', async () => {
             if (keepMultiSelection) return;
             const item = state.items.find((i) =>
                 String(i.id) === String(row.dataset.itemId)
-                || (i.type === row.dataset.type && i.spotify_id === row.dataset.spotifyId)
+                || (
+                    i.type === row.dataset.type
+                    && i.spotify_id === row.dataset.spotifyId
+                    && String(i.user_id || '') === String(row.dataset.userId || '')
+                )
             );
             if (!item) return;
             handleRowSelection(item, e);
@@ -4283,7 +4302,11 @@ document.addEventListener('DOMContentLoaded', async () => {
             e.stopPropagation();
             const item = state.items.find((i) =>
                 String(i.id) === String(row.dataset.itemId)
-                || (i.type === row.dataset.type && i.spotify_id === row.dataset.spotifyId)
+                || (
+                    i.type === row.dataset.type
+                    && i.spotify_id === row.dataset.spotifyId
+                    && String(i.user_id || '') === String(row.dataset.userId || '')
+                )
             );
             if (!item) return;
             if (btn) {
