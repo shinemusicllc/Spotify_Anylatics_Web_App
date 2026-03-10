@@ -492,93 +492,6 @@ function itemKey(item) {
     return `${item?.type || ''}:${item?.spotify_id || ''}:${item?.user_id ? String(item.user_id) : ''}`;
 }
 
-function getCanonicalLinkIdentity(item) {
-    let type = String(item?.type || '').trim().toLowerCase();
-    let spotifyId = String(item?.spotify_id || '').trim();
-    const spotifyUrl = String(item?.spotify_url || '').trim();
-
-    if (!type || !spotifyId) {
-        const parsedFromUrl = parseSpotifyUrl(spotifyUrl);
-        if (parsedFromUrl) {
-            if (!type) type = String(parsedFromUrl.type || '').trim().toLowerCase();
-            if (!spotifyId) spotifyId = String(parsedFromUrl.id || '').trim();
-        }
-    }
-
-    if (spotifyId) {
-        const parsedFromId = parseSpotifyUrl(spotifyId);
-        if (parsedFromId) {
-            if (!type) type = String(parsedFromId.type || '').trim().toLowerCase();
-            spotifyId = String(parsedFromId.id || '').trim();
-        }
-    }
-
-    if (!type || !spotifyId) return null;
-
-    // Count-equivalence should be stable even if ID casing/spacing varies in payloads.
-    const normalizedId = spotifyId.split('?')[0].split('#')[0].trim().toLowerCase();
-    if (!normalizedId) return null;
-
-    return { type, spotifyId: normalizedId };
-}
-
-function uniqueLinkKey(item) {
-    const canonical = getCanonicalLinkIdentity(item);
-    if (!canonical) return '';
-    return `${canonical.type}:${canonical.spotifyId}`;
-}
-
-function countUniqueLinks(items) {
-    const unique = new Set();
-    (items || []).forEach((item) => {
-        const key = uniqueLinkKey(item);
-        if (!key) return;
-        unique.add(key);
-    });
-    return unique.size;
-}
-
-function getStatusPriority(status) {
-    if (status === 'crawling' || status === 'pending') return 3;
-    if (status === 'error') return 2;
-    if (status === 'active') return 1;
-    return 0;
-}
-
-function summarizeUniqueLinkStatuses(items) {
-    const byLink = new Map();
-    (items || []).forEach((item) => {
-        const key = uniqueLinkKey(item);
-        if (!key) return;
-        const status = String(item.status || 'active');
-        const nextPriority = getStatusPriority(status);
-        const prev = byLink.get(key);
-        if (!prev || nextPriority > prev.priority) {
-            byLink.set(key, { status, priority: nextPriority });
-        }
-    });
-
-    let active = 0;
-    let errors = 0;
-    let crawling = 0;
-    byLink.forEach(({ status }) => {
-        if (status === 'crawling' || status === 'pending') {
-            crawling += 1;
-        } else if (status === 'error') {
-            errors += 1;
-        } else {
-            active += 1;
-        }
-    });
-
-    return {
-        total: byLink.size,
-        active,
-        errors,
-        crawling,
-    };
-}
-
 function getCurrentUserIdentity() {
     const user = getAuthUser();
     return {
@@ -1547,7 +1460,7 @@ function rebuildGroups() {
         counts.set(entryId, (counts.get(entryId) || 0) + 1);
     }
 
-    const groups = [{ id: ALL_GROUP_ID, name: ALL_GROUP_LABEL, count: countUniqueLinks(state.items) }];
+    const groups = [{ id: ALL_GROUP_ID, name: ALL_GROUP_LABEL, count: state.items.length }];
     const namedGroups = [];
     const seen = new Set();
     const pushUnique = (rawEntry) => {
@@ -2438,18 +2351,10 @@ function updateKPIs() {
     const scoped = state.activeGroup === ALL_GROUP_ID
         ? state.items
         : state.items.filter((i) => doesItemMatchGroupEntry(i, activeEntry));
-    let scopedTotal = scoped.length;
-    let active = scoped.filter(i => i.status === 'active').length;
-    let errors = scoped.filter(i => i.status === 'error').length;
-    let crawling = scoped.filter(i => i.status === 'crawling' || i.status === 'pending').length;
-
-    if (state.activeGroup === ALL_GROUP_ID) {
-        const summary = summarizeUniqueLinkStatuses(scoped);
-        scopedTotal = summary.total;
-        active = summary.active;
-        errors = summary.errors;
-        crawling = summary.crawling;
-    }
+    const scopedTotal = scoped.length;
+    const active = scoped.filter(i => i.status === 'active').length;
+    const errors = scoped.filter(i => i.status === 'error').length;
+    const crawling = scoped.filter(i => i.status === 'crawling' || i.status === 'pending').length;
 
     setText('kpi-total', scopedTotal);
     setText('kpi-active', active);
@@ -2459,7 +2364,7 @@ function updateKPIs() {
     setText('footer-active', active);
     setText('footer-errors', errors);
     setText('footer-crawling', crawling);
-    setText('group-count-all', countUniqueLinks(state.items));
+    setText('group-count-all', state.items.length);
 }
 
 function setText(id, val) {
