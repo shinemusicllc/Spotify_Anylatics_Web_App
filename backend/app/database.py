@@ -71,8 +71,65 @@ async def init_db():
     migrations = [
         "ALTER TABLE items ADD COLUMN IF NOT EXISTS user_id UUID REFERENCES users(id)",
         "CREATE INDEX IF NOT EXISTS ix_items_user_id ON items(user_id)",
-        "ALTER TABLE items DROP CONSTRAINT IF EXISTS items_spotify_id_key",
-        "DROP INDEX IF EXISTS ix_items_spotify_id",
+        """
+        DO $$
+        DECLARE rec RECORD;
+        BEGIN
+            FOR rec IN
+                SELECT c.conname AS constraint_name
+                FROM pg_constraint c
+                JOIN pg_class t ON t.oid = c.conrelid
+                JOIN pg_namespace n ON n.oid = t.relnamespace
+                WHERE t.relname = 'items'
+                  AND n.nspname = current_schema()
+                  AND c.contype = 'u'
+                  AND array_length(c.conkey, 1) = 1
+                  AND (
+                        SELECT a.attname
+                        FROM pg_attribute a
+                        WHERE a.attrelid = t.oid
+                          AND a.attnum = c.conkey[1]
+                  ) = 'spotify_id'
+            LOOP
+                EXECUTE format(
+                    'ALTER TABLE %I.%I DROP CONSTRAINT IF EXISTS %I',
+                    current_schema(),
+                    'items',
+                    rec.constraint_name
+                );
+            END LOOP;
+        END $$;
+        """,
+        """
+        DO $$
+        DECLARE rec RECORD;
+        BEGIN
+            FOR rec IN
+                SELECT i.relname AS index_name
+                FROM pg_index x
+                JOIN pg_class i ON i.oid = x.indexrelid
+                JOIN pg_class t ON t.oid = x.indrelid
+                JOIN pg_namespace n ON n.oid = t.relnamespace
+                WHERE t.relname = 'items'
+                  AND n.nspname = current_schema()
+                  AND x.indisunique = TRUE
+                  AND x.indnatts = 1
+                  AND EXISTS (
+                        SELECT 1
+                        FROM pg_attribute a
+                        WHERE a.attrelid = t.oid
+                          AND a.attnum = (x.indkey::smallint[])[1]
+                          AND a.attname = 'spotify_id'
+                  )
+            LOOP
+                EXECUTE format(
+                    'DROP INDEX IF EXISTS %I.%I',
+                    current_schema(),
+                    rec.index_name
+                );
+            END LOOP;
+        END $$;
+        """,
         "CREATE INDEX IF NOT EXISTS ix_items_spotify_id ON items(spotify_id)",
         "CREATE INDEX IF NOT EXISTS ix_items_user_type_spotify ON items(user_id, item_type, spotify_id)",
         "CREATE UNIQUE INDEX IF NOT EXISTS uq_items_user_type_spotify ON items(user_id, item_type, spotify_id)",
