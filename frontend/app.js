@@ -582,7 +582,7 @@ function distributeColumnDelta(widths, keys, delta) {
 }
 
 function rebalanceColumnWidths(sourceWidths, preferredKey = null, targetBudget = null) {
-    const widths = { ...sourceWidths, checked: DEFAULT_COLUMN_WIDTHS.checked };
+    const widths = { ...sourceWidths };
     RESIZABLE_COLUMN_KEYS.forEach((key) => {
         widths[key] = clampColumnWidth(key, widths[key]);
     });
@@ -611,14 +611,33 @@ function rebalanceColumnWidths(sourceWidths, preferredKey = null, targetBudget =
     return widths;
 }
 
-function setColumnWidth(key, width, persist = false) {
+function getDirectionalCompensationKeys(key, resizeEdge = 'end') {
+    const index = RESIZABLE_COLUMN_KEYS.indexOf(key);
+    if (index === -1) return [];
+    if (resizeEdge === 'start') {
+        return RESIZABLE_COLUMN_KEYS.slice(0, index).reverse();
+    }
+    return RESIZABLE_COLUMN_KEYS.slice(index + 1);
+}
+
+function setColumnWidth(key, width, persist = false, resizeEdge = 'end') {
     if (!(key in DEFAULT_COLUMN_WIDTHS)) return;
+    const currentWidth = clampColumnWidth(key, state.columnWidths[key]);
+    const nextWidth = clampColumnWidth(key, width);
+    if (currentWidth === nextWidth) return;
+
+    const delta = nextWidth - currentWidth;
     const nextWidths = {
         ...state.columnWidths,
-        [key]: clampColumnWidth(key, width),
+        [key]: nextWidth,
     };
-    const budget = state.columnBudget ?? measureAvailableColumnBudget() ?? getDefaultResizableColumnBudget();
-    state.columnWidths = rebalanceColumnWidths(nextWidths, key, budget);
+    const compensationKeys = getDirectionalCompensationKeys(key, resizeEdge);
+    const remaining = distributeColumnDelta(nextWidths, compensationKeys, -delta);
+    if (remaining !== 0) {
+        nextWidths[key] = clampColumnWidth(key, nextWidths[key] + remaining);
+    }
+
+    state.columnWidths = nextWidths;
     applyColumnWidths(state.columnWidths);
     if (persist) {
         savePersistedColumnWidths(state.columnWidths);
@@ -1690,7 +1709,7 @@ function setupColumnResizers() {
                 const nextWidth = resizeEdge === 'start'
                     ? startWidth - delta
                     : startWidth + delta;
-                setColumnWidth(key, nextWidth);
+                setColumnWidth(key, nextWidth, false, resizeEdge);
             };
 
             const onUp = () => {
