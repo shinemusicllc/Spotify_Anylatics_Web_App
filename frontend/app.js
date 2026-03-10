@@ -262,9 +262,19 @@ class SpotiCheckAPI {
         const suffix = qs.toString() ? `?${qs.toString()}` : '';
         return this._fetch(`/items${suffix}`);
     }
-    getItem(type, id)     { return this._fetch(`/items/${type}/${id}`); }
+    getItem(type, id, userId = null) {
+        const qs = new URLSearchParams();
+        if (userId) qs.set('user_id', String(userId));
+        const suffix = qs.toString() ? `?${qs.toString()}` : '';
+        return this._fetch(`/items/${type}/${id}${suffix}`);
+    }
     getJob(jobId)         { return this._fetch(`/jobs/${jobId}`); }
-    deleteItem(type, id)  { return this._fetch(`/items/${type}/${id}`, { method: 'DELETE' }); }
+    deleteItem(type, id, userId = null) {
+        const qs = new URLSearchParams();
+        if (userId) qs.set('user_id', String(userId));
+        const suffix = qs.toString() ? `?${qs.toString()}` : '';
+        return this._fetch(`/items/${type}/${id}${suffix}`, { method: 'DELETE' });
+    }
     clearItems()          { return this._fetch('/items', { method: 'DELETE' }); }
     getMyPreferences()    { return this._fetch('/auth/me/preferences'); }
     saveMyPreferences(preferences = {}) {
@@ -2421,7 +2431,7 @@ async function handleDeleteItem(item) {
 
     try {
         if (state.apiOnline) {
-            await api.deleteItem(item.type, item.spotify_id);
+            await api.deleteItem(item.type, item.spotify_id, item.user_id || null);
         }
         showToast(`Deleted: ${label}`, 'success');
     } catch (e) {

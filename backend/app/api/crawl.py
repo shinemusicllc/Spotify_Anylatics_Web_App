@@ -56,24 +56,17 @@ async def crawl(
     target_user_id = await _resolve_target_user_id(db, current_user, req.target_user_id)
     requested_group = (req.group or "").strip() or None
 
-    # Check if item already exists
-    existing = await db.execute(select(Item).where(Item.spotify_id == spotify_id))
+    # Check if item already exists for the selected owner only.
+    existing = await db.execute(
+        select(Item).where(
+            Item.spotify_id == spotify_id,
+            Item.item_type == item_type,
+            Item.user_id == target_user_id,
+        )
+    )
     item = existing.scalar_one_or_none()
 
     if item:
-        # Non-admin users must not mutate another user's tracked item.
-        if current_user.role != "admin" and item.user_id and item.user_id != current_user.id:
-            raise HTTPException(
-                status_code=409,
-                detail="This link is already tracked by another user",
-            )
-
-        # Admin can route the item ownership to selected target user.
-        if req.target_user_id is not None and current_user.role == "admin":
-            item.user_id = target_user_id
-        elif item.user_id is None:
-            item.user_id = target_user_id
-
         # Respect explicit group selection in add-link modal.
         if req.group is not None:
             item.group = requested_group
@@ -134,20 +127,17 @@ async def crawl_batch(
 
         item_type, spotify_id = parsed
 
-        # Check existing
-        existing = await db.execute(select(Item).where(Item.spotify_id == spotify_id))
+        # Check existing for the selected owner only.
+        existing = await db.execute(
+            select(Item).where(
+                Item.spotify_id == spotify_id,
+                Item.item_type == item_type,
+                Item.user_id == target_user_id,
+            )
+        )
         item = existing.scalar_one_or_none()
 
         if item:
-            if current_user.role != "admin" and item.user_id and item.user_id != current_user.id:
-                # Skip links that belong to another user for non-admin callers.
-                continue
-
-            if req.target_user_id is not None and current_user.role == "admin":
-                item.user_id = target_user_id
-            elif item.user_id is None:
-                item.user_id = target_user_id
-
             if req.group is not None:
                 item.group = requested_group
 

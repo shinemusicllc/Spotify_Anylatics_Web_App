@@ -184,6 +184,26 @@ async def _load_item_users(db: AsyncSession, items: list[Item]) -> dict[str, Use
     return {str(user.id): user for user in users}
 
 
+async def _delete_raw_if_unreferenced(
+    db: AsyncSession,
+    spotify_ids: list[str],
+    excluded_item_ids: list[uuid.UUID] | None = None,
+) -> None:
+    unique_ids = [sid for sid in dict.fromkeys(spotify_ids) if sid]
+    if not unique_ids:
+        return
+
+    query = select(Item.spotify_id).where(Item.spotify_id.in_(unique_ids))
+    if excluded_item_ids:
+        query = query.where(~Item.id.in_(excluded_item_ids))
+
+    remaining_rows = (await db.execute(query)).all()
+    remaining_ids = {row[0] for row in remaining_rows if row and row[0]}
+    stale_ids = [sid for sid in unique_ids if sid not in remaining_ids]
+    if stale_ids:
+        await db.execute(delete(RawResponse).where(RawResponse.spotify_id.in_(stale_ids)))
+
+
 def _item_to_response(
     item: Item,
     owner_url: str | None = None,
@@ -321,17 +341,28 @@ async def list_items(
 async def get_item(
     item_type: str,
     spotify_id: str,
+    user_id: str | None = Query(None, description="Target user (admin only)"),
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
     """Get a specific item by type and Spotify ID."""
-    result = await db.execute(
-        select(Item).where(
-            Item.spotify_id == spotify_id,
-            Item.item_type == item_type,
-        )
+    query = select(Item).where(
+        Item.spotify_id == spotify_id,
+        Item.item_type == item_type,
     )
-    item = result.scalar_one_or_none()
+    if current_user.role != "admin":
+        query = query.where(Item.user_id == current_user.id)
+    elif user_id:
+        query = query.where(Item.user_id == user_id)
+
+    result = await db.execute(query.order_by(Item.updated_at.desc()))
+    rows = result.scalars().all()
+    if current_user.role == "admin" and not user_id and len(rows) > 1:
+        raise HTTPException(
+            status_code=409,
+            detail="Multiple users track this link. Specify user_id.",
+        )
+    item = rows[0] if rows else None
     if not item:
         raise HTTPException(status_code=404, detail="Item not found")
 
@@ -393,17 +424,28 @@ async def rename_group(
 async def delete_item(
     item_type: str,
     spotify_id: str,
+    user_id: str | None = Query(None, description="Target user (admin only)"),
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
     """Delete a single item by type + Spotify ID."""
-    result = await db.execute(
-        select(Item).where(
-            Item.spotify_id == spotify_id,
-            Item.item_type == item_type,
-        )
+    query = select(Item).where(
+        Item.spotify_id == spotify_id,
+        Item.item_type == item_type,
     )
-    item = result.scalar_one_or_none()
+    if current_user.role != "admin":
+        query = query.where(Item.user_id == current_user.id)
+    elif user_id:
+        query = query.where(Item.user_id == user_id)
+
+    result = await db.execute(query.order_by(Item.updated_at.desc()))
+    rows = result.scalars().all()
+    if current_user.role == "admin" and not user_id and len(rows) > 1:
+        raise HTTPException(
+            status_code=409,
+            detail="Multiple users track this link. Specify user_id.",
+        )
+    item = rows[0] if rows else None
     if not item:
         raise HTTPException(status_code=404, detail="Item not found")
 
@@ -412,8 +454,8 @@ async def delete_item(
 
     await db.execute(delete(MetricsSnapshot).where(MetricsSnapshot.item_id == item.id))
     await db.execute(delete(CrawlJob).where(CrawlJob.item_id == item.id))
-    await db.execute(delete(RawResponse).where(RawResponse.spotify_id == item.spotify_id))
     await db.delete(item)
+    await _delete_raw_if_unreferenced(db, [item.spotify_id], excluded_item_ids=[item.id])
     await db.commit()
     return {"ok": True, "deleted": 1}
 
@@ -445,7 +487,7 @@ async def clear_items(
 
     await db.execute(delete(MetricsSnapshot).where(MetricsSnapshot.item_id.in_(item_ids)))
     await db.execute(delete(CrawlJob).where(CrawlJob.item_id.in_(item_ids)))
-    await db.execute(delete(RawResponse).where(RawResponse.spotify_id.in_(spotify_ids)))
     result = await db.execute(delete(Item).where(Item.id.in_(item_ids)))
+    await _delete_raw_if_unreferenced(db, spotify_ids, excluded_item_ids=item_ids)
     await db.commit()
     return {"ok": True, "deleted": result.rowcount or 0, "group": group}

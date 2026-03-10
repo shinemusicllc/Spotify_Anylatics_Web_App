@@ -369,6 +369,25 @@ async def _finalize_payload(item_type: str, data: dict) -> dict:
     return merged
 
 
+async def _load_job_item(db, job: CrawlJob, spotify_id: str, item_type: str) -> Item | None:
+    """Resolve the correct item row for this job (supports duplicate spotify_id across users)."""
+    if job.item_id:
+        by_id_result = await db.execute(select(Item).where(Item.id == job.item_id))
+        by_id = by_id_result.scalar_one_or_none()
+        if by_id is not None:
+            return by_id
+
+    fallback_result = await db.execute(
+        select(Item)
+        .where(
+            Item.spotify_id == spotify_id,
+            Item.item_type == item_type,
+        )
+        .order_by(Item.updated_at.desc())
+    )
+    return fallback_result.scalars().first()
+
+
 async def crawl_item_task(job_id: str, spotify_id: str, item_type: str):
     """
     Background task: crawl a single Spotify item.
@@ -392,10 +411,7 @@ async def crawl_item_task(job_id: str, spotify_id: str, item_type: str):
             job.started_at = datetime.utcnow()
             await db.commit()
 
-            existing_item_result = await db.execute(
-                select(Item).where(Item.spotify_id == spotify_id)
-            )
-            existing_item = existing_item_result.scalar_one_or_none()
+            existing_item = await _load_job_item(db, job, spotify_id, item_type)
             existing_data = {}
             if existing_item is not None:
                 existing_data = {
@@ -451,10 +467,7 @@ async def crawl_item_task(job_id: str, spotify_id: str, item_type: str):
 
             # 3. Check if response indicates an error
             if data.get("error"):
-                item_result = await db.execute(
-                    select(Item).where(Item.spotify_id == spotify_id)
-                )
-                item = item_result.scalar_one_or_none()
+                item = await _load_job_item(db, job, spotify_id, item_type)
                 if item:
                     item.status = "error"
                     item.error_code = data.get("error_code")
@@ -471,10 +484,7 @@ async def crawl_item_task(job_id: str, spotify_id: str, item_type: str):
                 raise Exception("No usable data from API/Playwright")
 
             # 4. Update Item with real data
-            item_result = await db.execute(
-                select(Item).where(Item.spotify_id == spotify_id)
-            )
-            item = item_result.scalar_one_or_none()
+            item = await _load_job_item(db, job, spotify_id, item_type)
             if item:
                 item.name = _prefer_existing_on_none(item.name, data.get("name"))
                 item.image = _prefer_existing_on_none(item.image, data.get("image"))
@@ -542,10 +552,18 @@ async def crawl_item_task(job_id: str, spotify_id: str, item_type: str):
                     job.completed_at = datetime.utcnow()
                     job.retry_count += 1
 
-                item_result = await db.execute(
-                    select(Item).where(Item.spotify_id == spotify_id)
-                )
-                item = item_result.scalar_one_or_none()
+                if job is not None:
+                    item = await _load_job_item(db, job, spotify_id, item_type)
+                else:
+                    item_result = await db.execute(
+                        select(Item)
+                        .where(
+                            Item.spotify_id == spotify_id,
+                            Item.item_type == item_type,
+                        )
+                        .order_by(Item.updated_at.desc())
+                    )
+                    item = item_result.scalars().first()
                 if item:
                     item.status = "error"
                     item.error_message = str(e)

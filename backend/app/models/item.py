@@ -3,7 +3,16 @@
 import uuid
 from datetime import datetime
 
-from sqlalchemy import String, Integer, BigInteger, DateTime, Text, Index, ForeignKey
+from sqlalchemy import (
+    String,
+    Integer,
+    BigInteger,
+    DateTime,
+    Text,
+    Index,
+    ForeignKey,
+    UniqueConstraint,
+)
 from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import Mapped, mapped_column
 
@@ -19,7 +28,7 @@ class Item(Base):
         UUID(as_uuid=True), primary_key=True, default=uuid.uuid4
     )
     spotify_id: Mapped[str] = mapped_column(
-        String(64), unique=True, nullable=False, index=True
+        String(64), nullable=False, index=True
     )
     item_type: Mapped[str] = mapped_column(
         String(16), nullable=False
@@ -62,4 +71,13 @@ class Item(Base):
     )
     last_checked: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
 
-    __table_args__ = (Index("ix_items_type_status", "item_type", "status"),)
+    __table_args__ = (
+        Index("ix_items_type_status", "item_type", "status"),
+        Index("ix_items_user_type_spotify", "user_id", "item_type", "spotify_id"),
+        UniqueConstraint(
+            "user_id",
+            "item_type",
+            "spotify_id",
+            name="uq_items_user_type_spotify",
+        ),
+    )

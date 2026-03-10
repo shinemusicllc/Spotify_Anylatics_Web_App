@@ -71,6 +71,11 @@ async def init_db():
     migrations = [
         "ALTER TABLE items ADD COLUMN IF NOT EXISTS user_id UUID REFERENCES users(id)",
         "CREATE INDEX IF NOT EXISTS ix_items_user_id ON items(user_id)",
+        "ALTER TABLE items DROP CONSTRAINT IF EXISTS items_spotify_id_key",
+        "DROP INDEX IF EXISTS ix_items_spotify_id",
+        "CREATE INDEX IF NOT EXISTS ix_items_spotify_id ON items(spotify_id)",
+        "CREATE INDEX IF NOT EXISTS ix_items_user_type_spotify ON items(user_id, item_type, spotify_id)",
+        "CREATE UNIQUE INDEX IF NOT EXISTS uq_items_user_type_spotify ON items(user_id, item_type, spotify_id)",
         "ALTER TABLE crawl_jobs ADD COLUMN IF NOT EXISTS user_id UUID REFERENCES users(id)",
         "CREATE INDEX IF NOT EXISTS ix_crawl_jobs_user_id ON crawl_jobs(user_id)",
         "ALTER TABLE users ADD COLUMN IF NOT EXISTS avatar TEXT",
