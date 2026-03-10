@@ -2395,72 +2395,83 @@ async function pollJobs() {
         return;
     }
 
+    const pendingJobIds = Array.from(state.pendingJobs);
+    if (pendingJobIds.length === 0) {
+        stopPolling();
+        return;
+    }
+
     let shouldReload = false;
     let hasTerminalUpdate = false;
     let shouldNotifyBatchDone = false;
-    for (const jobId of Array.from(state.pendingJobs)) {
-        try {
-            const job = await api.getJob(jobId);
-            const mappedItemId = state.pendingJobToItem.get(jobId) || jobId;
-            const inBatch = Boolean(
-                state.batchRefresh?.active
-                && state.batchRefresh?.jobIds?.has(jobId)
-            );
-            if (job.status === 'completed') {
-                hasTerminalUpdate = true;
-                shouldReload = true;
-                state.pendingJobs.delete(jobId);
-                state.pendingJobToItem.delete(jobId);
-                const completedAt = job.completed_at || new Date().toISOString();
-                // Update item in state with real data
-                const idx = state.items.findIndex(i => i.id === mappedItemId || i.id === jobId);
-                if (idx >= 0 && job.result) {
-                    state.items[idx] = {
-                        ...state.items[idx],
-                        ...normalizeJobResult(job.result, state.items[idx]),
+    const jobResults = await Promise.all(
+        pendingJobIds.map(async (jobId) => {
+            try {
+                return { jobId, job: await api.getJob(jobId) };
+            } catch {
+                return { jobId, job: null };
+            }
+        })
+    );
+
+    for (const { jobId, job } of jobResults) {
+        if (!job) continue;
+
+        const mappedItemId = state.pendingJobToItem.get(jobId) || jobId;
+        const inBatch = Boolean(
+            state.batchRefresh?.active
+            && state.batchRefresh?.jobIds?.has(jobId)
+        );
+        if (job.status === 'completed') {
+            hasTerminalUpdate = true;
+            state.pendingJobs.delete(jobId);
+            state.pendingJobToItem.delete(jobId);
+            const completedAt = job.completed_at || new Date().toISOString();
+            // Update item in state with real data
+            const idx = state.items.findIndex(i => i.id === mappedItemId || i.id === jobId);
+            if (idx >= 0 && job.result) {
+                state.items[idx] = {
+                    ...state.items[idx],
+                    ...normalizeJobResult(job.result, state.items[idx]),
+                    status: 'active',
+                    last_checked: completedAt,
+                };
+            } else if (job.result) {
+                const bySpotifyId = state.items.findIndex(i => i.spotify_id === job.result.spotify_id);
+                if (bySpotifyId >= 0) {
+                    state.items[bySpotifyId] = {
+                        ...state.items[bySpotifyId],
+                        ...normalizeJobResult(job.result, state.items[bySpotifyId]),
                         status: 'active',
                         last_checked: completedAt,
                     };
-                } else if (job.result) {
-                    const bySpotifyId = state.items.findIndex(i => i.spotify_id === job.result.spotify_id);
-                    if (bySpotifyId >= 0) {
-                        state.items[bySpotifyId] = {
-                            ...state.items[bySpotifyId],
-                            ...normalizeJobResult(job.result, state.items[bySpotifyId]),
-                            status: 'active',
-                            last_checked: completedAt,
-                        };
-                    } else {
-                        shouldReload = true;
-                    }
                 } else {
                     shouldReload = true;
                 }
-                if (inBatch && state.batchRefresh) {
-                    state.batchRefresh.done += 1;
-                    shouldNotifyBatchDone = true;
-                }
-            } else if (job.status === 'error') {
-                hasTerminalUpdate = true;
+            } else {
                 shouldReload = true;
-                state.pendingJobs.delete(jobId);
-                state.pendingJobToItem.delete(jobId);
-                const idx = state.items.findIndex(i => i.id === mappedItemId || i.id === jobId);
-                if (idx >= 0) {
-                    state.items[idx].status = 'error';
-                    state.items[idx].error_message = job.error;
-                    state.items[idx].last_checked = job.completed_at || new Date().toISOString();
-                } else {
-                    shouldReload = true;
-                }
-                if (inBatch && state.batchRefresh) {
-                    state.batchRefresh.done += 1;
-                    state.batchRefresh.errors += 1;
-                    shouldNotifyBatchDone = true;
-                }
             }
-        } catch {
-            // API offline, skip this poll cycle
+            if (inBatch && state.batchRefresh) {
+                state.batchRefresh.done += 1;
+                shouldNotifyBatchDone = true;
+            }
+        } else if (job.status === 'error') {
+            hasTerminalUpdate = true;
+            state.pendingJobs.delete(jobId);
+            state.pendingJobToItem.delete(jobId);
+            const idx = state.items.findIndex(i => i.id === mappedItemId || i.id === jobId);
+            if (idx >= 0) {
+                state.items[idx].status = 'error';
+                state.items[idx].error_message = job.error;
+                state.items[idx].last_checked = job.completed_at || new Date().toISOString();
+            } else {
+                shouldReload = true;
+            }
+            if (inBatch && state.batchRefresh) {
+                state.batchRefresh.done += 1;
+                state.batchRefresh.errors += 1;
+                shouldNotifyBatchDone = true;
+            }
         }
     }
 
@@ -2682,15 +2693,16 @@ async function loadData(opts = {}) {
     const preserveScroll = Boolean(opts?.preserveScroll);
     const skeleton = document.getElementById('skeleton-container');
 
-    // Health check (separate from data fetch)
-    try {
-        await api.health();
-        state.apiOnline = true;
-        updateApiStatus();
-    } catch {
-        state.apiOnline = false;
-        updateApiStatus();
-    }
+    // Keep health async so list rendering is not blocked by a separate round-trip.
+    api.health()
+        .then(() => {
+            state.apiOnline = true;
+            updateApiStatus();
+        })
+        .catch(() => {
+            state.apiOnline = false;
+            updateApiStatus();
+        });
 
     // Fetch items
     try {
