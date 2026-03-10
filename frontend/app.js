@@ -2849,15 +2849,21 @@ async function pollJobs() {
             state.pendingJobs.delete(jobId);
             state.pendingJobToItem.delete(jobId);
             const completedAt = job.completed_at || new Date().toISOString();
+            const stableItemId = job.item_id ? String(job.item_id) : null;
             // Update item in state with real data
             const idx = state.items.findIndex(i => i.id === mappedItemId || i.id === jobId);
             if (idx >= 0 && job.result) {
+                const previousId = state.items[idx]?.id ? String(state.items[idx].id) : null;
                 state.items[idx] = {
                     ...state.items[idx],
                     ...normalizeJobResult(job.result, state.items[idx]),
+                    id: stableItemId || state.items[idx].id,
                     status: 'active',
                     last_checked: completedAt,
                 };
+                if (stableItemId && previousId && previousId !== stableItemId) {
+                    persistCurrentItemOrder();
+                }
             } else if (job.result) {
                 // Avoid owner mix-up when multiple users track the same Spotify ID.
                 shouldReload = true;

@@ -31,6 +31,7 @@ async def get_job(
 
     return JobResponse(
         id=str(job.id),
+        item_id=str(job.item_id) if job.item_id else None,
         status=job.status,
         spotify_url=job.spotify_url,
         item_type=job.item_type,

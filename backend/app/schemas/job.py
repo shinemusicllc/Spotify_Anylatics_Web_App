@@ -8,6 +8,7 @@ class JobResponse(BaseModel):
     """Job status response."""
 
     id: str
+    item_id: str | None = None
     status: str  # pending|crawling|completed|error
     spotify_url: str
     item_type: str | None = None
