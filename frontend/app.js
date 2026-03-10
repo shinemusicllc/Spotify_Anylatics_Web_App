@@ -2179,10 +2179,24 @@ function renderList(opts = {}) {
         // Has data but filtered to zero
         const noResult = document.createElement('div');
         noResult.className = 'custom-grid-row text-center py-12 text-secondary-text';
+        const canAddFromEmptyState = !state.searchQuery;
         const msg = state.searchQuery
             ? `No results for "${escapeHtml(state.searchQuery)}"`
             : `No links in "${escapeHtml(getActiveGroupName())}"`;
-        noResult.innerHTML = `<div class="col-span-2">${msg}</div>`;
+        noResult.innerHTML = canAddFromEmptyState
+            ? `
+                <div class="col-span-2 flex flex-col items-center gap-5">
+                    <div>${msg}</div>
+                    <button type="button" data-action="empty-add-link" class="btn-accent flex items-center gap-2 px-6 py-2.5 rounded-full text-sm font-bold cursor-pointer">
+                        + Add Link
+                    </button>
+                </div>
+            `
+            : `<div class="col-span-2">${msg}</div>`;
+        const addFromEmptyBtn = noResult.querySelector('[data-action="empty-add-link"]');
+        if (addFromEmptyBtn) {
+            addFromEmptyBtn.addEventListener('click', openModal);
+        }
         container.appendChild(noResult);
         restoreScroll();
         return;
