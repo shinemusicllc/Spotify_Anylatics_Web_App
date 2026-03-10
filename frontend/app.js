@@ -2147,6 +2147,10 @@ function renderList(opts = {}) {
     const container = document.getElementById('link-list');
     const skeleton = document.getElementById('skeleton-container');
     const emptyState = document.getElementById('empty-state');
+    const emptyTitleEl = emptyState ? (emptyState.querySelector('[data-empty-title]') || emptyState.querySelector('h3')) : null;
+    const emptyDescEl = emptyState ? (emptyState.querySelector('[data-empty-description]') || emptyState.querySelector('p')) : null;
+    const defaultEmptyTitle = 'No links yet';
+    const defaultEmptyDescription = 'Add your first Spotify link to start monitoring play counts, followers, and more.';
     const listWrap = document.querySelector('.list-wrap');
     const prevScrollTop = preserveScroll && listWrap ? listWrap.scrollTop : null;
     const restoreScroll = () => {
@@ -2161,46 +2165,41 @@ function renderList(opts = {}) {
     const items = getVisibleItems();
     state.filteredItems = items;
 
-    // Clear previous rows (keep skeleton & empty state)
+    // Clear previous rows (keep skeleton and empty state)
     container.querySelectorAll('.custom-grid-row').forEach(el => el.remove());
 
     if (skeleton) skeleton.style.display = 'none';
 
-    if (items.length === 0 && state.items.length === 0) {
-        // No data at all → show empty state
-        if (emptyState) emptyState.style.display = '';
-        restoreScroll();
-        return;
-    }
-
-    if (emptyState) emptyState.style.display = 'none';
-
     if (items.length === 0) {
-        // Has data but filtered to zero
+        if (!state.searchQuery && emptyState) {
+            if (emptyTitleEl) {
+                emptyTitleEl.textContent = state.items.length === 0
+                    ? defaultEmptyTitle
+                    : `No links in "${getActiveGroupName()}"`;
+            }
+            if (emptyDescEl) {
+                emptyDescEl.textContent = state.items.length === 0
+                    ? defaultEmptyDescription
+                    : 'Add a Spotify link to this group to start monitoring.';
+            }
+            emptyState.style.display = '';
+            restoreScroll();
+            return;
+        }
+
+        if (emptyState) emptyState.style.display = 'none';
+
         const noResult = document.createElement('div');
         noResult.className = 'custom-grid-row text-center py-12 text-secondary-text';
-        const canAddFromEmptyState = !state.searchQuery;
-        const msg = state.searchQuery
-            ? `No results for "${escapeHtml(state.searchQuery)}"`
-            : `No links in "${escapeHtml(getActiveGroupName())}"`;
-        noResult.innerHTML = canAddFromEmptyState
-            ? `
-                <div class="col-span-2 flex flex-col items-center gap-5">
-                    <div>${msg}</div>
-                    <button type="button" data-action="empty-add-link" class="btn-accent flex items-center gap-2 px-6 py-2.5 rounded-full text-sm font-bold cursor-pointer">
-                        + Add Link
-                    </button>
-                </div>
-            `
-            : `<div class="col-span-2">${msg}</div>`;
-        const addFromEmptyBtn = noResult.querySelector('[data-action="empty-add-link"]');
-        if (addFromEmptyBtn) {
-            addFromEmptyBtn.addEventListener('click', openModal);
-        }
+        noResult.innerHTML = `<div class="col-span-2">No results for "${escapeHtml(state.searchQuery)}"</div>`;
         container.appendChild(noResult);
         restoreScroll();
         return;
     }
+
+    if (emptyTitleEl) emptyTitleEl.textContent = defaultEmptyTitle;
+    if (emptyDescEl) emptyDescEl.textContent = defaultEmptyDescription;
+    if (emptyState) emptyState.style.display = 'none';
 
     // Render all rows
     const frag = document.createDocumentFragment();
@@ -2212,7 +2211,6 @@ function renderList(opts = {}) {
     refreshCheckedLabels();
     restoreScroll();
 }
-
 function refreshCheckedLabels() {
     const labels = document.querySelectorAll('#link-list .row-checked');
     labels.forEach((label) => {
@@ -4355,3 +4353,4 @@ document.addEventListener('DOMContentLoaded', async () => {
 // Fallback hooks for inline onclick handlers
 window.clearList = clearList;
 window.refreshAllItems = refreshAllItems;
+
