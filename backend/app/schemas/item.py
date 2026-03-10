@@ -54,6 +54,8 @@ class ItemResponse(BaseModel):
     # Grouping
     group: str | None = None
     user_id: str | None = None
+    user_name: str | None = None
+    user_avatar: str | None = None
     added_date: str | None = None
 
     # Timestamps

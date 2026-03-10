@@ -676,32 +676,51 @@ function getTitleToneClass(type) {
     return map[type] || '';
 }
 
+function getItemUserName(item) {
+    if (item.user_name) return item.user_name;
+    const currentUser = getAuthUser();
+    if (currentUser && String(currentUser.id || '') === String(item.user_id || '')) {
+        return currentUser.display_name || currentUser.username || 'ADMIN';
+    }
+    const match = (state.adminUserList || []).find((user) => String(user.id || user._id || '') === String(item.user_id || ''));
+    if (match) return match.display_name || match.username || 'User';
+    return 'User';
+}
+
+function getItemUserAvatar(item) {
+    if (item.user_avatar) return item.user_avatar;
+    const currentUser = getAuthUser();
+    if (currentUser && String(currentUser.id || '') === String(item.user_id || '')) {
+        return currentUser.avatar || null;
+    }
+    const match = (state.adminUserList || []).find((user) => String(user.id || user._id || '') === String(item.user_id || ''));
+    return match?.avatar || null;
+}
+
+function getDisplayTitle(item) {
+    const baseTitle = item.name || 'Unknown';
+    if (item.type !== 'playlist') return baseTitle;
+
+    const artistOrOwner = (item.owner_name || (Array.isArray(item.artist_names) ? item.artist_names[0] : '') || '').trim();
+    if (!artistOrOwner) return baseTitle;
+    if (baseTitle.toLowerCase().startsWith(`${artistOrOwner.toLowerCase()} -`)) return baseTitle;
+    return `${artistOrOwner} - ${baseTitle}`;
+}
+
 function renderOwnerUpdatedCell(item, ownerUrl, updatedAt) {
     const safeUpdatedAt = escapeHtml(updatedAt || '-');
-    if (item.type !== 'playlist') {
-        return `
-            <div class="meta-cell">
-                <div class="list-owner-meta list-owner-meta-updated-only">
-                    <div class="list-owner-time list-owner-time-only">${safeUpdatedAt}</div>
-                </div>
-            </div>
-        `;
-    }
-
-    const ownerName = escapeHtml(item.owner_name || '-');
-    const ownerMarkup = item.owner_name
-        ? `<a class="list-owner-link" href="${ownerUrl}" target="_blank" rel="noopener noreferrer">${ownerName}</a>`
-        : ownerName;
-    const avatarLabel = escapeHtml((item.owner_name || 'PL').slice(0, 2).toUpperCase());
-    const ownerAvatar = item.owner_image
-        ? `<img alt="Owner" class="list-owner-avatar" src="${item.owner_image}">`
+    const userName = escapeHtml(getItemUserName(item));
+    const userAvatarUrl = getItemUserAvatar(item);
+    const avatarLabel = escapeHtml((getItemUserName(item) || 'US').slice(0, 2).toUpperCase());
+    const ownerAvatar = userAvatarUrl
+        ? `<img alt="User" class="list-owner-avatar" src="${userAvatarUrl}">`
         : `<div class="list-owner-avatar list-owner-fallback">${avatarLabel}</div>`;
 
     return `
         <div class="flex items-center gap-3 meta-cell">
             ${ownerAvatar}
             <div class="list-owner-meta">
-                <div class="list-owner-name">${ownerMarkup}</div>
+                <div class="list-owner-name">${userName}</div>
                 <div class="list-owner-time text-secondary-text">${safeUpdatedAt}</div>
             </div>
         </div>
@@ -1743,6 +1762,7 @@ function renderRow(item) {
     const subtitle = getItemSubtitle(item);
     const titleToneClass = isError ? 'list-asset-title-muted' : getTitleToneClass(item.type);
     const ownerUpdatedCell = renderOwnerUpdatedCell(item, ownerUrl, updatedAt);
+    const displayTitle = getDisplayTitle(item);
 
     const row = document.createElement('div');
     row.className = `custom-grid-row px-4 py-3 bg-white/5 rounded-lg border border-transparent hover:bg-row-hover hover:border-white/10 transition-all group ${isSelected ? 'row-selected' : ''} ${isDragging ? 'row-dragging' : ''} ${isDropTarget ? 'row-drop-target' : ''} ${isDropBefore ? 'row-drop-before' : ''} ${isDropAfter ? 'row-drop-after' : ''}`;
@@ -1761,7 +1781,7 @@ function renderRow(item) {
             <div>
                 <span class="list-type-badge ${isError ? 'badge-error' : getBadgeClass(item.type)}">${item.type}</span>
                 <h3 class="list-asset-title ${titleToneClass}">
-                    <a class="list-title-link" href="${spotifyUrl}" target="_blank" rel="noopener noreferrer">${escapeHtml(item.name || 'Unknown')}</a>
+                    <a class="list-title-link" href="${spotifyUrl}" target="_blank" rel="noopener noreferrer">${escapeHtml(displayTitle)}</a>
                 </h3>
                 <div class="list-asset-meta">
                     <p class="list-asset-uri text-secondary-text">spotify:${item.type}:${item.spotify_id}</p>

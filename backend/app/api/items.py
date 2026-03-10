@@ -173,11 +173,22 @@ async def _load_recent_snapshots(db: AsyncSession, items: list[Item]) -> dict:
     return snapshot_map
 
 
+async def _load_item_users(db: AsyncSession, items: list[Item]) -> dict[str, User]:
+    user_ids = [item.user_id for item in items if item.user_id]
+    if not user_ids:
+        return {}
+
+    result = await db.execute(select(User).where(User.id.in_(user_ids)))
+    users = result.scalars().all()
+    return {str(user.id): user for user in users}
+
+
 def _item_to_response(
     item: Item,
     owner_url: str | None = None,
     raw_data: dict | None = None,
     snapshots: list[MetricsSnapshot] | None = None,
+    item_user: User | None = None,
 ) -> ItemResponse:
     """Convert DB Item model to API response schema."""
     duration = None
@@ -245,6 +256,8 @@ def _item_to_response(
         error_message=item.error_message,
         group=item.group,
         user_id=str(item.user_id) if item.user_id else None,
+        user_name=(item_user.display_name or item_user.username) if item_user else None,
+        user_avatar=item_user.avatar if item_user else None,
         added_date=_format_added_date(item.created_at),
         last_checked=item.last_checked,
         created_at=item.created_at,
@@ -286,6 +299,7 @@ async def list_items(
     items = result.scalars().all()
     raw_map = await _load_latest_raw_data(db, items)
     snapshot_map = await _load_recent_snapshots(db, items)
+    user_map = await _load_item_users(db, items)
 
     return ItemListResponse(
         items=[
@@ -294,6 +308,7 @@ async def list_items(
                 _extract_owner_url(item, raw_map.get(item.spotify_id)),
                 raw_map.get(item.spotify_id),
                 snapshot_map.get(item.id),
+                user_map.get(str(item.user_id)) if item.user_id else None,
             )
             for item in items
         ],
@@ -324,11 +339,13 @@ async def get_item(
 
     raw_map = await _load_latest_raw_data(db, [item])
     snapshot_map = await _load_recent_snapshots(db, [item])
+    user_map = await _load_item_users(db, [item])
     return _item_to_response(
         item,
         _extract_owner_url(item, raw_map.get(item.spotify_id)),
         raw_map.get(item.spotify_id),
         snapshot_map.get(item.id),
+        user_map.get(str(item.user_id)) if item.user_id else None,
     )
 
 
