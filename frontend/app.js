@@ -2829,6 +2829,8 @@ async function pollJobs() {
         );
         if (job.status === 'completed') {
             hasTerminalUpdate = true;
+            // Force a canonical reload so delta badges (snapshot-based) appear immediately.
+            shouldReload = true;
             state.pendingJobs.delete(jobId);
             state.pendingJobToItem.delete(jobId);
             const completedAt = job.completed_at || new Date().toISOString();
