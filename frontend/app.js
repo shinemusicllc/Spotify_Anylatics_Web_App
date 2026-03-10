@@ -492,15 +492,48 @@ function itemKey(item) {
     return `${item?.type || ''}:${item?.spotify_id || ''}:${item?.user_id ? String(item.user_id) : ''}`;
 }
 
+function getCanonicalLinkIdentity(item) {
+    let type = String(item?.type || '').trim().toLowerCase();
+    let spotifyId = String(item?.spotify_id || '').trim();
+    const spotifyUrl = String(item?.spotify_url || '').trim();
+
+    if (!type || !spotifyId) {
+        const parsedFromUrl = parseSpotifyUrl(spotifyUrl);
+        if (parsedFromUrl) {
+            if (!type) type = String(parsedFromUrl.type || '').trim().toLowerCase();
+            if (!spotifyId) spotifyId = String(parsedFromUrl.id || '').trim();
+        }
+    }
+
+    if (spotifyId) {
+        const parsedFromId = parseSpotifyUrl(spotifyId);
+        if (parsedFromId) {
+            if (!type) type = String(parsedFromId.type || '').trim().toLowerCase();
+            spotifyId = String(parsedFromId.id || '').trim();
+        }
+    }
+
+    if (!type || !spotifyId) return null;
+
+    // Count-equivalence should be stable even if ID casing/spacing varies in payloads.
+    const normalizedId = spotifyId.split('?')[0].split('#')[0].trim().toLowerCase();
+    if (!normalizedId) return null;
+
+    return { type, spotifyId: normalizedId };
+}
+
 function uniqueLinkKey(item) {
-    return `${item?.type || ''}:${item?.spotify_id || ''}`;
+    const canonical = getCanonicalLinkIdentity(item);
+    if (!canonical) return '';
+    return `${canonical.type}:${canonical.spotifyId}`;
 }
 
 function countUniqueLinks(items) {
     const unique = new Set();
     (items || []).forEach((item) => {
-        if (!item?.type || !item?.spotify_id) return;
-        unique.add(uniqueLinkKey(item));
+        const key = uniqueLinkKey(item);
+        if (!key) return;
+        unique.add(key);
     });
     return unique.size;
 }
@@ -515,8 +548,8 @@ function getStatusPriority(status) {
 function summarizeUniqueLinkStatuses(items) {
     const byLink = new Map();
     (items || []).forEach((item) => {
-        if (!item?.type || !item?.spotify_id) return;
         const key = uniqueLinkKey(item);
+        if (!key) return;
         const status = String(item.status || 'active');
         const nextPriority = getStatusPriority(status);
         const prev = byLink.get(key);
