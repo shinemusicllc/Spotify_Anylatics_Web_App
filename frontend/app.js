@@ -914,6 +914,22 @@ function getGroupEntryById(groupId) {
     return state.groups.find((g) => String(g.id) === String(groupId)) || null;
 }
 
+function parseGroupEntryId(groupId) {
+    const raw = normalizeGroupName(groupId);
+    if (!raw || raw.toLowerCase() === ALL_GROUP_ID) {
+        return { id: ALL_GROUP_ID, name: ALL_GROUP_LABEL, ownerUserId: null };
+    }
+    const compositeIndex = raw.indexOf('::');
+    if (compositeIndex === -1) {
+        return { id: raw, name: raw, ownerUserId: null };
+    }
+    return {
+        id: raw,
+        ownerUserId: raw.slice(0, compositeIndex) || null,
+        name: raw.slice(compositeIndex + 2) || raw,
+    };
+}
+
 function doesItemMatchGroupEntry(item, groupEntry) {
     if (!groupEntry || groupEntry.id === ALL_GROUP_ID) return true;
     if (normalizeGroupName(item.group) !== normalizeGroupName(groupEntry.name)) return false;
@@ -1180,6 +1196,11 @@ function canManageGroupEntry(groupEntry) {
 }
 
 function rebuildGroups() {
+    const previousGroups = Array.isArray(state.groups) ? state.groups.slice() : [];
+    const previousActiveId = state.activeGroup;
+    const previousActiveEntry =
+        previousGroups.find((g) => String(g.id) === String(previousActiveId))
+        || parseGroupEntryId(previousActiveId);
     const counts = new Map();
     const encountered = [];
     for (const item of state.items) {
@@ -1227,14 +1248,6 @@ function rebuildGroups() {
     // Then append any groups discovered from data but not explicitly ordered yet.
     encountered.forEach(pushUnique);
 
-    // Keep currently-selected group visible even if empty.
-    if (state.activeGroup !== ALL_GROUP_ID) {
-        const activeEntry = getGroupEntryById(state.activeGroup);
-        if (activeEntry) {
-            pushUnique(activeEntry);
-        }
-    }
-
     for (const entry of namedGroups) {
         groups.push({
             id: entry.id,
@@ -1246,9 +1259,31 @@ function rebuildGroups() {
     }
 
     state.groups = groups;
-    if (!state.groups.some((g) => g.id === state.activeGroup)) {
-        state.activeGroup = ALL_GROUP_ID;
+    if (state.activeGroup === ALL_GROUP_ID) {
+        return;
     }
+
+    if (state.groups.some((g) => String(g.id) === String(state.activeGroup))) {
+        return;
+    }
+
+    const previousName = normalizeGroupName(previousActiveEntry?.name);
+    const previousOwner = previousActiveEntry?.ownerUserId ? String(previousActiveEntry.ownerUserId) : null;
+    let remapped = null;
+
+    if (previousName) {
+        remapped = state.groups.find((g) => {
+            if (g.id === ALL_GROUP_ID) return false;
+            if (normalizeGroupName(g.name).toLowerCase() !== previousName.toLowerCase()) return false;
+            if (state.adminFilterUserId) return true;
+            if (previousOwner && g.ownerUserId) {
+                return String(g.ownerUserId) === previousOwner;
+            }
+            return !previousOwner || !g.ownerUserId;
+        }) || null;
+    }
+
+    state.activeGroup = remapped ? remapped.id : ALL_GROUP_ID;
 }
 
 function renderGroups() {
@@ -2623,6 +2658,7 @@ async function setupAdminUserFilter() {
     try {
         const users = await _fetchAdminUsers({ preferCache: true });
         state.adminUserList = Array.isArray(users) ? users.slice() : [];
+        rebuildAdminUserFilterOptions();
         if (state.items.length) {
             rebuildGroups();
             updateGroupHeader();
@@ -2652,30 +2688,7 @@ async function setupAdminUserFilter() {
         id: 'admin-user-filter',
         options: filterOptions,
         selected: '',
-        onChange: function(val) {
-            state.adminFilterUserId = val || null;
-            clearRowSelection();
-            var pageTitle = document.getElementById('page-title');
-            var breadcrumb = document.getElementById('breadcrumb-group');
-            if (val) {
-                var selectedUser = state.adminUserList.find(function(u) { return String(u.id || u._id) === val; });
-                var username = (selectedUser && (selectedUser.display_name || selectedUser.username)) || val;
-                var groupName = getActiveGroupName();
-                if (pageTitle) pageTitle.textContent = groupName + ' (' + username + ')';
-                if (breadcrumb) breadcrumb.textContent = groupName + ' (' + username + ')';
-            } else {
-                updateGroupHeader();
-            }
-            loadData({ preserveScroll: false });
-            // Load the selected user's groups (or own groups if All Users)
-            if (val) {
-                syncGroupsFromServer(val);
-            } else {
-                // Switching back to All Users — reload own groups
-                state.customGroups = loadCustomGroups();
-                syncGroupsFromServer();
-            }
-        }
+        onChange: handleAdminFilterChange
     });
     filterDiv.appendChild(filterDropdown);
 
@@ -2687,6 +2700,45 @@ async function setupAdminUserFilter() {
         groupPanel.insertBefore(filterDiv, groupPanel.firstChild);
     }
 
+}
+
+function rebuildAdminUserFilterOptions() {
+    const filterWrap = document.getElementById('admin-user-filter-dropdown');
+    if (!filterWrap) return;
+    const options = [{ value: '', label: 'All Users' }];
+    (state.adminUserList || []).forEach((user) => {
+        options.push({
+            value: user.id || user._id || '',
+            label: user.display_name || user.username || String(user.id || user._id || ''),
+        });
+    });
+    updateCustomDropdownOptions('admin-user-filter-dropdown', options, state.adminFilterUserId || '');
+}
+
+function handleAdminFilterChange(val) {
+    state.adminFilterUserId = val || null;
+    state.activeGroup = ALL_GROUP_ID;
+    state.groupSearchQuery = '';
+    clearRowSelection();
+
+    var pageTitle = document.getElementById('page-title');
+    var breadcrumb = document.getElementById('breadcrumb-group');
+    if (val) {
+        var selectedUser = state.adminUserList.find(function(u) { return String(u.id || u._id) === val; });
+        var username = (selectedUser && (selectedUser.display_name || selectedUser.username)) || val;
+        if (pageTitle) pageTitle.textContent = ALL_GROUP_LABEL + ' (' + username + ')';
+        if (breadcrumb) breadcrumb.textContent = ALL_GROUP_LABEL + ' (' + username + ')';
+    } else {
+        updateGroupHeader();
+    }
+
+    loadData({ preserveScroll: false });
+    if (val) {
+        syncGroupsFromServer(val);
+    } else {
+        state.customGroups = loadCustomGroups();
+        syncGroupsFromServer();
+    }
 }
 
 async function loadData(opts = {}) {
@@ -3139,7 +3191,12 @@ function renderAdminUsersLoading() {
 function prefetchAdminUsers() {
     var user = getAuthUser();
     if (!user || user.role !== 'admin') return;
-    _fetchAdminUsers({ preferCache: true }).catch(function() {});
+    _fetchAdminUsers({ preferCache: true })
+        .then(function(users) {
+            state.adminUserList = Array.isArray(users) ? users.slice() : [];
+            rebuildAdminUserFilterOptions();
+        })
+        .catch(function() {});
 }
 
 async function _fetchAdminUsers(opts) {
@@ -3164,6 +3221,7 @@ async function _fetchAdminUsers(opts) {
         _adminUsersCache = Array.isArray(data) ? data : (data.users || []);
         state.adminUserList = _adminUsersCache.slice();
         state.adminUsersCacheTs = Date.now();
+        rebuildAdminUserFilterOptions();
         return _adminUsersCache;
     })
     .finally(function() {
