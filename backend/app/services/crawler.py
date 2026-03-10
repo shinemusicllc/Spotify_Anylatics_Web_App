@@ -294,7 +294,7 @@ def _extract_primary_artist_id(data: dict) -> str | None:
     return None
 
 
-async def _enrich_track_artist_metrics(data: dict) -> dict:
+async def _enrich_owner_artist_metrics(data: dict) -> dict:
     primary_artist_id = _extract_primary_artist_id(data)
     if not primary_artist_id:
         return data
@@ -353,8 +353,8 @@ def _formatted_item_name(item_type: str, data: dict) -> str | None:
 
 async def _finalize_payload(item_type: str, data: dict) -> dict:
     merged = dict(data)
-    if item_type == "track":
-        merged = await _enrich_track_artist_metrics(merged)
+    if item_type in {"track", "album"}:
+        merged = await _enrich_owner_artist_metrics(merged)
 
     formatted_name = _formatted_item_name(item_type, merged)
     if formatted_name:
