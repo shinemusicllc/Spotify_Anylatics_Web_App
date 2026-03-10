@@ -1600,7 +1600,22 @@ function populateGroupSelect() {
 function resolveSelectedGroup() {
     var dd = document.getElementById('modal-group-select-dropdown');
     var picked = normalizeGroupName(dd ? dd.getAttribute('data-value') : null);
-    if (picked && picked !== GROUP_SELECT_ALL) return picked;
+    if (!picked || picked.toLowerCase() === GROUP_SELECT_ALL.toLowerCase()) return null;
+
+    // In admin all-users mode, dropdown values may be composite ids (userId::groupName).
+    // Always resolve to the raw group name before sending to backend.
+    var entry = getGroupEntryById(picked);
+    if (entry && entry.id !== ALL_GROUP_ID) {
+        var nameFromEntry = normalizeGroupName(entry.name);
+        if (nameFromEntry) return nameFromEntry;
+    }
+
+    var parsed = parseGroupEntryId(picked);
+    var parsedName = normalizeGroupName(parsed ? parsed.name : '');
+    if (parsedName && parsedName.toLowerCase() !== ALL_GROUP_ID) return parsedName;
+
+    // Fallback for non-composite ids
+    if (picked.toLowerCase() !== ALL_GROUP_ID) return picked;
     return null;
 }
 
