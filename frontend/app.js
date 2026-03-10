@@ -1078,6 +1078,10 @@ function updateDragAutoScroll(container, clientY) {
 
 function getAdminUserLabelById(userId) {
     if (!userId) return '';
+    const currentUser = getAuthUser();
+    if (currentUser && String(currentUser.id || '') === String(userId)) {
+        return currentUser.display_name || currentUser.username || 'Admin';
+    }
     const match = (state.adminUserList || []).find((user) => String(user.id || user._id || '') === String(userId));
     return (match && (match.display_name || match.username)) || '';
 }
@@ -1103,7 +1107,7 @@ function getAdminGroupDisplayName(groupName) {
         return groupName;
     }
 
-    const primaryLabel = getAdminUserLabelById(uniqueUserIds[0]) || uniqueUserIds[0];
+    const primaryLabel = getAdminUserLabelById(uniqueUserIds[0]) || 'User';
     if (!primaryLabel) return groupName;
     if (uniqueUserIds.length === 1) {
         return `${primaryLabel} - ${groupName}`;
@@ -2503,6 +2507,11 @@ async function setupAdminUserFilter() {
     try {
         const users = await _fetchAdminUsers({ preferCache: true });
         state.adminUserList = Array.isArray(users) ? users.slice() : [];
+        if (state.items.length) {
+            rebuildGroups();
+            updateGroupHeader();
+            renderGroups();
+        }
     } catch {
         return;
     }
