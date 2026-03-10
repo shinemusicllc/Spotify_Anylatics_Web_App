@@ -492,6 +492,19 @@ function itemKey(item) {
     return `${item?.type || ''}:${item?.spotify_id || ''}:${item?.user_id ? String(item.user_id) : ''}`;
 }
 
+function uniqueLinkKey(item) {
+    return `${item?.type || ''}:${item?.spotify_id || ''}`;
+}
+
+function countUniqueLinks(items) {
+    const unique = new Set();
+    (items || []).forEach((item) => {
+        if (!item?.type || !item?.spotify_id) return;
+        unique.add(uniqueLinkKey(item));
+    });
+    return unique.size;
+}
+
 function getCurrentUserIdentity() {
     const user = getAuthUser();
     return {
@@ -1460,7 +1473,7 @@ function rebuildGroups() {
         counts.set(entryId, (counts.get(entryId) || 0) + 1);
     }
 
-    const groups = [{ id: ALL_GROUP_ID, name: ALL_GROUP_LABEL, count: state.items.length }];
+    const groups = [{ id: ALL_GROUP_ID, name: ALL_GROUP_LABEL, count: countUniqueLinks(state.items) }];
     const namedGroups = [];
     const seen = new Set();
     const pushUnique = (rawEntry) => {
@@ -2351,19 +2364,22 @@ function updateKPIs() {
     const scoped = state.activeGroup === ALL_GROUP_ID
         ? state.items
         : state.items.filter((i) => doesItemMatchGroupEntry(i, activeEntry));
+    const scopedTotal = state.activeGroup === ALL_GROUP_ID
+        ? countUniqueLinks(scoped)
+        : scoped.length;
     const active = scoped.filter(i => i.status === 'active').length;
     const errors = scoped.filter(i => i.status === 'error').length;
     const crawling = scoped.filter(i => i.status === 'crawling' || i.status === 'pending').length;
 
-    setText('kpi-total', scoped.length);
+    setText('kpi-total', scopedTotal);
     setText('kpi-active', active);
     setText('kpi-errors', errors);
     setText('kpi-crawling', crawling);
-    setText('footer-total', scoped.length);
+    setText('footer-total', scopedTotal);
     setText('footer-active', active);
     setText('footer-errors', errors);
     setText('footer-crawling', crawling);
-    setText('group-count-all', state.items.length);
+    setText('group-count-all', countUniqueLinks(state.items));
 }
 
 function setText(id, val) {
