@@ -1156,6 +1156,15 @@ function getCurrentUserLabel() {
     return currentUser?.display_name || currentUser?.username || 'Admin';
 }
 
+function getScopedGroupOwnerUserId() {
+    const currentUser = getAuthUser();
+    if (!currentUser?.id) return null;
+    if (currentUser.role === 'admin' && state.adminFilterUserId) {
+        return String(state.adminFilterUserId);
+    }
+    return String(currentUser.id);
+}
+
 function getAdminGroupBaseName(groupName, ownerLabel = '') {
     const raw = normalizeGroupName(groupName);
     if (!raw) return 'Group';
@@ -1236,12 +1245,13 @@ function rebuildGroups() {
     };
 
     // Follow user-defined order first.
+    const scopedOwnerUserId = getScopedGroupOwnerUserId();
     (state.customGroups || []).forEach((rawName) => {
         const normalized = normalizeGroupName(rawName);
         pushUnique({
-            id: buildGroupEntryId(normalized, getAuthUser()?.id || null),
+            id: buildGroupEntryId(normalized, scopedOwnerUserId),
             name: normalized,
-            ownerUserId: getAuthUser()?.id || null,
+            ownerUserId: scopedOwnerUserId,
         });
     });
 
@@ -1422,10 +1432,10 @@ function handleCreateGroup(rawName) {
         return;
     }
 
-    const currentUser = getAuthUser();
+    const scopedOwnerUserId = getScopedGroupOwnerUserId();
     const existing = state.groups.find((g) => (
         normalizeGroupName(g.name).toLowerCase() === name.toLowerCase()
-        && String(g.ownerUserId || currentUser?.id || '') === String(currentUser?.id || '')
+        && String(g.ownerUserId || scopedOwnerUserId || '') === String(scopedOwnerUserId || '')
     ));
     if (existing) {
         state.activeGroup = existing.id;
@@ -1441,7 +1451,7 @@ function handleCreateGroup(rawName) {
 
     state.customGroups.push(name);
     saveCustomGroups();
-    state.activeGroup = buildGroupEntryId(name, currentUser?.id || null);
+    state.activeGroup = buildGroupEntryId(name, scopedOwnerUserId);
     state.isCreatingGroup = false;
     state.renamingGroupId = null;
     rebuildGroups();
