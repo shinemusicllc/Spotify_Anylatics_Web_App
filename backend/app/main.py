@@ -56,10 +56,12 @@ async def lifespan(app: FastAPI):
     """Application startup/shutdown events."""
     logger.info("Starting SpotiCheck API...")
 
-    # Keep deployment simple: auto-create tables unless explicitly disabled.
-    if settings.AUTO_INIT_DB:
-        await init_db()
-        logger.info("Database tables checked/created")
+    # Always ensure compatibility migrations run at startup.
+    # Older deployments may carry legacy unique constraints that break per-user link ownership.
+    if not settings.AUTO_INIT_DB:
+        logger.warning("AUTO_INIT_DB=false but running compatibility DB init to ensure schema integrity")
+    await init_db()
+    logger.info("Database tables checked/created")
 
     yield
 
