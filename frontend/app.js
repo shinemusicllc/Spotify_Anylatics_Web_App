@@ -877,6 +877,31 @@ function getActiveGroupName() {
     return match?.displayName || match?.name || state.activeGroup;
 }
 
+function isAdminAllUsersMode() {
+    const currentUser = getAuthUser();
+    return Boolean(currentUser?.role === 'admin' && !state.adminFilterUserId);
+}
+
+function buildGroupEntryId(groupName, ownerUserId = null) {
+    const normalizedName = normalizeGroupName(groupName);
+    const normalizedOwner = ownerUserId ? String(ownerUserId) : '';
+    if (!isAdminAllUsersMode() || !normalizedOwner) {
+        return normalizedName;
+    }
+    return `${normalizedOwner}::${normalizedName}`;
+}
+
+function getGroupEntryById(groupId) {
+    return state.groups.find((g) => String(g.id) === String(groupId)) || null;
+}
+
+function doesItemMatchGroupEntry(item, groupEntry) {
+    if (!groupEntry || groupEntry.id === ALL_GROUP_ID) return true;
+    if (normalizeGroupName(item.group) !== normalizeGroupName(groupEntry.name)) return false;
+    if (!groupEntry.ownerUserId) return true;
+    return String(item.user_id || '') === String(groupEntry.ownerUserId);
+}
+
 function updateGroupHeader() {
     const name = getActiveGroupName();
     const breadcrumb = document.getElementById('breadcrumb-group');
@@ -894,7 +919,8 @@ function getVisibleItems() {
     let items = state.items;
 
     if (state.activeGroup !== ALL_GROUP_ID) {
-        items = items.filter((i) => i.group === state.activeGroup);
+        const activeEntry = getGroupEntryById(state.activeGroup);
+        items = items.filter((i) => doesItemMatchGroupEntry(i, activeEntry));
     }
 
     if (state.searchQuery) {
@@ -1106,37 +1132,32 @@ function getAdminGroupBaseName(groupName, ownerLabel = '') {
     return raw;
 }
 
-function getAdminGroupDisplayName(groupName) {
+function getAdminGroupDisplayName(groupName, ownerUserId = null) {
     const currentUser = getAuthUser();
     if (currentUser?.role !== 'admin' || !groupName || groupName === ALL_GROUP_LABEL) {
         return groupName;
     }
 
-    const matchingItems = state.items.filter((item) => normalizeGroupName(item.group) === groupName);
-    const uniqueUserIds = Array.from(new Set(
-        matchingItems
-            .map((item) => item.user_id ? String(item.user_id) : '')
-            .filter(Boolean)
-    ));
-
     let ownerLabel = '';
     if (state.adminFilterUserId) {
         ownerLabel = getAdminUserLabelById(state.adminFilterUserId) || getCurrentUserLabel();
-    } else if (uniqueUserIds.length === 1) {
-        ownerLabel = getAdminUserLabelById(uniqueUserIds[0]) || getCurrentUserLabel();
+    } else if (ownerUserId) {
+        ownerLabel = getAdminUserLabelById(ownerUserId) || getCurrentUserLabel();
     } else if ((state.customGroups || []).some((name) => normalizeGroupName(name) === normalizeGroupName(groupName))) {
         ownerLabel = getCurrentUserLabel();
-    } else if (uniqueUserIds.length > 1) {
-        ownerLabel = getAdminUserLabelById(uniqueUserIds[0]) || 'User';
     } else {
         ownerLabel = getCurrentUserLabel();
     }
 
     const baseName = getAdminGroupBaseName(groupName, ownerLabel);
-    if (uniqueUserIds.length > 1 && !state.adminFilterUserId) {
-        return `${ownerLabel} +${uniqueUserIds.length - 1} - ${baseName}`;
-    }
     return `${ownerLabel} - ${baseName}`;
+}
+
+function canManageGroupEntry(groupEntry) {
+    if (!groupEntry || groupEntry.id === ALL_GROUP_ID) return false;
+    if (!isAdminAllUsersMode()) return true;
+    const currentUser = getAuthUser();
+    return Boolean(currentUser?.id && String(groupEntry.ownerUserId || '') === String(currentUser.id));
 }
 
 function rebuildGroups() {
@@ -1146,28 +1167,42 @@ function rebuildGroups() {
         const group = normalizeGroupName(item.group);
         if (!group) continue;
         if (group.toLowerCase() === ALL_GROUP_ID) continue;
-        if (!counts.has(group)) {
-            encountered.push(group);
+        const entryId = buildGroupEntryId(group, item.user_id || null);
+        if (!counts.has(entryId)) {
+            encountered.push({
+                id: entryId,
+                name: group,
+                ownerUserId: item.user_id ? String(item.user_id) : null,
+            });
         }
-        counts.set(group, (counts.get(group) || 0) + 1);
+        counts.set(entryId, (counts.get(entryId) || 0) + 1);
     }
 
     const groups = [{ id: ALL_GROUP_ID, name: ALL_GROUP_LABEL, count: state.items.length }];
     const namedGroups = [];
     const seen = new Set();
-    const pushUnique = (rawName) => {
-        const name = normalizeGroupName(rawName);
+    const pushUnique = (rawEntry) => {
+        const isEntryObject = rawEntry && typeof rawEntry === 'object';
+        const name = normalizeGroupName(isEntryObject ? rawEntry.name : rawEntry);
         if (!name || name.toLowerCase() === ALL_GROUP_ID) return;
-        const key = name.toLowerCase();
+        const ownerUserId = isEntryObject && rawEntry.ownerUserId ? String(rawEntry.ownerUserId) : null;
+        const id = isEntryObject
+            ? normalizeGroupName(rawEntry.id || buildGroupEntryId(name, ownerUserId))
+            : normalizeGroupName(name);
+        const key = id.toLowerCase();
         if (seen.has(key)) return;
         seen.add(key);
-        namedGroups.push(name);
+        namedGroups.push({ id, name, ownerUserId });
     };
 
     // Follow user-defined order first.
     (state.customGroups || []).forEach((rawName) => {
         const normalized = normalizeGroupName(rawName);
-        pushUnique(normalized);
+        pushUnique({
+            id: buildGroupEntryId(normalized, getAuthUser()?.id || null),
+            name: normalized,
+            ownerUserId: getAuthUser()?.id || null,
+        });
     });
 
     // Then append any groups discovered from data but not explicitly ordered yet.
@@ -1175,15 +1210,19 @@ function rebuildGroups() {
 
     // Keep currently-selected group visible even if empty.
     if (state.activeGroup !== ALL_GROUP_ID) {
-        pushUnique(state.activeGroup);
+        const activeEntry = getGroupEntryById(state.activeGroup);
+        if (activeEntry) {
+            pushUnique(activeEntry);
+        }
     }
 
-    for (const name of namedGroups) {
+    for (const entry of namedGroups) {
         groups.push({
-            id: name,
-            name,
-            displayName: getAdminGroupDisplayName(name),
-            count: counts.get(name) || 0,
+            id: entry.id,
+            name: entry.name,
+            ownerUserId: entry.ownerUserId,
+            displayName: getAdminGroupDisplayName(entry.name, entry.ownerUserId),
+            count: counts.get(entry.id) || 0,
         });
     }
 
@@ -1206,7 +1245,7 @@ function renderGroups() {
 
     const groupButtons = groups.map((g) => {
         const isActive = g.id === state.activeGroup;
-        const canDelete = g.id !== ALL_GROUP_ID;
+        const canDelete = canManageGroupEntry(g);
         const isDragging = state.draggingGroupId === g.id;
         const isDropTarget = state.dragOverGroupId === g.id && !isDragging;
         const isRenaming = Boolean(
@@ -1329,7 +1368,11 @@ function handleCreateGroup(rawName) {
         return;
     }
 
-    const existing = state.groups.find((g) => g.id.toLowerCase() === name.toLowerCase());
+    const currentUser = getAuthUser();
+    const existing = state.groups.find((g) => (
+        normalizeGroupName(g.name).toLowerCase() === name.toLowerCase()
+        && String(g.ownerUserId || currentUser?.id || '') === String(currentUser?.id || '')
+    ));
     if (existing) {
         state.activeGroup = existing.id;
         state.isCreatingGroup = false;
@@ -1344,7 +1387,7 @@ function handleCreateGroup(rawName) {
 
     state.customGroups.push(name);
     saveCustomGroups();
-    state.activeGroup = name;
+    state.activeGroup = buildGroupEntryId(name, currentUser?.id || null);
     state.isCreatingGroup = false;
     state.renamingGroupId = null;
     rebuildGroups();
@@ -1360,11 +1403,15 @@ function handleDeleteGroup(rawGroupId) {
     if (!groupId || groupId.toLowerCase() === ALL_GROUP_ID) return;
 
     const target = state.groups.find((g) => g.id.toLowerCase() === groupId.toLowerCase());
+    if (!canManageGroupEntry(target)) {
+        showToast('Select that user in Filter by User to manage this group', 'info');
+        return;
+    }
     const groupName = target?.name || groupId;
     const confirmed = window.confirm(`Delete group "${groupName}"?\nAll links in this group will move to All Links.`);
     if (!confirmed) return;
 
-    const groupKey = groupId.toLowerCase();
+    const groupKey = normalizeGroupName(target?.name || groupId).toLowerCase();
     state.customGroups = (state.customGroups || []).filter((name) => {
         const normalized = normalizeGroupName(name);
         return normalized && normalized.toLowerCase() !== groupKey;
@@ -1374,14 +1421,15 @@ function handleDeleteGroup(rawGroupId) {
     state.items = state.items.map((item) => {
         const itemGroup = normalizeGroupName(item.group);
         if (!itemGroup || itemGroup.toLowerCase() !== groupKey) return item;
+        if (target?.ownerUserId && String(item.user_id || '') !== String(target.ownerUserId)) return item;
         return { ...item, group: null };
     });
 
-    if ((state.activeGroup || '').toLowerCase() === groupKey) {
+    if ((state.activeGroup || '').toLowerCase() === groupId.toLowerCase()) {
         state.activeGroup = ALL_GROUP_ID;
     }
     state.isCreatingGroup = false;
-    if ((state.renamingGroupId || '').toLowerCase() === groupKey) {
+    if ((state.renamingGroupId || '').toLowerCase() === groupId.toLowerCase()) {
         state.renamingGroupId = null;
     }
     syncGroupUI(true);
@@ -1410,6 +1458,10 @@ function startRenameGroupFlow(rawGroupId) {
 
     const target = state.groups.find((g) => normalizeGroupName(g.id).toLowerCase() === groupId.toLowerCase());
     if (!target) return;
+    if (!canManageGroupEntry(target)) {
+        showToast('Select that user in Filter by User to rename this group', 'info');
+        return;
+    }
 
     state.isCreatingGroup = false;
     state.renamingGroupId = target.id;
@@ -1439,6 +1491,12 @@ function handleRenameGroup(rawGroupId, rawName, opts = {}) {
         renderGroups();
         return;
     }
+    if (!canManageGroupEntry(target)) {
+        showToast('Select that user in Filter by User to rename this group', 'info');
+        state.renamingGroupId = null;
+        renderGroups();
+        return;
+    }
 
     const nextName = normalizeGroupName(rawName);
     if (!nextName) {
@@ -1454,18 +1512,19 @@ function handleRenameGroup(rawGroupId, rawName, opts = {}) {
         return;
     }
 
-    const oldKey = target.id.toLowerCase();
+    const oldKey = normalizeGroupName(target.name).toLowerCase();
     const sameByCaseInsensitive = nextName.toLowerCase() === oldKey;
     const duplicate = state.groups.find((g) => (
-        normalizeGroupName(g.id).toLowerCase() === nextName.toLowerCase()
-        && normalizeGroupName(g.id).toLowerCase() !== oldKey
+        normalizeGroupName(g.name).toLowerCase() === nextName.toLowerCase()
+        && String(g.ownerUserId || '') === String(target.ownerUserId || '')
+        && normalizeGroupName(g.name).toLowerCase() !== oldKey
     ));
     if (duplicate) {
         showToast(`Group "${duplicate.name}" already exists`, 'error');
         return;
     }
 
-    if (!sameByCaseInsensitive || nextName !== target.id) {
+    if (!sameByCaseInsensitive || nextName !== target.name) {
         state.customGroups = (state.customGroups || []).map((raw) => {
             const n = normalizeGroupName(raw);
             if (n.toLowerCase() !== oldKey) return n;
@@ -1476,18 +1535,19 @@ function handleRenameGroup(rawGroupId, rawName, opts = {}) {
         state.items = state.items.map((item) => {
             const itemGroup = normalizeGroupName(item.group);
             if (itemGroup.toLowerCase() !== oldKey) return item;
+            if (target?.ownerUserId && String(item.user_id || '') !== String(target.ownerUserId)) return item;
             return { ...item, group: nextName };
         });
 
-        if (normalizeGroupName(state.activeGroup).toLowerCase() === oldKey) {
-            state.activeGroup = nextName;
+        if (normalizeGroupName(state.activeGroup).toLowerCase() === normalizeGroupName(target.id).toLowerCase()) {
+            state.activeGroup = buildGroupEntryId(nextName, target.ownerUserId || null);
         }
     }
 
     state.renamingGroupId = null;
     syncGroupUI(true);
     renderList({ preserveScroll: true });
-    if (!sameByCaseInsensitive || nextName !== target.id) {
+    if (!sameByCaseInsensitive || nextName !== target.name) {
         showToast(`Renamed group: ${target.name} → ${nextName}`, 'success');
     }
 }
@@ -1875,9 +1935,10 @@ function refreshCheckedLabels() {
 }
 
 function updateKPIs() {
+    const activeEntry = getGroupEntryById(state.activeGroup);
     const scoped = state.activeGroup === ALL_GROUP_ID
         ? state.items
-        : state.items.filter((i) => i.group === state.activeGroup);
+        : state.items.filter((i) => doesItemMatchGroupEntry(i, activeEntry));
     const active = scoped.filter(i => i.status === 'active').length;
     const errors = scoped.filter(i => i.status === 'error').length;
     const crawling = scoped.filter(i => i.status === 'crawling' || i.status === 'pending').length;
@@ -2048,7 +2109,7 @@ async function refreshAllItems() {
         ? selectedVisibleItems
         : (state.activeGroup === ALL_GROUP_ID
             ? state.items
-            : state.items.filter((i) => i.group === state.activeGroup));
+            : state.items.filter((i) => doesItemMatchGroupEntry(i, getGroupEntryById(state.activeGroup))));
 
     if (targetItems.length === 0) {
         showToast('No links to refresh', 'info');
