@@ -1086,6 +1086,26 @@ function getAdminUserLabelById(userId) {
     return (match && (match.display_name || match.username)) || '';
 }
 
+function isUuidLike(value) {
+    return /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(String(value || '').trim());
+}
+
+function getCurrentUserLabel() {
+    const currentUser = getAuthUser();
+    return currentUser?.display_name || currentUser?.username || 'Admin';
+}
+
+function getAdminGroupBaseName(groupName, ownerLabel = '') {
+    const raw = normalizeGroupName(groupName);
+    if (!raw) return 'Group';
+    if (isUuidLike(raw)) return 'Group';
+    const prefixed = ownerLabel ? `${ownerLabel} - ` : '';
+    if (prefixed && raw.toLowerCase().startsWith(prefixed.toLowerCase())) {
+        return raw.slice(prefixed.length).trim() || 'Group';
+    }
+    return raw;
+}
+
 function getAdminGroupDisplayName(groupName) {
     const currentUser = getAuthUser();
     if (currentUser?.role !== 'admin' || !groupName || groupName === ALL_GROUP_LABEL) {
@@ -1099,20 +1119,24 @@ function getAdminGroupDisplayName(groupName) {
             .filter(Boolean)
     ));
 
-    if (!uniqueUserIds.length) {
-        if (state.adminFilterUserId) {
-            const filteredUserLabel = getAdminUserLabelById(state.adminFilterUserId);
-            return filteredUserLabel ? `${filteredUserLabel} - ${groupName}` : groupName;
-        }
-        return groupName;
+    let ownerLabel = '';
+    if (state.adminFilterUserId) {
+        ownerLabel = getAdminUserLabelById(state.adminFilterUserId) || getCurrentUserLabel();
+    } else if (uniqueUserIds.length === 1) {
+        ownerLabel = getAdminUserLabelById(uniqueUserIds[0]) || getCurrentUserLabel();
+    } else if ((state.customGroups || []).some((name) => normalizeGroupName(name) === normalizeGroupName(groupName))) {
+        ownerLabel = getCurrentUserLabel();
+    } else if (uniqueUserIds.length > 1) {
+        ownerLabel = getAdminUserLabelById(uniqueUserIds[0]) || 'User';
+    } else {
+        ownerLabel = getCurrentUserLabel();
     }
 
-    const primaryLabel = getAdminUserLabelById(uniqueUserIds[0]) || 'User';
-    if (!primaryLabel) return groupName;
-    if (uniqueUserIds.length === 1) {
-        return `${primaryLabel} - ${groupName}`;
+    const baseName = getAdminGroupBaseName(groupName, ownerLabel);
+    if (uniqueUserIds.length > 1 && !state.adminFilterUserId) {
+        return `${ownerLabel} +${uniqueUserIds.length - 1} - ${baseName}`;
     }
-    return `${primaryLabel} +${uniqueUserIds.length - 1} - ${groupName}`;
+    return `${ownerLabel} - ${baseName}`;
 }
 
 function rebuildGroups() {
