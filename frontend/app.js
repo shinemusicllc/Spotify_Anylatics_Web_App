@@ -19,7 +19,7 @@ const CONFIG = {
 };
 const GROUP_STORAGE_KEY = 'spoticheck_custom_groups_v1';
 const ROW_ORDER_STORAGE_KEY = 'spoticheck_row_order_v1';
-const COLUMN_WIDTH_STORAGE_KEY = 'spoticheck_column_widths_v5';
+const COLUMN_WIDTH_STORAGE_KEY = 'spoticheck_column_widths_v4';
 const ALL_GROUP_ID = 'all';
 const ALL_GROUP_LABEL = 'All Links';
 const GROUP_SELECT_ALL = '__all__';
@@ -36,13 +36,13 @@ const DEFAULT_COLUMN_WIDTHS = Object.freeze({
 });
 const MIN_COLUMN_WIDTHS = Object.freeze({
     asset: 320,
-    owner: 112,
-    playlistSaves: 72,
-    playlistCount: 72,
-    albumCount: 72,
-    artistFollowers: 76,
-    artistListeners: 80,
-    trackViews: 80,
+    owner: 132,
+    playlistSaves: 84,
+    playlistCount: 84,
+    albumCount: 80,
+    artistFollowers: 84,
+    artistListeners: 88,
+    trackViews: 88,
     checked: 72,
 });
 const MAX_COLUMN_WIDTHS = Object.freeze({
@@ -590,25 +590,6 @@ function distributeColumnDelta(widths, keys, delta) {
     return remaining;
 }
 
-function distributeColumnDeltaSequential(widths, keys, delta) {
-    let remaining = Math.round(delta);
-    if (!remaining) return 0;
-
-    for (const key of keys) {
-        if (!remaining) break;
-        const min = MIN_COLUMN_WIDTHS[key] ?? 72;
-        const max = MAX_COLUMN_WIDTHS[key] ?? 900;
-        const current = widths[key];
-        const target = current + remaining;
-        const next = Math.min(max, Math.max(min, target));
-        const actual = next - current;
-        widths[key] = next;
-        remaining -= actual;
-    }
-
-    return remaining;
-}
-
 function rebalanceColumnWidths(sourceWidths, preferredKey = null, targetBudget = null) {
     const widths = { ...sourceWidths };
     RESIZABLE_COLUMN_KEYS.forEach((key) => {
@@ -660,7 +641,7 @@ function setColumnWidth(key, width, persist = false, resizeEdge = 'end') {
         [key]: nextWidth,
     };
     const compensationKeys = getDirectionalCompensationKeys(key, resizeEdge);
-    const remaining = distributeColumnDeltaSequential(nextWidths, compensationKeys, -delta);
+    const remaining = distributeColumnDelta(nextWidths, compensationKeys, -delta);
     if (remaining !== 0) {
         nextWidths[key] = clampColumnWidth(key, nextWidths[key] + remaining);
     }
@@ -1649,13 +1630,11 @@ function renderRow(item) {
 
     row.innerHTML = `
         <!-- Left: Asset Details -->
-        <div class="list-asset-cell flex items-center gap-4">
-            <div class="list-cover-slot">
-                <button type="button" class="list-cover-trigger" data-action="preview-image" data-image-url="${escapeHtml(coverUrl)}" aria-label="Preview cover image">
-                    <img alt="Cover" class="list-cover-image" src="${coverUrl}">
-                </button>
-            </div>
-            <div class="list-asset-content">
+        <div class="flex items-center gap-4">
+            <button type="button" class="list-cover-trigger" data-action="preview-image" data-image-url="${escapeHtml(coverUrl)}" aria-label="Preview cover image">
+                <img alt="Cover" class="list-cover-image" src="${coverUrl}">
+            </button>
+            <div>
                 <span class="list-type-badge ${isError ? 'badge-error' : getBadgeClass(item.type)}">${item.type}</span>
                 <h3 class="list-asset-title ${titleToneClass}">
                     <a class="list-title-link" href="${spotifyUrl}" target="_blank" rel="noopener noreferrer">${escapeHtml(item.name || 'Unknown')}</a>

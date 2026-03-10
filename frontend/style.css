@@ -685,15 +685,6 @@ h3 {
   overflow: hidden;
 }
 
-.list-asset-cell {
-  min-width: 0;
-}
-
-.list-asset-content {
-  min-width: 0;
-  flex: 1 1 auto;
-}
-
 .list-grid > .custom-grid-row:hover {
   background: rgba(255, 255, 255, 0.05) !important;
   border-radius: 0.5rem !important;
@@ -727,13 +718,6 @@ h3 {
   border-radius: 0.5rem;
   object-fit: cover;
   box-shadow: none;
-}
-
-.list-cover-slot {
-  flex: 0 0 70px;
-  width: 70px;
-  min-width: 70px;
-  max-width: 70px;
 }
 
 .list-owner-avatar {
@@ -924,15 +908,11 @@ h3 {
   flex: 0 0 70px;
   width: 70px;
   min-width: 70px;
-  max-width: 70px;
   height: 70px;
-  min-height: 70px;
-  max-height: 70px;
   padding: 0;
   border: none;
   background: transparent;
   cursor: zoom-in;
-  overflow: hidden;
 }
 
 .list-stats-cell {
