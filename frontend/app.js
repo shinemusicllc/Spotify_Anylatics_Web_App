@@ -532,7 +532,7 @@ function findOwnedItemIndex(type, spotifyId, ownerUserId = null) {
         if (item.type !== type || item.spotify_id !== spotifyId) return false;
         if (!ownerId) return true;
         const itemOwnerId = item.user_id ? String(item.user_id) : '';
-        return !itemOwnerId || itemOwnerId === ownerId;
+        return itemOwnerId === ownerId;
     });
 }
 
@@ -2659,21 +2659,12 @@ async function submitSingle() {
         const existingIdx = findOwnedItemIndex(parsed.type, parsed.id, currentIdentity.id);
 
         if (existingIdx >= 0) {
-            const existingOwnerId = state.items[existingIdx].user_id ? String(state.items[existingIdx].user_id) : '';
-            const shouldAttachCurrentUser = !existingOwnerId || existingOwnerId === String(currentIdentity.id || '');
             state.items[existingIdx] = {
                 ...state.items[existingIdx],
                 status: 'crawling',
                 error_code: null,
                 error_message: null,
                 last_checked: now,
-                ...(shouldAttachCurrentUser
-                    ? {
-                        user_id: currentIdentity.id,
-                        user_name: currentIdentity.name,
-                        user_avatar: currentIdentity.avatar,
-                    }
-                    : {}),
             };
             state.pendingJobToItem.set(jobId, state.items[existingIdx].id);
         } else {
@@ -2740,21 +2731,12 @@ async function submitBatch() {
             const ownedIdx = findOwnedItemIndex(parsed.type, parsed.id, currentIdentity.id);
 
             if (ownedIdx >= 0) {
-                const existingOwnerId = state.items[ownedIdx].user_id ? String(state.items[ownedIdx].user_id) : '';
-                const shouldAttachCurrentUser = !existingOwnerId || existingOwnerId === String(currentIdentity.id || '');
                 state.items[ownedIdx] = {
                     ...state.items[ownedIdx],
                     status: 'crawling',
                     error_code: null,
                     error_message: null,
                     last_checked: now,
-                    ...(shouldAttachCurrentUser
-                        ? {
-                            user_id: currentIdentity.id,
-                            user_name: currentIdentity.name,
-                            user_avatar: currentIdentity.avatar,
-                        }
-                        : {}),
                 };
                 state.pendingJobToItem.set(jobId, state.items[ownedIdx].id);
             } else {
