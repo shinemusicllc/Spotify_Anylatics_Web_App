@@ -77,16 +77,16 @@ h3 {
 
 /* ── CSS Custom Properties (Design Tokens) ─────────────────────── */
 :root {
-  --meta-gap: 18px;
-  --asset-col: 520px;
-  --owner-col: 220px;
-  --playlist-save-col: 120px;
-  --playlist-count-col: 120px;
-  --album-count-col: 110px;
-  --artist-followers-col: 120px;
-  --artist-listeners-col: 132px;
-  --track-views-col: 132px;
-  --checked-col: 132px;
+  --meta-gap: 12px;
+  --asset-col: 420px;
+  --owner-col: 160px;
+  --playlist-save-col: 92px;
+  --playlist-count-col: 92px;
+  --album-count-col: 88px;
+  --artist-followers-col: 92px;
+  --artist-listeners-col: 104px;
+  --track-views-col: 100px;
+  --checked-col: 92px;
   --meta-grid-width: calc(
     var(--owner-col) + var(--playlist-save-col) + var(--playlist-count-col) +
       var(--album-count-col) + var(--artist-followers-col) +
@@ -144,6 +144,44 @@ h3 {
 #sidebar.collapsed .sidebar-profile-wrap {
   justify-content: center;
   padding: 8px 0;
+}
+
+#sidebar.collapsed:hover {
+  width: 240px;
+}
+
+#sidebar.collapsed:hover .sidebar-label,
+#sidebar.collapsed:hover .sidebar-logo-text,
+#sidebar.collapsed:hover .sidebar-user-info {
+  display: block;
+}
+
+#sidebar.collapsed:hover .sidebar-header {
+  justify-content: flex-start;
+  padding-left: 24px;
+  padding-right: 24px;
+}
+
+#sidebar.collapsed:hover nav {
+  padding-left: 12px;
+  padding-right: 12px;
+}
+
+#sidebar.collapsed:hover nav a {
+  justify-content: flex-start;
+  padding-left: 12px;
+  padding-right: 12px;
+  gap: 16px;
+}
+
+#sidebar.collapsed:hover .sidebar-profile {
+  padding-left: 16px;
+  padding-right: 16px;
+}
+
+#sidebar.collapsed:hover .sidebar-profile-wrap {
+  justify-content: flex-start;
+  padding: 8px;
 }
 
 .app-sidebar {
@@ -264,13 +302,14 @@ h3 {
 /* ── Grid Layout ───────────────────────────────────────────────── */
 .custom-grid-row {
   display: grid;
-  grid-template-columns: var(--asset-col) minmax(var(--meta-grid-width), 1fr);
+  grid-template-columns: minmax(0, var(--asset-col)) minmax(0, 1fr);
   gap: 16px;
   align-items: center;
   user-select: none;
   cursor: grab;
   position: relative;
-  min-width: var(--table-min-width);
+  min-width: 0;
+  width: 100%;
 }
 
 .custom-grid-row.row-selected {
@@ -359,7 +398,8 @@ h3 {
     var(--checked-col);
   column-gap: var(--meta-gap);
   align-items: center;
-  min-width: var(--meta-grid-width);
+  min-width: 0;
+  width: 100%;
 }
 
 .meta-cell {
@@ -440,7 +480,7 @@ h3 {
 
 .list-wrap {
   position: relative;
-  overflow-x: auto;
+  overflow-x: hidden;
   overflow-y: auto;
 }
 
@@ -448,7 +488,8 @@ h3 {
   background: #111315;
   border: none;
   overflow: visible;
-  min-width: var(--table-min-width);
+  min-width: 0;
+  width: 100%;
 }
 
 /* ── Playlist Hero ─────────────────────────────────────────────── */
@@ -560,7 +601,7 @@ h3 {
 }
 
 .list-head .meta-grid > .meta-cell {
-  padding-left: 16px;
+  padding-left: 12px;
   min-height: 16px;
   border-left: 1px solid rgba(255, 255, 255, 0.2);
 }
@@ -631,6 +672,10 @@ h3 {
   opacity: 1;
   animation: none;
   cursor: pointer;
+}
+
+.list-grid > .custom-grid-row .meta-grid {
+  overflow: hidden;
 }
 
 .list-grid > .custom-grid-row:hover {
@@ -742,6 +787,14 @@ h3 {
 
 .title-tone-album .list-title-link:hover {
   color: #d8b4fe;
+}
+
+.title-tone-artist {
+  color: #fb923c;
+}
+
+.title-tone-artist .list-title-link:hover {
+  color: #fdba74;
 }
 
 .list-title-link:focus-visible,
@@ -1268,11 +1321,12 @@ h3 {
 
 .skeleton-row {
   display: grid;
-  grid-template-columns: var(--asset-col) minmax(var(--meta-grid-width), 1fr);
+  grid-template-columns: minmax(0, var(--asset-col)) minmax(0, 1fr);
   gap: 16px;
   padding: 12px 16px;
   align-items: center;
-  min-width: var(--table-min-width);
+  min-width: 0;
+  width: 100%;
 }
 
 /* ── Empty State ───────────────────────────────────────────────── */

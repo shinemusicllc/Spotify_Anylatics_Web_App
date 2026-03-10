@@ -10,7 +10,7 @@
     <link rel="shortcut icon" type="image/svg+xml" href="favicon.svg?v=1">
     <script src="https://cdn.tailwindcss.com?plugins=forms,container-queries"></script>
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=Inter+Tight:wght@600;700;800&family=Material+Symbols+Rounded:opsz,wght,FILL,GRAD@20..48,500,0..1,0&display=swap" rel="stylesheet">
-    <link rel="stylesheet" href="style.css?v=20260309-32">
+    <link rel="stylesheet" href="style.css?v=20260310-34">
     <script id="tailwind-config">
         tailwind.config = {
             darkMode: "class",
@@ -42,8 +42,8 @@
 
 <body class="bg-background-dark text-white font-display flex h-screen overflow-hidden">
     <!-- Zone 1: Collapsible Sidebar -->
-    <aside id="sidebar" class="app-sidebar w-64 flex-shrink-0 bg-sidebar-dark flex flex-col border-r border-white/5 h-full">
-        <div class="p-6 flex items-center gap-3 cursor-pointer sidebar-header" onclick="document.getElementById('sidebar').classList.toggle('collapsed')">
+    <aside id="sidebar" class="app-sidebar collapsed w-64 flex-shrink-0 bg-sidebar-dark flex flex-col border-r border-white/5 h-full">
+        <div class="p-6 flex items-center gap-3 sidebar-header">
             <svg width="34" height="34" viewBox="0 0 34 34" fill="none" xmlns="http://www.w3.org/2000/svg" class="flex-shrink-0">
                 <circle cx="17" cy="17" r="17" fill="#1DB954"></circle>
                 <rect x="8" y="13" width="2.8" height="8" rx="1.4" fill="#000"></rect>
@@ -548,6 +548,6 @@
             </div>
         </div>
 
-    <script src="app.js?v=20260309-33"></script>
+    <script src="app.js?v=20260310-34"></script>
 </body>
 </html>

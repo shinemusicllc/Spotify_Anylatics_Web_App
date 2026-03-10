@@ -19,31 +19,31 @@ const CONFIG = {
 };
 const GROUP_STORAGE_KEY = 'spoticheck_custom_groups_v1';
 const ROW_ORDER_STORAGE_KEY = 'spoticheck_row_order_v1';
-const COLUMN_WIDTH_STORAGE_KEY = 'spoticheck_column_widths_v1';
+const COLUMN_WIDTH_STORAGE_KEY = 'spoticheck_column_widths_v2';
 const ALL_GROUP_ID = 'all';
 const ALL_GROUP_LABEL = 'All Links';
 const GROUP_SELECT_ALL = '__all__';
 const DEFAULT_COLUMN_WIDTHS = Object.freeze({
-    asset: 520,
-    owner: 220,
-    playlistSaves: 120,
-    playlistCount: 120,
-    albumCount: 110,
-    artistFollowers: 120,
-    artistListeners: 132,
-    trackViews: 132,
-    checked: 132,
+    asset: 420,
+    owner: 160,
+    playlistSaves: 92,
+    playlistCount: 92,
+    albumCount: 88,
+    artistFollowers: 92,
+    artistListeners: 104,
+    trackViews: 100,
+    checked: 92,
 });
 const MIN_COLUMN_WIDTHS = Object.freeze({
-    asset: 340,
-    owner: 120,
-    playlistSaves: 96,
-    playlistCount: 96,
-    albumCount: 96,
-    artistFollowers: 96,
-    artistListeners: 96,
-    trackViews: 96,
-    checked: 108,
+    asset: 320,
+    owner: 132,
+    playlistSaves: 84,
+    playlistCount: 84,
+    albumCount: 80,
+    artistFollowers: 84,
+    artistListeners: 88,
+    trackViews: 88,
+    checked: 88,
 });
 const MAX_COLUMN_WIDTHS = Object.freeze({
     asset: 900,
@@ -527,6 +527,7 @@ function getTitleToneClass(type) {
     const map = {
         track: 'title-tone-track',
         album: 'title-tone-album',
+        artist: 'title-tone-artist',
     };
     return map[type] || '';
 }
