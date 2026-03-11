@@ -80,6 +80,7 @@ h3 {
   --meta-gap: 12px;
   --asset-col: 420px;
   --owner-col: 160px;
+  --playlist-owner-col: 160px;
   --playlist-save-col: 92px;
   --playlist-count-col: 92px;
   --album-count-col: 88px;
@@ -88,10 +89,10 @@ h3 {
   --track-views-col: 100px;
   --checked-col: 84px;
   --meta-grid-width: calc(
-    var(--owner-col) + var(--playlist-save-col) + var(--playlist-count-col) +
-      var(--album-count-col) + var(--artist-followers-col) +
-      var(--artist-listeners-col) + var(--track-views-col) +
-      var(--checked-col) + (7 * var(--meta-gap))
+    var(--owner-col) + var(--playlist-owner-col) + var(--playlist-save-col) +
+      var(--playlist-count-col) + var(--album-count-col) +
+      var(--artist-followers-col) + var(--artist-listeners-col) +
+      var(--track-views-col) + var(--checked-col) + (8 * var(--meta-gap))
   );
   --table-min-width: calc(var(--asset-col) + var(--meta-grid-width) + 16px);
   --surface-0: #0e1116;
@@ -386,10 +387,10 @@ h3 {
 .meta-grid {
   display: grid;
   grid-template-columns:
-    var(--owner-col) var(--playlist-save-col) var(--playlist-count-col)
-    var(--album-count-col) var(--artist-followers-col)
+    var(--owner-col) var(--playlist-owner-col) var(--playlist-save-col)
+    var(--playlist-count-col) var(--album-count-col) var(--artist-followers-col)
     var(--artist-listeners-col) var(--track-views-col)
-    var(--checked-col);
+  var(--checked-col);
   column-gap: var(--meta-gap);
   align-items: center;
   min-width: 0;
@@ -696,12 +697,12 @@ h3 {
   box-shadow: none !important;
 }
 
-.list-grid .meta-grid > :nth-child(2),
 .list-grid .meta-grid > :nth-child(3),
 .list-grid .meta-grid > :nth-child(4),
 .list-grid .meta-grid > :nth-child(5),
 .list-grid .meta-grid > :nth-child(6),
-.list-grid .meta-grid > :nth-child(7) {
+.list-grid .meta-grid > :nth-child(7),
+.list-grid .meta-grid > :nth-child(8) {
   font-variant-numeric: tabular-nums;
   letter-spacing: 0.015em;
 }
@@ -977,15 +978,6 @@ h3 {
   font-weight: 500;
 }
 
-.custom-grid-row:hover .checked-stack {
-  align-items: center;
-}
-
-.custom-grid-row:hover .checked-status {
-  justify-content: center;
-  text-align: center;
-}
-
 .metric-stack {
   display: flex;
   flex-direction: column;
@@ -1042,63 +1034,64 @@ h3 {
   line-height: 1.25;
 }
 
-.row-action-buttons {
-  display: none;
-  align-items: center;
-  gap: 6px;
-  position: relative;
-  order: 1;
-  z-index: 7;
-  pointer-events: auto;
-}
-
 .checked-stack {
   order: 2;
 }
 
-.row-refresh-btn,
-.row-delete-btn {
-  display: none;
+.playlist-owner-cell {
+  font-size: 13px;
+  color: #c6cedb;
+}
+
+.playlist-owner-cell > .truncate {
+  display: inline-block;
+  max-width: 100%;
+}
+
+.row-context-menu {
+  position: fixed;
+  z-index: 500;
+  min-width: 220px;
+  background: #171d27;
+  border: 1px solid rgba(255, 255, 255, 0.14);
+  border-radius: 12px;
+  box-shadow: 0 24px 60px rgba(0, 0, 0, 0.48);
+  padding: 6px;
+}
+
+.row-context-item {
+  width: 100%;
+  display: flex;
   align-items: center;
-  justify-content: center;
-  width: 28px;
-  height: 28px;
-  border-radius: 9999px;
-  border: 1px solid rgba(255, 255, 255, 0.16);
-  background: rgba(255, 255, 255, 0.03);
-  color: #b3b3b3;
-  transition:
-    background 120ms ease,
-    border-color 120ms ease,
-    color 120ms ease;
-  position: relative;
-  z-index: 8;
-  pointer-events: auto;
+  gap: 10px;
+  border: none;
+  background: transparent;
+  color: #f2f5fb;
+  text-align: left;
+  border-radius: 8px;
+  padding: 8px 10px;
+  font-size: 13px;
+  cursor: pointer;
 }
 
-.row-refresh-btn .material-icons-round,
-.row-delete-btn .material-icons-round {
-  font-size: 16px;
-}
-
-.row-refresh-btn:hover,
-.row-delete-btn:hover {
+.row-context-item:hover {
   background: rgba(255, 255, 255, 0.08);
-  border-color: rgba(255, 255, 255, 0.34);
-  color: #b3b3b3;
 }
 
-.custom-grid-row:hover .row-checked {
-  display: none;
+.row-context-item .material-icons-round {
+  font-size: 16px;
+  color: #8fe9b4;
 }
 
-.custom-grid-row:hover .row-action-buttons {
-  display: inline-flex;
+.row-context-danger .material-icons-round,
+.row-context-danger {
+  color: #fca5a5;
 }
 
-.custom-grid-row:hover .row-refresh-btn,
-.custom-grid-row:hover .row-delete-btn {
-  display: inline-flex;
+.row-context-separator {
+  height: 1px;
+  background: rgba(255, 255, 255, 0.1);
+  margin: 4px 0;
 }
 
 .content-panel footer {
@@ -1438,17 +1431,17 @@ h3 {
 @media (max-width: 1024px) {
   .meta-grid {
     grid-template-columns:
-      var(--owner-col) var(--playlist-save-col) var(--artist-followers-col)
-      var(--track-views-col) var(--checked-col);
+      var(--owner-col) var(--playlist-owner-col) var(--playlist-save-col)
+      var(--artist-followers-col) var(--track-views-col) var(--checked-col);
     min-width: calc(
-      var(--owner-col) + var(--playlist-save-col) +
+      var(--owner-col) + var(--playlist-owner-col) + var(--playlist-save-col) +
         var(--artist-followers-col) + var(--track-views-col) +
-        var(--checked-col) + (4 * var(--meta-gap))
+        var(--checked-col) + (5 * var(--meta-gap))
     );
   }
-  .meta-grid > :nth-child(3),
   .meta-grid > :nth-child(4),
-  .meta-grid > :nth-child(6) {
+  .meta-grid > :nth-child(5),
+  .meta-grid > :nth-child(7) {
     display: none;
   }
 }

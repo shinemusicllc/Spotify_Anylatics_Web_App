@@ -27,6 +27,7 @@ const GROUP_SELECT_ALL = '__all__';
 const DEFAULT_COLUMN_WIDTHS = Object.freeze({
     asset: 420,
     owner: 160,
+    playlistOwner: 160,
     playlistSaves: 92,
     playlistCount: 92,
     albumCount: 88,
@@ -38,6 +39,7 @@ const DEFAULT_COLUMN_WIDTHS = Object.freeze({
 const MIN_COLUMN_WIDTHS = Object.freeze({
     asset: 320,
     owner: 132,
+    playlistOwner: 132,
     playlistSaves: 84,
     playlistCount: 84,
     albumCount: 80,
@@ -49,6 +51,7 @@ const MIN_COLUMN_WIDTHS = Object.freeze({
 const MAX_COLUMN_WIDTHS = Object.freeze({
     asset: 900,
     owner: 360,
+    playlistOwner: 360,
     playlistSaves: 240,
     playlistCount: 240,
     albumCount: 240,
@@ -60,6 +63,7 @@ const MAX_COLUMN_WIDTHS = Object.freeze({
 const COLUMN_WIDTH_VAR_MAP = Object.freeze({
     asset: '--asset-col',
     owner: '--owner-col',
+    playlistOwner: '--playlist-owner-col',
     playlistSaves: '--playlist-save-col',
     playlistCount: '--playlist-count-col',
     albumCount: '--album-count-col',
@@ -71,6 +75,7 @@ const COLUMN_WIDTH_VAR_MAP = Object.freeze({
 const RESIZABLE_COLUMN_KEYS = Object.freeze([
     'asset',
     'owner',
+    'playlistOwner',
     'playlistSaves',
     'playlistCount',
     'albumCount',
@@ -216,6 +221,8 @@ const state = {
     uiPrefSaveTimer: null,
     remoteSyncTimer: null,
     remoteSyncInFlight: false,
+    contextMenuVisible: false,
+    contextMenuAnchorSelectionKey: null,
 };
 
 // ═══════════════════════════════════════════════════════════════════
@@ -882,6 +889,21 @@ function renderOwnerUpdatedCell(item, ownerUrl, updatedAt) {
                 <div class="list-owner-name">${userName}</div>
                 <div class="list-owner-time text-secondary-text">${safeUpdatedAt}</div>
             </div>
+        </div>
+    `;
+}
+
+function getPlaylistOwnerLabel(item) {
+    if (!item || item.type !== 'playlist') return '-';
+    const owner = normalizeStoredGroupName(item.owner_name || item.playlist_owner || item.playlist_owner_name || '');
+    return owner || '-';
+}
+
+function renderPlaylistOwnerCell(item) {
+    const owner = getPlaylistOwnerLabel(item);
+    return `
+        <div class="meta-cell playlist-owner-cell" title="${escapeHtml(owner)}">
+            <span class="truncate">${escapeHtml(owner)}</span>
         </div>
     `;
 }
@@ -2260,6 +2282,7 @@ function renderRow(item) {
         <!-- Right: Metadata -->
         <div class="meta-grid w-full">
             ${ownerUpdatedCell}
+            ${renderPlaylistOwnerCell(item)}
             <div class="meta-cell">${renderMetricCell(excel.playlistSaves, excel.playlistSavesDelta, excel.deltaDays)}</div>
             <div class="meta-cell">${renderMetricCell(excel.playlistTrackCount, excel.playlistTrackCountDelta, excel.deltaDays)}</div>
             <div class="meta-cell">${renderMetricCell(excel.albumTrackCount, excel.albumTrackCountDelta, excel.deltaDays)}</div>
@@ -2273,14 +2296,6 @@ function renderRow(item) {
                         <span class="status-dot ${status.dot}"></span>
                         <span class="truncate">${status.label}</span>
                     </span>
-                </div>
-                <div class="row-action-buttons">
-                    <button type="button" class="row-refresh-btn" aria-label="Refresh row">
-                        <span class="material-icons-round">refresh</span>
-                    </button>
-                    <button type="button" class="row-delete-btn" aria-label="Delete link">
-                        <span class="material-icons-round">delete</span>
-                    </button>
                 </div>
             </div>
         </div>
@@ -2494,7 +2509,97 @@ function closeImagePreview() {
     if (image) image.src = '';
 }
 
-async function handleDeleteItems(items) {
+function getRowContextMenuElement() {
+    return document.getElementById('row-context-menu');
+}
+
+function hideRowContextMenu() {
+    const menu = getRowContextMenuElement();
+    if (!menu) return;
+    menu.classList.remove('open');
+    menu.style.display = 'none';
+    state.contextMenuVisible = false;
+    state.contextMenuAnchorSelectionKey = null;
+}
+
+function updateRowContextMenuLabels() {
+    const menu = getRowContextMenuElement();
+    if (!menu) return;
+    const selectedCount = getSelectedItems().length;
+    const refreshLabel = menu.querySelector('[data-context-label="refresh"]');
+    const deleteLabel = menu.querySelector('[data-context-label="delete"]');
+    if (refreshLabel) {
+        refreshLabel.textContent = selectedCount > 1
+            ? `Refresh ${selectedCount} selected`
+            : 'Refresh row';
+    }
+    if (deleteLabel) {
+        deleteLabel.textContent = selectedCount > 1
+            ? `Delete ${selectedCount} selected`
+            : 'Delete row';
+    }
+}
+
+function showRowContextMenu(clientX, clientY, row) {
+    const menu = getRowContextMenuElement();
+    if (!menu || !row) return;
+    const item = findItemFromRow(row);
+    if (!item) return;
+
+    const targetSelectionKey = selectionKey(item);
+    if (!state.selectedItemKeys.has(targetSelectionKey)) {
+        state.selectedItemKeys = new Set([targetSelectionKey]);
+        state.selectionAnchorKey = targetSelectionKey;
+        renderList({ preserveScroll: true });
+    }
+    state.contextMenuAnchorSelectionKey = targetSelectionKey;
+    updateRowContextMenuLabels();
+
+    menu.style.display = 'block';
+    menu.classList.add('open');
+    const rect = menu.getBoundingClientRect();
+    const maxX = window.innerWidth - rect.width - 8;
+    const maxY = window.innerHeight - rect.height - 8;
+    const left = Math.max(8, Math.min(clientX, maxX));
+    const top = Math.max(8, Math.min(clientY, maxY));
+    menu.style.left = `${left}px`;
+    menu.style.top = `${top}px`;
+    state.contextMenuVisible = true;
+}
+
+async function executeRowContextMenuAction(action) {
+    if (!action) return;
+    const selectedItems = getSelectedItems();
+    if (action === 'add-link') {
+        openModal();
+        return;
+    }
+    if (action === 'refresh') {
+        if (selectedItems.length >= 2) {
+            await refreshAllItems();
+            return;
+        }
+        if (selectedItems.length === 1) {
+            await handleRefreshItem(selectedItems[0]);
+            return;
+        }
+        showToast('No selected link to refresh', 'info');
+        return;
+    }
+    if (action === 'delete') {
+        if (!selectedItems.length) {
+            showToast('No selected link to delete', 'info');
+            return;
+        }
+        await handleDeleteItems(selectedItems);
+        return;
+    }
+    if (action === 'clear-list') {
+        await clearList();
+    }
+}
+
+async function handleDeleteItems(items, opts = {}) {
     const uniqueMap = new Map();
     (items || []).forEach((item) => {
         if (!item) return;
@@ -2505,6 +2610,13 @@ async function handleDeleteItems(items) {
 
     const deletingMany = targets.length > 1;
     const firstLabel = targets[0].name || `${targets[0].type}:${targets[0].spotify_id}`;
+    const requireConfirm = opts.confirm !== false;
+    if (requireConfirm) {
+        const confirmMessage = deletingMany
+            ? `Delete ${targets.length} selected links?\nThis action cannot be undone.`
+            : `Delete "${firstLabel}"?\nThis action cannot be undone.`;
+        if (!window.confirm(confirmMessage)) return;
+    }
     const targetSelectionKeys = new Set(targets.map((item) => selectionKey(item)));
     const targetIdentitySet = new Set(targets.map((item) => itemIdentity(item)));
     const targetItemIds = new Set(targets.map((item) => String(item.id)).filter(Boolean));
@@ -2644,6 +2756,8 @@ async function clearList() {
         showToast('List is already empty', 'info');
         return;
     }
+    const confirmed = window.confirm('Clear all links in the current scope?\nThis action cannot be undone.');
+    if (!confirmed) return;
 
     state.items = [];
     state.filteredItems = [];
@@ -4401,8 +4515,6 @@ document.addEventListener('DOMContentLoaded', async () => {
             handleRowSelection(item, e);
         });
         listElForDelete.addEventListener('click', (e) => {
-            const btn = e.target.closest('.row-delete-btn');
-            const refreshBtn = e.target.closest('.row-refresh-btn');
             const copyBtn = e.target.closest('[data-action="copy-link"]');
             const previewBtn = e.target.closest('[data-action="preview-image"]');
             if (copyBtn) {
@@ -4417,27 +4529,13 @@ document.addEventListener('DOMContentLoaded', async () => {
                 openImagePreview(previewBtn.getAttribute('data-image-url'));
                 return;
             }
+        });
+        listElForDelete.addEventListener('contextmenu', (e) => {
             const row = e.target.closest('.custom-grid-row');
             if (!row) return;
-            if (!btn && !refreshBtn) {
-                return;
-            }
             e.preventDefault();
             e.stopPropagation();
-            const item = findItemFromRow(row);
-            if (!item) return;
-            if (btn) {
-                const shouldDeleteSelection =
-                    state.selectedItemKeys.size > 1
-                    && state.selectedItemKeys.has(selectionKey(item));
-                if (shouldDeleteSelection) {
-                    handleDeleteItems(getSelectedItems());
-                } else {
-                    handleDeleteItem(item);
-                }
-            } else if (refreshBtn) {
-                handleRefreshItem(item);
-            }
+            showRowContextMenu(e.clientX, e.clientY, row);
         });
         listElForDelete.addEventListener('dragstart', (e) => {
             const row = e.target.closest('.custom-grid-row');
@@ -4445,6 +4543,7 @@ document.addEventListener('DOMContentLoaded', async () => {
                 e.preventDefault();
                 return;
             }
+            hideRowContextMenu();
             const draggedSelectionKey = row.dataset.selectionKey;
             const selectedKeys = state.selectedItemKeys.has(draggedSelectionKey)
                 ? state.filteredItems
@@ -4519,6 +4618,22 @@ document.addEventListener('DOMContentLoaded', async () => {
                 stopDragAutoScroll();
             });
         }
+    }
+
+    const rowContextMenu = getRowContextMenuElement();
+    if (rowContextMenu) {
+        rowContextMenu.addEventListener('click', async (e) => {
+            const actionBtn = e.target.closest('[data-context-action]');
+            if (!actionBtn) return;
+            e.preventDefault();
+            e.stopPropagation();
+            const action = actionBtn.getAttribute('data-context-action');
+            hideRowContextMenu();
+            await executeRowContextMenuAction(action);
+        });
+        rowContextMenu.addEventListener('contextmenu', (e) => {
+            e.preventDefault();
+        });
     }
 
     const imagePreviewModal = document.getElementById('image-preview-modal');
@@ -4596,6 +4711,7 @@ document.addEventListener('DOMContentLoaded', async () => {
     // Keyboard shortcuts
     document.addEventListener('keydown', (e) => {
         if (e.key === 'Escape') {
+            hideRowContextMenu();
             closeModal();
             closeImagePreview();
         }
@@ -4615,6 +4731,11 @@ document.addEventListener('DOMContentLoaded', async () => {
         }
     });
     const handleOutsideSelectionClear = (e) => {
+        const menu = getRowContextMenuElement();
+        if (menu && menu.contains(e.target)) return;
+        if (state.contextMenuVisible && menu && !menu.contains(e.target)) {
+            hideRowContextMenu();
+        }
         if (e.button !== 0) return;
         if (state.currentView !== 'linkchecker') return;
         if (!state.selectedItemKeys.size) return;
@@ -4635,6 +4756,8 @@ document.addEventListener('DOMContentLoaded', async () => {
     };
     // Capture phase avoids clearing selection after row mousedown triggers re-render.
     document.addEventListener('mousedown', handleOutsideSelectionClear, true);
+    window.addEventListener('resize', hideRowContextMenu);
+    document.addEventListener('scroll', hideRowContextMenu, true);
 
     // Sticky header
     initStickyHeader();

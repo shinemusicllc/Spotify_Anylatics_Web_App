@@ -169,6 +169,11 @@
                                 <span class="head-cell-label">User / Updated</span>
                                 <button type="button" class="column-resize-handle" data-col-key="owner" aria-label="Resize Owner / Updated column"></button>
                             </div>
+                            <div class="meta-cell head-cell" data-col-key="playlistOwner">
+                                <button type="button" class="column-resize-handle column-resize-handle-start" data-col-key="playlistOwner" data-resize-edge="start" aria-label="Resize Playlist Owner column from left"></button>
+                                <span class="head-cell-label">Playlist Owner</span>
+                                <button type="button" class="column-resize-handle" data-col-key="playlistOwner" aria-label="Resize Playlist Owner column"></button>
+                            </div>
                             <div class="meta-cell head-cell" data-col-key="playlistSaves">
                                 <button type="button" class="column-resize-handle column-resize-handle-start" data-col-key="playlistSaves" data-resize-edge="start" aria-label="Resize Playlist save column from left"></button>
                                 <span class="head-cell-label">Playlist (Lưu)</span>
@@ -556,6 +561,26 @@
             </div>
         </div>
 
-    <script src="app.js?v=20260311-55"></script>
+        <div id="row-context-menu" class="row-context-menu" style="display:none">
+            <button type="button" class="row-context-item" data-context-action="add-link">
+                <span class="material-icons-round">add</span>
+                <span>Add Link</span>
+            </button>
+            <button type="button" class="row-context-item" data-context-action="refresh">
+                <span class="material-icons-round">refresh</span>
+                <span data-context-label="refresh">Refresh row</span>
+            </button>
+            <button type="button" class="row-context-item row-context-danger" data-context-action="delete">
+                <span class="material-icons-round">delete</span>
+                <span data-context-label="delete">Delete row</span>
+            </button>
+            <div class="row-context-separator"></div>
+            <button type="button" class="row-context-item" data-context-action="clear-list">
+                <span class="material-icons-round">clear_all</span>
+                <span>Clear List</span>
+            </button>
+        </div>
+
+    <script src="app.js?v=20260311-56"></script>
 </body>
 </html>
