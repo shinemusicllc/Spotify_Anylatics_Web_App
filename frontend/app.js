@@ -1188,7 +1188,20 @@ function doesItemMatchGroupEntry(item, groupEntry) {
     const itemParsed = splitLegacyGroupName(item.group);
     if (normalizeStoredGroupName(itemParsed.name) !== normalizeStoredGroupName(groupEntry.name)) return false;
     if (!groupEntry.ownerUserId) return true;
-    return String(item.user_id || itemParsed.ownerUserId || '') === String(groupEntry.ownerUserId);
+    return isItemOwnedByUser(item, groupEntry.ownerUserId);
+}
+
+function isItemOwnedByUser(item, ownerUserId) {
+    const ownerId = ownerUserId ? String(ownerUserId) : '';
+    if (!ownerId) return true;
+    const itemParsed = splitLegacyGroupName(item?.group);
+    const itemOwnerId = String(item?.user_id || itemParsed.ownerUserId || '');
+    if (itemOwnerId) {
+        return itemOwnerId === ownerId;
+    }
+    const currentUser = getAuthUser();
+    // Legacy rows may have null user_id; in admin mode treat them as admin-owned.
+    return Boolean(currentUser?.role === 'admin' && String(currentUser.id || '') === ownerId);
 }
 
 function updateGroupHeader() {
@@ -1497,6 +1510,8 @@ function canManageGroupEntry(groupEntry) {
 }
 
 function rebuildGroups() {
+    const currentUser = getAuthUser();
+    const legacyFallbackOwnerId = currentUser?.role === 'admin' ? String(currentUser.id || '') : null;
     const previousGroups = Array.isArray(state.groups) ? state.groups.slice() : [];
     const previousActiveId = state.activeGroup;
     const previousActiveEntry =
@@ -1509,7 +1524,9 @@ function rebuildGroups() {
         const group = normalizeStoredGroupName(parsedItemGroup.name);
         if (!group) continue;
         if (group.toLowerCase() === ALL_GROUP_ID) continue;
-        const ownerUserId = item.user_id ? String(item.user_id) : (parsedItemGroup.ownerUserId || null);
+        const ownerUserId = item.user_id
+            ? String(item.user_id)
+            : (parsedItemGroup.ownerUserId || legacyFallbackOwnerId || null);
         const entryId = buildGroupEntryId(group, ownerUserId);
         if (!counts.has(entryId)) {
             encountered.push({
@@ -1859,7 +1876,7 @@ function handleDeleteGroup(rawGroupId) {
     state.items = state.items.map((item) => {
         const itemGroup = normalizeStoredGroupName(item.group);
         if (!itemGroup || itemGroup.toLowerCase() !== groupKey) return item;
-        if (target?.ownerUserId && String(item.user_id || '') !== String(target.ownerUserId)) return item;
+        if (target?.ownerUserId && !isItemOwnedByUser(item, target.ownerUserId)) return item;
         return { ...item, group: null };
     });
     syncGroupItemsToServer(target?.name || groupName, '', ownerUserId || null);
@@ -1993,7 +2010,7 @@ function handleRenameGroup(rawGroupId, rawName, opts = {}) {
         state.items = state.items.map((item) => {
             const itemGroup = normalizeStoredGroupName(item.group);
             if (itemGroup.toLowerCase() !== oldKey) return item;
-            if (target?.ownerUserId && String(item.user_id || '') !== String(target.ownerUserId)) return item;
+            if (target?.ownerUserId && !isItemOwnedByUser(item, target.ownerUserId)) return item;
             return { ...item, group: nextName };
         });
 

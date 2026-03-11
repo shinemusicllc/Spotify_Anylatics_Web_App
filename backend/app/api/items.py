@@ -4,7 +4,7 @@ from collections import defaultdict
 import uuid
 
 from fastapi import APIRouter, Depends, HTTPException, Query
-from sqlalchemy import delete, func, select, update
+from sqlalchemy import delete, func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.database import get_db
@@ -122,6 +122,20 @@ def _build_album_export_tracks(raw_data: dict | None) -> list[dict]:
         )
 
     return export_rows
+
+
+def _normalize_group_name(value: str | None) -> str:
+    text = (value or "").strip()
+    if not text:
+        return ""
+    if "::" in text:
+        maybe_owner, possible_name = text.split("::", 1)
+        try:
+            uuid.UUID(maybe_owner.strip())
+            text = possible_name.strip()
+        except ValueError:
+            pass
+    return text.lower()
 
 
 def _format_added_date(value) -> str | None:
@@ -395,6 +409,7 @@ async def rename_group(
     if not old_clean:
         raise HTTPException(status_code=400, detail="old_group is required")
     next_group = new_clean or None
+    old_norm = _normalize_group_name(old_clean)
 
     target_user_id = current_user.id
     if current_user.role == "admin" and user_id:
@@ -403,18 +418,29 @@ async def rename_group(
         except ValueError as exc:
             raise HTTPException(status_code=400, detail="Invalid user_id") from exc
 
-    stmt = (
-        update(Item)
-        .where(Item.user_id == target_user_id)
-        .where(func.lower(Item.group) == old_clean.lower())
-        .values(group=next_group)
-    )
-    result = await db.execute(stmt)
+    query = select(Item).where(Item.group.is_not(None))
+    if current_user.role == "admin":
+        if str(target_user_id) == str(current_user.id):
+            # Legacy admin rows may still have null user_id.
+            query = query.where(or_(Item.user_id == target_user_id, Item.user_id.is_(None)))
+        else:
+            query = query.where(Item.user_id == target_user_id)
+    else:
+        query = query.where(Item.user_id == target_user_id)
+
+    items = (await db.execute(query)).scalars().all()
+    updated = 0
+    for item in items:
+        if _normalize_group_name(item.group) != old_norm:
+            continue
+        item.group = next_group
+        updated += 1
+
     await db.commit()
 
     return {
         "ok": True,
-        "updated": int(result.rowcount or 0),
+        "updated": int(updated),
         "old_group": old_clean,
         "new_group": next_group,
     }
