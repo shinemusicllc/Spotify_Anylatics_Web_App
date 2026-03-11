@@ -893,15 +893,23 @@ function applyPersistedItemOrder(items) {
 
     const indexByKey = new Map(order.map((key, idx) => [key, idx]));
     return list.sort((a, b) => {
-        const aIdx = indexByKey.has(itemKey(a)) ? indexByKey.get(itemKey(a)) : Number.MAX_SAFE_INTEGER;
-        const bIdx = indexByKey.has(itemKey(b)) ? indexByKey.get(itemKey(b)) : Number.MAX_SAFE_INTEGER;
+        const aSelectionKey = selectionKey(a);
+        const bSelectionKey = selectionKey(b);
+        const aLegacyKey = itemKey(a);
+        const bLegacyKey = itemKey(b);
+        const aIdx = indexByKey.has(aSelectionKey)
+            ? indexByKey.get(aSelectionKey)
+            : (indexByKey.has(aLegacyKey) ? indexByKey.get(aLegacyKey) : Number.MAX_SAFE_INTEGER);
+        const bIdx = indexByKey.has(bSelectionKey)
+            ? indexByKey.get(bSelectionKey)
+            : (indexByKey.has(bLegacyKey) ? indexByKey.get(bLegacyKey) : Number.MAX_SAFE_INTEGER);
         if (aIdx !== bIdx) return aIdx - bIdx;
         return 0;
     });
 }
 
 function persistCurrentItemOrder() {
-    savePersistedRowOrder(state.items.map((item) => itemKey(item)));
+    savePersistedRowOrder(state.items.map((item) => selectionKey(item)));
 }
 
 function syncSelectedItemsWithState() {
@@ -918,23 +926,30 @@ function mergeItemsKeepOrder(existingItems, incomingItems) {
     const existing = Array.isArray(existingItems) ? existingItems : [];
     const incoming = Array.isArray(incomingItems) ? incomingItems : [];
 
-    const incomingByKey = new Map();
-    incoming.forEach((it) => incomingByKey.set(itemKey(it), it));
+    const incomingBySelectionKey = new Map();
+    incoming.forEach((it) => {
+        const key = selectionKey(it);
+        if (!incomingBySelectionKey.has(key)) {
+            incomingBySelectionKey.set(key, []);
+        }
+        incomingBySelectionKey.get(key).push(it);
+    });
 
     const merged = [];
     for (const oldItem of existing) {
-        const k = itemKey(oldItem);
-        if (!incomingByKey.has(k)) continue;
-        merged.push({ ...oldItem, ...incomingByKey.get(k) });
-        incomingByKey.delete(k);
+        const key = selectionKey(oldItem);
+        const queue = incomingBySelectionKey.get(key);
+        if (!queue || !queue.length) continue;
+        const next = queue.shift();
+        merged.push({ ...oldItem, ...next });
+        if (!queue.length) {
+            incomingBySelectionKey.delete(key);
+        }
     }
 
-    for (const it of incoming) {
-        const k = itemKey(it);
-        if (!incomingByKey.has(k)) continue;
-        merged.push(it);
-        incomingByKey.delete(k);
-    }
+    incomingBySelectionKey.forEach((queue) => {
+        queue.forEach((it) => merged.push(it));
+    });
 
     return merged;
 }
@@ -1197,6 +1212,30 @@ function getSelectedItems() {
     return state.items.filter((item) => state.selectedItemKeys.has(selectionKey(item)));
 }
 
+function findItemFromRow(row) {
+    if (!row) return null;
+    const rowSelectionKey = row.dataset.selectionKey;
+    if (rowSelectionKey) {
+        const bySelectionKey = state.items.find((item) => selectionKey(item) === rowSelectionKey);
+        if (bySelectionKey) return bySelectionKey;
+    }
+
+    const rowItemId = row.dataset.itemId;
+    if (rowItemId && rowItemId !== 'undefined' && rowItemId !== 'null') {
+        const byId = state.items.find((item) => String(item.id) === String(rowItemId));
+        if (byId) return byId;
+    }
+
+    const rowType = row.dataset.type;
+    const rowSpotifyId = row.dataset.spotifyId;
+    const rowUserId = String(row.dataset.userId || '');
+    return state.items.find((item) => (
+        item.type === rowType
+        && item.spotify_id === rowSpotifyId
+        && String(item.user_id || '') === rowUserId
+    )) || null;
+}
+
 function getVisibleItems() {
     let items = state.items;
 
@@ -1257,11 +1296,11 @@ function moveItemsByKeys(draggedKeys, targetKey, placement = 'before') {
     const draggedSet = new Set((draggedKeys || []).filter(Boolean));
     if (!draggedSet.size || !targetKey || draggedSet.has(targetKey)) return false;
 
-    const draggedItems = state.items.filter((item) => draggedSet.has(itemKey(item)));
+    const draggedItems = state.items.filter((item) => draggedSet.has(selectionKey(item)));
     if (!draggedItems.length) return false;
 
-    const remaining = state.items.filter((item) => !draggedSet.has(itemKey(item)));
-    const targetIndex = remaining.findIndex((item) => itemKey(item) === targetKey);
+    const remaining = state.items.filter((item) => !draggedSet.has(selectionKey(item)));
+    const targetIndex = remaining.findIndex((item) => selectionKey(item) === targetKey);
     if (targetIndex === -1) return false;
 
     const insertIndex = placement === 'after' ? targetIndex + 1 : targetIndex;
@@ -1309,7 +1348,7 @@ function syncRowDragUi(container) {
     const host = container || document.getElementById('link-list');
     if (!host) return;
     host.querySelectorAll('.custom-grid-row').forEach((row) => {
-        const key = row.dataset.itemKey;
+        const key = row.dataset.selectionKey;
         const isDragging = state.draggingRowKeys.includes(key);
         row.classList.toggle('row-dragging', isDragging);
         const isDropTarget = Boolean(state.dragOverRowKey && state.dragOverRowKey === key && !state.draggingRowKeys.includes(key));
@@ -2155,8 +2194,8 @@ function renderRow(item) {
     const key = itemKey(item);
     const rowSelectionKey = selectionKey(item);
     const isSelected = state.selectedItemKeys.has(rowSelectionKey);
-    const isDragging = state.draggingRowKeys.includes(key);
-    const isDropTarget = state.dragOverRowKey === key && !isDragging;
+    const isDragging = state.draggingRowKeys.includes(rowSelectionKey);
+    const isDropTarget = state.dragOverRowKey === rowSelectionKey && !isDragging;
 
     const isDropBefore = isDropTarget && state.dragOverRowPlacement !== 'after';
     const isDropAfter = isDropTarget && state.dragOverRowPlacement === 'after';
@@ -4332,14 +4371,7 @@ document.addEventListener('DOMContentLoaded', async () => {
                 && state.selectedItemKeys.size > 1
                 && state.selectedItemKeys.has(rowSelectionKey);
             if (keepMultiSelection) return;
-            const item = state.items.find((i) =>
-                String(i.id) === String(row.dataset.itemId)
-                || (
-                    i.type === row.dataset.type
-                    && i.spotify_id === row.dataset.spotifyId
-                    && String(i.user_id || '') === String(row.dataset.userId || '')
-                )
-            );
+            const item = findItemFromRow(row);
             if (!item) return;
             handleRowSelection(item, e);
         });
@@ -4367,14 +4399,7 @@ document.addEventListener('DOMContentLoaded', async () => {
             }
             e.preventDefault();
             e.stopPropagation();
-            const item = state.items.find((i) =>
-                String(i.id) === String(row.dataset.itemId)
-                || (
-                    i.type === row.dataset.type
-                    && i.spotify_id === row.dataset.spotifyId
-                    && String(i.user_id || '') === String(row.dataset.userId || '')
-                )
-            );
+            const item = findItemFromRow(row);
             if (!item) return;
             if (btn) {
                 const shouldDeleteSelection =
@@ -4395,20 +4420,19 @@ document.addEventListener('DOMContentLoaded', async () => {
                 e.preventDefault();
                 return;
             }
-            const draggedKey = row.dataset.itemKey;
             const draggedSelectionKey = row.dataset.selectionKey;
             const selectedKeys = state.selectedItemKeys.has(draggedSelectionKey)
                 ? state.filteredItems
                     .filter((item) => state.selectedItemKeys.has(selectionKey(item)))
-                    .map((item) => itemKey(item))
-                : [draggedKey];
+                    .map((item) => selectionKey(item))
+                : [draggedSelectionKey];
             state.draggingRowKeys = selectedKeys;
-            state.dragOverRowKey = draggedKey;
+            state.dragOverRowKey = draggedSelectionKey;
             state.dragOverRowPlacement = 'before';
             state.suppressNextRowClick = true;
             if (e.dataTransfer) {
                 e.dataTransfer.effectAllowed = 'move';
-                e.dataTransfer.setData('text/plain', draggedKey);
+                e.dataTransfer.setData('text/plain', draggedSelectionKey);
             }
             syncRowDragUi(listElForDelete);
         });
@@ -4417,7 +4441,7 @@ document.addEventListener('DOMContentLoaded', async () => {
             if (!state.draggingRowKeys.length) return;
             updateDragAutoScroll(listScrollWrap, e.clientY);
             if (!row) return;
-            const targetKey = row.dataset.itemKey;
+            const targetKey = row.dataset.selectionKey;
             if (!targetKey) return;
             e.preventDefault();
             const rect = row.getBoundingClientRect();
@@ -4432,7 +4456,7 @@ document.addEventListener('DOMContentLoaded', async () => {
             if (!row || !state.draggingRowKeys.length) return;
             e.preventDefault();
             stopDragAutoScroll();
-            const moved = moveItemsByKeys(state.draggingRowKeys, row.dataset.itemKey, state.dragOverRowPlacement);
+            const moved = moveItemsByKeys(state.draggingRowKeys, row.dataset.selectionKey, state.dragOverRowPlacement);
             state.draggingRowKeys = [];
             state.dragOverRowKey = null;
             state.dragOverRowPlacement = 'before';
@@ -4577,6 +4601,8 @@ document.addEventListener('DOMContentLoaded', async () => {
             node
             && node.classList
             && node.classList.contains('custom-grid-row')
+            && node.closest
+            && node.closest('#link-list')
         ));
         if (clickedInsideRow) return;
         clearRowSelection();
