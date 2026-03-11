@@ -4075,7 +4075,15 @@ async function adminDeleteUser(userId, username) {
             method: 'DELETE',
             headers: { 'Authorization': 'Bearer ' + token },
         });
-        var data = await res.json();
+        var raw = await res.text();
+        var data = {};
+        if (raw) {
+            try {
+                data = JSON.parse(raw);
+            } catch {
+                data = { detail: raw };
+            }
+        }
         if (!res.ok) throw new Error(data.detail || 'Failed to delete user');
         showToast('User ' + username + ' deleted permanently', 'success');
         await loadAdminUsers({ force: true });

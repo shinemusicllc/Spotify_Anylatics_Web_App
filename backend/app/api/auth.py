@@ -11,6 +11,7 @@ from app.database import get_db
 from app.models.user import User
 from app.models.item import Item
 from app.models.crawl_job import CrawlJob
+from app.models.metrics_snapshot import MetricsSnapshot
 from app.schemas.auth import (
     RegisterRequest,
     LoginRequest,
@@ -480,12 +481,26 @@ async def admin_delete_user(
 
     username = user.username
 
-    # Delete crawl jobs belonging to user
-    await db.execute(delete(CrawlJob).where(CrawlJob.user_id == user_id))
-    # Delete items belonging to user
-    await db.execute(delete(Item).where(Item.user_id == user_id))
-    # Delete the user
-    await db.execute(delete(User).where(User.id == user_id))
-    await db.flush()
+    try:
+        # Resolve all item ids first so dependent tables can be cleaned safely.
+        item_rows = (
+            await db.execute(select(Item.id).where(Item.user_id == user_id))
+        ).all()
+        item_ids = [row[0] for row in item_rows]
+
+        if item_ids:
+            await db.execute(delete(MetricsSnapshot).where(MetricsSnapshot.item_id.in_(item_ids)))
+            await db.execute(delete(CrawlJob).where(CrawlJob.item_id.in_(item_ids)))
+
+        # Delete crawl jobs belonging to user
+        await db.execute(delete(CrawlJob).where(CrawlJob.user_id == user_id))
+        # Delete items belonging to user
+        await db.execute(delete(Item).where(Item.user_id == user_id))
+        # Delete the user
+        await db.execute(delete(User).where(User.id == user_id))
+        await db.flush()
+    except Exception as exc:  # pragma: no cover - defensive safety path
+        await db.rollback()
+        raise HTTPException(status_code=500, detail=f"Failed to delete user: {exc}") from exc
 
     return {"ok": True, "message": f"User {username} and all their data deleted"}
