@@ -223,6 +223,8 @@ const state = {
     remoteSyncInFlight: false,
     contextMenuVisible: false,
     contextMenuAnchorSelectionKey: null,
+    exportInProgress: false,
+    exportLabel: '',
 };
 
 // ═══════════════════════════════════════════════════════════════════
@@ -233,10 +235,13 @@ class SpotiCheckAPI {
         this.base = baseUrl;
     }
 
-    async _fetch(path, opts = {}) {
+    async _fetchRaw(path, opts = {}) {
         try {
             const token = getAuthToken();
-            const headers = { 'Content-Type': 'application/json', ...opts.headers };
+            const headers = { ...opts.headers };
+            if (opts.body && !headers['Content-Type']) {
+                headers['Content-Type'] = 'application/json';
+            }
             if (token) {
                 headers['Authorization'] = `Bearer ${token}`;
             }
@@ -249,10 +254,14 @@ class SpotiCheckAPI {
                 return;
             }
             if (!res.ok) {
-                const err = await res.json().catch(() => ({}));
-                throw new Error(err.detail || `HTTP ${res.status}`);
+                const errPayload = await res.clone().json().catch(() => null);
+                const errDetail = errPayload?.detail
+                    || errPayload?.message
+                    || (await res.text().catch(() => ''))
+                    || `HTTP ${res.status}`;
+                throw new Error(errDetail);
             }
-            return res.json();
+            return res;
         } catch (e) {
             if (e.message?.includes('Failed to fetch') || e.message?.includes('NetworkError')) {
                 state.apiOnline = false;
@@ -261,6 +270,13 @@ class SpotiCheckAPI {
             throw e;
         }
     }
+
+    async _fetch(path, opts = {}) {
+        const res = await this._fetchRaw(path, opts);
+        if (!res) return;
+        return res.json();
+    }
+
     health()              { return this._fetch('/health'); }
     getItems(params = {}) {
         const qs = new URLSearchParams();
@@ -316,6 +332,30 @@ class SpotiCheckAPI {
                 group,
                 target_user_id: targetUserId || null,
                 item_ids: Array.isArray(itemIds) ? itemIds : null,
+            }),
+        });
+    }
+
+    exportRows(action, itemIds = [], deepFetch = false) {
+        return this._fetch('/items/export', {
+            method: 'POST',
+            body: JSON.stringify({
+                action,
+                format: 'json',
+                item_ids: Array.isArray(itemIds) ? itemIds : [],
+                deep_fetch: Boolean(deepFetch),
+            }),
+        });
+    }
+
+    exportFile(action, format, itemIds = [], deepFetch = false) {
+        return this._fetchRaw('/items/export', {
+            method: 'POST',
+            body: JSON.stringify({
+                action,
+                format,
+                item_ids: Array.isArray(itemIds) ? itemIds : [],
+                deep_fetch: Boolean(deepFetch),
             }),
         });
     }
@@ -899,11 +939,40 @@ function getPlaylistOwnerLabel(item) {
     return owner || '-';
 }
 
+function getPlaylistOwnerAvatar(item) {
+    if (!item || item.type !== 'playlist') return null;
+    return item.owner_image || item.playlist_owner_image || null;
+}
+
 function renderPlaylistOwnerCell(item) {
     const owner = getPlaylistOwnerLabel(item);
+    if (!item || item.type !== 'playlist' || owner === '-') {
+        return `
+            <div class="meta-cell playlist-owner-cell playlist-owner-cell-empty" title="-">
+                <span class="playlist-owner-empty">-</span>
+            </div>
+        `;
+    }
+
+    const ownerAvatarUrl = getPlaylistOwnerAvatar(item);
+    const ownerAvatarLabel = escapeHtml((owner || 'PO').slice(0, 2).toUpperCase());
+    const ownerUrl = item.owner_url
+        || item.playlist_owner_url
+        || item.owner_link
+        || `https://open.spotify.com/search/${encodeURIComponent(owner)}`;
+    const ownerContent = ownerUrl
+        ? `<a class="list-title-link playlist-owner-link" href="${escapeHtml(ownerUrl)}" target="_blank" rel="noopener noreferrer">${escapeHtml(owner)}</a>`
+        : escapeHtml(owner);
+    const ownerAvatar = ownerAvatarUrl
+        ? `<img alt="Playlist owner" class="list-owner-avatar playlist-owner-avatar" src="${ownerAvatarUrl}">`
+        : `<div class="list-owner-avatar list-owner-fallback playlist-owner-avatar">${ownerAvatarLabel}</div>`;
+
     return `
         <div class="meta-cell playlist-owner-cell" title="${escapeHtml(owner)}">
-            <span class="truncate">${escapeHtml(owner)}</span>
+            ${ownerAvatar}
+            <div class="list-owner-meta">
+                <div class="list-owner-name">${ownerContent}</div>
+            </div>
         </div>
     `;
 }
@@ -2509,6 +2578,354 @@ function closeImagePreview() {
     if (image) image.src = '';
 }
 
+function cleanExportText(value) {
+    if (value == null) return '';
+    return String(value).replace(/\r?\n/g, ' ').trim();
+}
+
+function csvEscapeCell(value) {
+    const text = cleanExportText(value);
+    if (/["\r\n,]/.test(text)) {
+        return `"${text.replace(/"/g, '""')}"`;
+    }
+    return text;
+}
+
+function buildExportFileName(prefix, extension) {
+    const now = new Date();
+    const stamp = [
+        now.getFullYear(),
+        String(now.getMonth() + 1).padStart(2, '0'),
+        String(now.getDate()).padStart(2, '0'),
+        '-',
+        String(now.getHours()).padStart(2, '0'),
+        String(now.getMinutes()).padStart(2, '0'),
+        String(now.getSeconds()).padStart(2, '0'),
+    ].join('');
+    return `${prefix}-${stamp}.${extension}`;
+}
+
+function getExportProgressElement() {
+    return document.getElementById('export-progress-indicator');
+}
+
+function setExportInProgress(active, label = '') {
+    state.exportInProgress = Boolean(active);
+    state.exportLabel = label || '';
+
+    const indicator = getExportProgressElement();
+    if (!indicator) return;
+    const textEl = indicator.querySelector('[data-export-progress-text]');
+    if (textEl) {
+        textEl.textContent = state.exportLabel || 'Exporting data...';
+    }
+    indicator.classList.toggle('open', state.exportInProgress);
+    indicator.setAttribute('aria-hidden', state.exportInProgress ? 'false' : 'true');
+    if (state.contextMenuVisible) {
+        updateRowContextMenuLabels();
+    }
+}
+
+function parseResponseFilename(response, fallbackName) {
+    const contentDisposition = response?.headers?.get?.('Content-Disposition') || '';
+    if (!contentDisposition) return fallbackName;
+    const utfMatch = contentDisposition.match(/filename\*=UTF-8''([^;]+)/i);
+    if (utfMatch?.[1]) {
+        try {
+            return decodeURIComponent(utfMatch[1].trim());
+        } catch {
+            return utfMatch[1].trim();
+        }
+    }
+    const plainMatch = contentDisposition.match(/filename="?([^\";]+)"?/i);
+    if (plainMatch?.[1]) {
+        return plainMatch[1].trim();
+    }
+    return fallbackName;
+}
+
+async function downloadResponseAsFile(response, fallbackName) {
+    const blob = await response.blob();
+    const objectUrl = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = objectUrl;
+    a.download = parseResponseFilename(response, fallbackName);
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    setTimeout(() => URL.revokeObjectURL(objectUrl), 0);
+}
+
+function downloadTextFile(content, fileName, mimeType = 'text/plain;charset=utf-8') {
+    const blob = new Blob([content], { type: mimeType });
+    const objectUrl = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = objectUrl;
+    a.download = fileName;
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    setTimeout(() => URL.revokeObjectURL(objectUrl), 0);
+}
+
+function getItemArtistsLabel(item) {
+    const artists = Array.isArray(item?.artist_names)
+        ? item.artist_names.map((name) => cleanExportText(name)).filter(Boolean)
+        : [];
+    if (artists.length) return artists.join(', ');
+    const owner = cleanExportText(item?.owner_name || item?.playlist_owner || item?.playlist_owner_name || '');
+    return owner || '';
+}
+
+function getItemSpotifyUrlForExport(item) {
+    if (!item) return '';
+    return cleanExportText(item.spotify_url || getSpotifyUrl(item.type, item.spotify_id));
+}
+
+function getContextActionItems(opts = {}) {
+    const selected = getSelectedItems();
+    if (selected.length) return selected;
+    const fallbackToVisible = opts.fallbackToVisible === true;
+    if (fallbackToVisible) {
+        return getVisibleItems();
+    }
+    return [];
+}
+
+function buildListViewExportRows(items) {
+    return (items || []).map((item) => {
+        const excel = getExcelColumnValues(item);
+        return [
+            cleanExportText(item.type || ''),
+            cleanExportText(item.name || ''),
+            getItemSpotifyUrlForExport(item),
+            cleanExportText(item.group || ''),
+            cleanExportText(getItemUserName(item)),
+            cleanExportText(getPlaylistOwnerLabel(item) === '-' ? '' : getPlaylistOwnerLabel(item)),
+            excel.playlistSaves ?? '',
+            excel.playlistTrackCount ?? '',
+            excel.albumTrackCount ?? '',
+            excel.artistFollowers ?? '',
+            excel.artistListeners ?? '',
+            excel.trackViews ?? '',
+            cleanExportText(formatUpdatedAt(item.last_checked || item.created_at || '')),
+        ];
+    });
+}
+
+function buildPlaylistType3ExportRows(items) {
+    return (items || [])
+        .filter((item) => item?.type === 'playlist')
+        .map((item) => {
+            const artists = getItemArtistsLabel(item) || '-';
+            const trackName = cleanExportText(item.name || '-');
+            const spotifyLink = getItemSpotifyUrlForExport(item);
+            const trackPlayCount = item.playcount ?? item.followers ?? item.saves ?? '';
+            return [
+                `${artists} - ${trackName}`,
+                spotifyLink,
+                trackPlayCount === '' ? '' : formatDetailedMetric(trackPlayCount),
+            ];
+        });
+}
+
+function buildAlbumType0ExportRows(items) {
+    const rows = [];
+    (items || [])
+        .filter((item) => item?.type === 'album')
+        .forEach((item) => {
+            const albumName = cleanExportText(item.name || '-');
+            const tracks = Array.isArray(item.export_tracks) ? item.export_tracks : [];
+            if (tracks.length) {
+                tracks.forEach((track, index) => {
+                    rows.push([
+                        albumName,
+                        String(index + 1),
+                        cleanExportText(track.track_name || '-'),
+                        cleanExportText(track.spotify_url || ''),
+                        '',
+                    ]);
+                });
+                return;
+            }
+            rows.push([
+                albumName,
+                '1',
+                cleanExportText(item.name || '-'),
+                getItemSpotifyUrlForExport(item),
+                item.playcount == null ? '' : formatDetailedMetric(item.playcount),
+            ]);
+        });
+    return rows;
+}
+
+function buildTrackOfflineExportRows(items) {
+    return (items || [])
+        .filter((item) => item?.type === 'track')
+        .map((item) => {
+            const artists = getItemArtistsLabel(item) || '-';
+            const trackName = cleanExportText(item.name || '-');
+            const spotifyLink = getItemSpotifyUrlForExport(item);
+            const playCount = item.playcount == null ? '' : formatDetailedMetric(item.playcount);
+            const firstArtistListenPerMonthCount = item.monthly_listeners == null
+                ? ''
+                : formatDetailedMetric(item.monthly_listeners);
+            return [
+                `${artists} - ${trackName}`,
+                spotifyLink,
+                playCount,
+                firstArtistListenPerMonthCount,
+            ];
+        });
+}
+
+function rowsToDelimitedText(rows, delimiter = '\t') {
+    return rows
+        .map((row) => row.map((cell) => cleanExportText(cell)).join(delimiter))
+        .join('\r\n');
+}
+
+function buildCsvContent(headers, rows) {
+    const lines = [];
+    if (Array.isArray(headers) && headers.length) {
+        lines.push(headers.map((h) => csvEscapeCell(h)).join(','));
+    }
+    (rows || []).forEach((row) => {
+        lines.push((row || []).map((cell) => csvEscapeCell(cell)).join(','));
+    });
+    return `\uFEFF${lines.join('\r\n')}`;
+}
+
+function getStructuredExportRows(action, items) {
+    if (action.endsWith('playlist-type3')) {
+        return {
+            rows: buildPlaylistType3ExportRows(items),
+            filePrefix: 'spoticheck-playlist-type3',
+            title: 'playlist',
+        };
+    }
+    if (action.endsWith('album-type0')) {
+        return {
+            rows: buildAlbumType0ExportRows(items),
+            filePrefix: 'spoticheck-album-type0',
+            title: 'album',
+        };
+    }
+    if (action.endsWith('track-offline')) {
+        return {
+            rows: buildTrackOfflineExportRows(items),
+            filePrefix: 'spoticheck-track-offline',
+            title: 'track offline',
+        };
+    }
+    return { rows: [], filePrefix: 'spoticheck-export', title: 'export' };
+}
+
+async function runStructuredExport(action, items, destination) {
+    const payload = getStructuredExportRows(action, items);
+    if (!payload.rows.length) {
+        showToast('Không có dữ liệu phù hợp cho kiểu xuất này', 'info');
+        return;
+    }
+    const text = rowsToDelimitedText(payload.rows, '\t');
+    if (destination === 'clipboard') {
+        await copyToClipboard(text, `Copied ${payload.rows.length} ${payload.title} lines`);
+        return;
+    }
+    const fileName = buildExportFileName(payload.filePrefix, 'txt');
+    downloadTextFile(text, fileName, 'text/plain;charset=utf-8');
+    showToast(`Exported ${payload.rows.length} ${payload.title} lines`, 'success');
+}
+
+function mapContextActionToExportRequest(action) {
+    if (action === 'export-listview-excel') {
+        return { exportAction: 'listview-excel', format: 'xlsx', deepFetch: false };
+    }
+    if (action === 'clipboard-playlist-type3') {
+        return { exportAction: 'playlist-type3', format: 'json', deepFetch: true };
+    }
+    if (action === 'clipboard-album-type0') {
+        return { exportAction: 'album-type0', format: 'json', deepFetch: true };
+    }
+    if (action === 'clipboard-track-offline') {
+        return { exportAction: 'track-offline', format: 'json', deepFetch: false };
+    }
+    if (action === 'txt-playlist-type3') {
+        return { exportAction: 'playlist-type3', format: 'txt', deepFetch: true };
+    }
+    if (action === 'txt-album-type0') {
+        return { exportAction: 'album-type0', format: 'txt', deepFetch: true };
+    }
+    if (action === 'txt-track-offline') {
+        return { exportAction: 'track-offline', format: 'txt', deepFetch: false };
+    }
+    return null;
+}
+
+function getStableItemIdsForExport(items) {
+    return (items || [])
+        .filter((item) => item && item.id && !String(item.id).startsWith('temp-'))
+        .map((item) => String(item.id));
+}
+
+async function runServerExport(contextAction, selectedItems) {
+    const request = mapContextActionToExportRequest(contextAction);
+    if (!request) return false;
+
+    const stableItemIds = getStableItemIdsForExport(selectedItems);
+    if (!stableItemIds.length) {
+        showToast('No completed rows selected for export', 'info');
+        return true;
+    }
+
+    const selectedCount = selectedItems.length;
+    if (stableItemIds.length < selectedCount) {
+        showToast(`Skipping ${selectedCount - stableItemIds.length} row(s) still crawling`, 'info');
+    }
+
+    const confirmText = `Export ${stableItemIds.length} selected row(s)?`;
+    if (!window.confirm(confirmText)) {
+        return true;
+    }
+
+    setExportInProgress(true, 'Exporting data...');
+    try {
+        if (request.format === 'json') {
+            const payload = await api.exportRows(request.exportAction, stableItemIds, request.deepFetch);
+            const rows = Array.isArray(payload?.rows) ? payload.rows : [];
+            if (!rows.length) {
+                showToast('No data available for this export mode', 'info');
+                return true;
+            }
+            const text = rowsToDelimitedText(rows, '\t');
+            await copyToClipboard(text, `Copied ${rows.length} line(s)`);
+            return true;
+        }
+
+        const response = await api.exportFile(
+            request.exportAction,
+            request.format,
+            stableItemIds,
+            request.deepFetch
+        );
+        if (!response) {
+            throw new Error('Export request did not return a response');
+        }
+        const fallbackName = buildExportFileName(
+            request.exportAction === 'listview-excel' ? 'spoticheck-listview' : `spoticheck-${request.exportAction}`,
+            request.format
+        );
+        await downloadResponseAsFile(response, fallbackName);
+        showToast('Export completed', 'success');
+        return true;
+    } catch (err) {
+        console.warn('[Export] Server export failed, fallback to local formatter:', err);
+        return false;
+    } finally {
+        setExportInProgress(false);
+    }
+}
+
 function getRowContextMenuElement() {
     return document.getElementById('row-context-menu');
 }
@@ -2522,22 +2939,73 @@ function hideRowContextMenu() {
     state.contextMenuAnchorSelectionKey = null;
 }
 
+function setContextActionDisabled(menu, action, disabled) {
+    menu.querySelectorAll(`[data-context-action="${action}"]`).forEach((btn) => {
+        btn.disabled = disabled;
+        btn.classList.toggle('is-disabled', disabled);
+    });
+}
+
+function syncRowContextSubmenuDirection(menu) {
+    if (!menu) return;
+    const viewportPadding = 8;
+    const menuRect = menu.getBoundingClientRect();
+    menu.querySelectorAll('.row-context-parent').forEach((parent) => {
+        parent.classList.remove('submenu-flip', 'submenu-up');
+        const submenu = parent.querySelector('.row-context-submenu');
+        if (!submenu) return;
+        const parentRect = parent.getBoundingClientRect();
+        const projectedRight = menuRect.right + submenu.offsetWidth + 12;
+        if (projectedRight > (window.innerWidth - viewportPadding)) {
+            parent.classList.add('submenu-flip');
+        }
+        const projectedBottom = parentRect.top - 6 + submenu.offsetHeight;
+        if (projectedBottom > (window.innerHeight - viewportPadding)) {
+            parent.classList.add('submenu-up');
+        }
+    });
+}
+
 function updateRowContextMenuLabels() {
     const menu = getRowContextMenuElement();
     if (!menu) return;
     const selectedCount = getSelectedItems().length;
-    const refreshLabel = menu.querySelector('[data-context-label="refresh"]');
-    const deleteLabel = menu.querySelector('[data-context-label="delete"]');
-    if (refreshLabel) {
-        refreshLabel.textContent = selectedCount > 1
+    const fetchLabels = menu.querySelectorAll('[data-context-label="fetch"]');
+    const deleteLabels = menu.querySelectorAll('[data-context-label="delete"]');
+    const exportLabels = menu.querySelectorAll('[data-context-label="export-list"]');
+    const hasSelection = selectedCount > 0;
+    fetchLabels.forEach((label) => {
+        label.textContent = selectedCount > 1
             ? `Refresh ${selectedCount} selected`
             : 'Refresh row';
-    }
-    if (deleteLabel) {
-        deleteLabel.textContent = selectedCount > 1
+    });
+    deleteLabels.forEach((label) => {
+        label.textContent = selectedCount > 1
             ? `Delete ${selectedCount} selected`
             : 'Delete row';
-    }
+    });
+    exportLabels.forEach((label) => {
+        label.textContent = selectedCount > 1
+            ? `Export ListView to Excel (${selectedCount})`
+            : 'Export ListView to Excel';
+    });
+
+    const disableForExport = state.exportInProgress;
+    [
+        'delete-selected',
+        'fetch-selected',
+        'export-listview-excel',
+        'clipboard-playlist-type3',
+        'clipboard-album-type0',
+        'clipboard-track-offline',
+        'txt-playlist-type3',
+        'txt-album-type0',
+        'txt-track-offline',
+    ].forEach((action) => setContextActionDisabled(menu, action, !hasSelection || disableForExport));
+
+    menu.querySelectorAll('[data-context-group]').forEach((groupEl) => {
+        groupEl.classList.toggle('is-disabled', !hasSelection || disableForExport);
+    });
 }
 
 function showRowContextMenu(clientX, clientY, row) {
@@ -2564,41 +3032,92 @@ function showRowContextMenu(clientX, clientY, row) {
     const top = Math.max(8, Math.min(clientY, maxY));
     menu.style.left = `${left}px`;
     menu.style.top = `${top}px`;
+    syncRowContextSubmenuDirection(menu);
     state.contextMenuVisible = true;
 }
 
 async function executeRowContextMenuAction(action) {
     if (!action) return;
-    const selectedItems = getSelectedItems();
+    if (state.exportInProgress) {
+        showToast('Export is running. Please wait.', 'info');
+        return;
+    }
+
+    const selectedItems = getContextActionItems();
     if (action === 'add-link') {
         openModal();
         return;
     }
-    if (action === 'refresh') {
-        if (selectedItems.length >= 2) {
-            await refreshAllItems();
+    if (action === 'fetch-selected') {
+        if (!selectedItems.length) {
+            showToast('No rows selected', 'info');
             return;
         }
         if (selectedItems.length === 1) {
             await handleRefreshItem(selectedItems[0]);
             return;
         }
-        showToast('No selected link to refresh', 'info');
+        if (selectedItems.length >= 2) {
+            await refreshAllItems();
+            return;
+        }
         return;
     }
-    if (action === 'delete') {
+    if (action === 'delete-selected') {
         if (!selectedItems.length) {
-            showToast('No selected link to delete', 'info');
+            showToast('No rows selected', 'info');
             return;
         }
         await handleDeleteItems(selectedItems);
         return;
     }
+
+    if (
+        action === 'export-listview-excel'
+        || action.startsWith('clipboard-')
+        || action.startsWith('txt-')
+    ) {
+        if (!selectedItems.length) {
+            showToast('No rows selected', 'info');
+            return;
+        }
+
+        const ok = await runServerExport(action, selectedItems);
+        if (!ok) {
+            if (action === 'export-listview-excel') {
+                const headers = [
+                    'Type',
+                    'Name',
+                    'Spotify URL',
+                    'Group',
+                    'User',
+                    'Playlist Owner',
+                    'Playlist (Save)',
+                    'Playlist (Count)',
+                    'Album (Track Count)',
+                    'Artist (Followers)',
+                    'Artist (Listeners)',
+                    'Tracks (Views)',
+                    'Updated',
+                ];
+                const rows = buildListViewExportRows(selectedItems);
+                const csv = buildCsvContent(headers, rows);
+                const fileName = buildExportFileName('spoticheck-listview', 'csv');
+                downloadTextFile(csv, fileName, 'text/csv;charset=utf-8');
+                showToast(`Exported ${rows.length} rows to Excel (CSV fallback)`, 'success');
+            } else if (action.startsWith('clipboard-')) {
+                await runStructuredExport(action, selectedItems, 'clipboard');
+            } else if (action.startsWith('txt-')) {
+                await runStructuredExport(action, selectedItems, 'txt');
+            }
+        }
+        return;
+    }
+
     if (action === 'clear-list') {
         await clearList();
     }
 }
-
 async function handleDeleteItems(items, opts = {}) {
     const uniqueMap = new Map();
     (items || []).forEach((item) => {
@@ -2886,9 +3405,8 @@ function openSpotifyPopup(url) {
 
 function openModal() {
     document.getElementById('add-link-modal').classList.add('open');
-    document.getElementById('modal-url-input').value = '';
-    document.getElementById('modal-url-input').focus();
-    document.getElementById('modal-batch-area').classList.add('hidden');
+    document.getElementById('modal-batch-input').value = '';
+    document.getElementById('modal-batch-input').focus();
     document.getElementById('modal-url-hint').textContent = 'Supports: playlist, track, album, and artist links';
     document.getElementById('modal-url-hint').className = 'text-xs text-secondary-text mt-2';
     populateGroupSelect();
@@ -2899,75 +3417,20 @@ function closeModal() {
 }
 
 async function submitSingle() {
-    const input = document.getElementById('modal-url-input');
-    const url = input.value.trim();
+    const textarea = document.getElementById('modal-batch-input');
+    const urls = textarea.value.split('\n').map((u) => u.trim()).filter(Boolean);
     const hint = document.getElementById('modal-url-hint');
 
-    if (!url) {
-        hint.textContent = 'Please enter a Spotify URL or URI';
-        hint.className = 'text-xs text-red-400 mt-2';
-        return;
-    }
-
-    const parsed = parseSpotifyUrl(url);
-    if (!parsed) {
-        hint.textContent = 'Invalid Spotify URL. Example: https://open.spotify.com/playlist/...';
-        hint.className = 'text-xs text-red-400 mt-2';
-        return;
-    }
-
-    const selectedGroup = resolveSelectedGroupContext();
-    const group = selectedGroup.group;
-    const currentIdentity = getUserIdentityById(selectedGroup.targetUserId);
-
-    try {
-        const result = await api.crawl(url, group, selectedGroup.targetUserId);
-        const jobId = result?.job_id;
-        if (!jobId) {
-            throw new Error('Backend did not return job_id');
-        }
-        showToast(`Added ${parsed.type}: crawling started`, 'success');
-
-        const now = new Date().toISOString();
-        const newItem = {
-            id: `temp-${jobId}`,
-            spotify_id: parsed.id,
-            type: parsed.type,
-            name: `Loading ${parsed.type}...`,
-            status: 'crawling',
-            group: group,
-            last_checked: now,
-            user_id: currentIdentity.id,
-            user_name: currentIdentity.name,
-            user_avatar: currentIdentity.avatar,
-        };
-        state.items.unshift(newItem);
-        state.pendingJobToItem.set(jobId, newItem.id);
-        persistCurrentItemOrder();
-
-        state.pendingJobs.add(jobId);
-        startPolling();
-        syncGroupUI(true);
-        renderList();
-        closeModal();
-    } catch (e) {
-        hint.textContent = `Error: ${e.message}`;
-        hint.className = 'text-xs text-red-400 mt-2';
-    }
-}
-
-async function submitBatch() {
-    const textarea = document.getElementById('modal-batch-input');
-    const urls = textarea.value.split('\n').map(u => u.trim()).filter(Boolean);
-
     if (urls.length === 0) {
-        showToast('No URLs to add', 'error');
+        hint.textContent = 'Please enter at least one Spotify URL or URI';
+        hint.className = 'text-xs text-red-400 mt-2';
         return;
     }
 
-    const invalid = urls.filter(u => !parseSpotifyUrl(u));
+    const invalid = urls.filter((u) => !parseSpotifyUrl(u));
     if (invalid.length > 0) {
-        showToast(`${invalid.length} invalid URL(s) found`, 'error');
+        hint.textContent = `${invalid.length} invalid Spotify URL(s) found`;
+        hint.className = 'text-xs text-red-400 mt-2';
         return;
     }
 
@@ -2976,18 +3439,29 @@ async function submitBatch() {
     const currentIdentity = getUserIdentityById(selectedGroup.targetUserId);
 
     try {
-        const result = await api.crawlBatch(urls, group, selectedGroup.targetUserId);
-        showToast(`Added ${urls.length} links — crawling started`, 'success');
+        let jobIds = [];
+        if (urls.length === 1) {
+            const result = await api.crawl(urls[0], group, selectedGroup.targetUserId);
+            const singleJobId = result?.job_id;
+            if (!singleJobId) {
+                throw new Error('Backend did not return job_id');
+            }
+            jobIds = [singleJobId];
+        } else {
+            const result = await api.crawlBatch(urls, group, selectedGroup.targetUserId);
+            jobIds = Array.isArray(result?.job_ids) ? result.job_ids : [];
+            if (!jobIds.length) {
+                throw new Error('Backend did not return job_ids');
+            }
+        }
+        showToast(`Added ${urls.length} link${urls.length > 1 ? 's' : ''} - crawling started`, 'success');
 
         const now = new Date().toISOString();
         let mappedJobs = 0;
-
-        // Create a placeholder row for every submitted URL.
         urls.forEach((url, i) => {
             const parsed = parseSpotifyUrl(url);
-            if (!parsed) return;
-            const jobId = result.job_ids?.[i];
-            if (!jobId) return;
+            const jobId = jobIds[i];
+            if (!parsed || !jobId) return;
 
             const newItem = {
                 id: `temp-${jobId}`,
@@ -3003,27 +3477,28 @@ async function submitBatch() {
             };
             state.items.unshift(newItem);
             state.pendingJobToItem.set(jobId, newItem.id);
-            persistCurrentItemOrder();
-
             state.pendingJobs.add(jobId);
             mappedJobs += 1;
         });
 
-        if (mappedJobs === 0) {
-            showToast('No jobs were created by backend', 'error');
-            return;
+        if (!mappedJobs) {
+            throw new Error('No jobs were mapped to submitted links');
         }
 
+        persistCurrentItemOrder();
         startPolling();
         syncGroupUI(true);
         renderList();
         closeModal();
     } catch (e) {
-        showToast(`Batch error: ${e.message}`, 'error');
+        hint.textContent = `Error: ${e.message}`;
+        hint.className = 'text-xs text-red-400 mt-2';
     }
 }
 
-// ═══════════════════════════════════════════════════════════════════
+async function submitBatch() {
+    return submitSingle();
+}
 // TOAST NOTIFICATIONS
 // ═══════════════════════════════════════════════════════════════════
 
@@ -4278,12 +4753,6 @@ document.addEventListener('DOMContentLoaded', async () => {
         });
     });
 
-    // Batch toggle
-    document.getElementById('modal-batch-toggle').addEventListener('click', () => {
-        document.getElementById('modal-batch-area').classList.toggle('hidden');
-    });
-    document.getElementById('modal-batch-submit').addEventListener('click', submitBatch);
-
     // Search
     document.getElementById('search-input').addEventListener('input', (e) => {
         handleSearch(e.target.value);
@@ -4533,6 +5002,8 @@ document.addEventListener('DOMContentLoaded', async () => {
         listElForDelete.addEventListener('contextmenu', (e) => {
             const row = e.target.closest('.custom-grid-row');
             if (!row) return;
+            // Keep native browser link context-menu on title/anchor right-click.
+            if (e.target.closest('a[href]')) return;
             e.preventDefault();
             e.stopPropagation();
             showRowContextMenu(e.clientX, e.clientY, row);
@@ -4786,4 +5257,10 @@ document.addEventListener('DOMContentLoaded', async () => {
 // Fallback hooks for inline onclick handlers
 window.clearList = clearList;
 window.refreshAllItems = refreshAllItems;
+
+
+
+
+
+
 
