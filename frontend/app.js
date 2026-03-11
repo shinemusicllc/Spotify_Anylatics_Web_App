@@ -1,11 +1,11 @@
-/**
- * SpotiCheck — Frontend Application
- * Kết nối API backend, render dynamic rows, quản lý state
+﻿/**
+ * SpotiCheck â€” Frontend Application
+ * Káº¿t ná»‘i API backend, render dynamic rows, quáº£n lÃ½ state
  */
 
-// ═══════════════════════════════════════════════════════════════════
+// â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
 // CONFIG
-// ═══════════════════════════════════════════════════════════════════
+// â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
 const CONFIG = {
     API_BASE: window.location.hostname === 'localhost'
         ? 'http://localhost:8010/api'
@@ -84,6 +84,14 @@ const RESIZABLE_COLUMN_KEYS = Object.freeze([
     'trackViews',
     'checked',
 ]);
+const METRIC_SORT_CONFIG = Object.freeze({
+    playlistSaves: { valueKey: 'playlistSaves', deltaKey: 'playlistSavesDelta', shortLabel: 'SL' },
+    playlistCount: { valueKey: 'playlistTrackCount', deltaKey: 'playlistTrackCountDelta', shortLabel: 'SL' },
+    albumCount: { valueKey: 'albumTrackCount', deltaKey: 'albumTrackCountDelta', shortLabel: 'SL' },
+    artistFollowers: { valueKey: 'artistFollowers', deltaKey: 'artistFollowersDelta', shortLabel: 'SL' },
+    artistListeners: { valueKey: 'artistListeners', deltaKey: 'artistListenersDelta', shortLabel: 'SL' },
+    trackViews: { valueKey: 'trackViews', deltaKey: 'trackViewsDelta', shortLabel: 'SL' },
+});
 const UI_PREF_SAVE_DEBOUNCE_MS = 700;
 
 function getUserGroupStorageKey() {
@@ -181,9 +189,9 @@ function setupAuthUI() {
 }
 
 
-// ═══════════════════════════════════════════════════════════════════
+// â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
 // STATE
-// ═══════════════════════════════════════════════════════════════════
+// â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
 const state = {
     items: [],
     filteredItems: [],
@@ -225,11 +233,15 @@ const state = {
     contextMenuAnchorSelectionKey: null,
     exportInProgress: false,
     exportLabel: '',
+    metricSortColumn: null,
+    metricSortMode: 'value',
+    metricSortDirection: 'desc',
+    metricSortMenuOpenKey: null,
 };
 
-// ═══════════════════════════════════════════════════════════════════
+// â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
 // API CLIENT
-// ═══════════════════════════════════════════════════════════════════
+// â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
 class SpotiCheckAPI {
     constructor(baseUrl) {
         this.base = baseUrl;
@@ -363,9 +375,9 @@ class SpotiCheckAPI {
 
 const api = new SpotiCheckAPI(CONFIG.API_BASE);
 
-// ═══════════════════════════════════════════════════════════════════
+// â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
 // UTILITY HELPERS
-// ═══════════════════════════════════════════════════════════════════
+// â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
 
 /** Format large numbers with suffix (1.2k, 3.4M) */
 function formatNumber(n) {
@@ -508,6 +520,16 @@ function getExcelColumnValues(item) {
         trackViewsDelta: type === 'track' ? item.playcount_delta : null,
         deltaDays: item.delta_days,
     };
+}
+
+function getMetricSortValue(item, columnKey, mode = 'value') {
+    const config = METRIC_SORT_CONFIG[columnKey];
+    if (!config) return null;
+    const excel = getExcelColumnValues(item);
+    const valueKey = mode === 'delta' ? config.deltaKey : config.valueKey;
+    const raw = excel[valueKey];
+    const numeric = Number(raw);
+    return Number.isFinite(numeric) ? numeric : null;
 }
 
 function getItemSubtitle(item) {
@@ -1166,7 +1188,7 @@ async function syncGroupsFromServer(targetUserId) {
             // Admin viewing another user's groups
             state.customGroups = serverGroups;
         } else {
-            // Own groups — server is source of truth
+            // Own groups â€” server is source of truth
             // But if server is empty and local has groups, push local to server (first sync)
             var localGroups = (state.customGroups || []).map(normalizeStoredGroupName).filter(Boolean);
             if (serverGroups.length === 0 && localGroups.length > 0) {
@@ -1174,7 +1196,7 @@ async function syncGroupsFromServer(targetUserId) {
                 state.customGroups = localGroups;
                 await saveGroupsToServer(localGroups);
             } else {
-                // Server has data — use server as source of truth
+                // Server has data â€” use server as source of truth
                 state.customGroups = serverGroups;
             }
             localStorage.setItem(getUserGroupStorageKey(), JSON.stringify(state.customGroups));
@@ -1356,6 +1378,25 @@ function getVisibleItems() {
             (i.spotify_id || '').toLowerCase().includes(q) ||
             (i.type || '').toLowerCase().includes(q)
         );
+    }
+
+    if (state.metricSortColumn && METRIC_SORT_CONFIG[state.metricSortColumn]) {
+        const columnKey = state.metricSortColumn;
+        const mode = state.metricSortMode === 'delta' ? 'delta' : 'value';
+        const direction = state.metricSortDirection === 'asc' ? 'asc' : 'desc';
+        const sortFactor = direction === 'asc' ? 1 : -1;
+        const sortedItems = [...items];
+        sortedItems.sort((a, b) => {
+            const left = getMetricSortValue(a, columnKey, mode);
+            const right = getMetricSortValue(b, columnKey, mode);
+
+            if (left == null && right == null) return 0;
+            if (left == null) return 1;
+            if (right == null) return -1;
+            if (left === right) return 0;
+            return left > right ? sortFactor : -sortFactor;
+        });
+        return sortedItems;
     }
 
     return items;
@@ -2115,7 +2156,7 @@ function handleRenameGroup(rawGroupId, rawName, opts = {}) {
     syncGroupUI(true);
     renderList({ preserveScroll: true });
     if (!sameByCaseInsensitive || nextName !== target.name) {
-        showToast(`Renamed group: ${target.name} → ${nextName}`, 'success');
+        showToast(`Renamed group: ${target.name} â†’ ${nextName}`, 'success');
     }
 }
 
@@ -2287,9 +2328,9 @@ function normalizeJobResult(result, fallback = {}) {
     };
 }
 
-// ═══════════════════════════════════════════════════════════════════
+// â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
 // ROW RENDERER
-// ═══════════════════════════════════════════════════════════════════
+// â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
 
 function renderRow(item) {
     const status = getStatusInfo(item);
@@ -2422,6 +2463,171 @@ function setupColumnResizers() {
     });
 }
 
+function isMetricSortColumn(colKey) {
+    return Boolean(colKey && METRIC_SORT_CONFIG[colKey]);
+}
+
+function getMetricSortModeLabel(colKey) {
+    if (state.metricSortColumn === colKey) {
+        return state.metricSortMode === 'delta' ? 'Biến động' : 'Số lượng';
+    }
+    return 'None';
+}
+
+function updateMetricSortControlsUI() {
+    const controls = document.querySelectorAll('.metric-sort-controls[data-sort-col]');
+    controls.forEach((control) => {
+        const colKey = control.dataset.sortCol;
+        if (!isMetricSortColumn(colKey)) return;
+        const modeToggle = control.querySelector('[data-sort-menu-toggle]');
+        const dirToggle = control.querySelector('[data-sort-direction-toggle]');
+        const menu = control.querySelector('[data-sort-menu]');
+        const active = state.metricSortColumn === colKey;
+        const mode = active ? state.metricSortMode : 'value';
+        const direction = active ? state.metricSortDirection : null;
+
+        if (modeToggle) {
+            modeToggle.classList.toggle('is-active', active);
+            modeToggle.setAttribute('title', active ? `Đang lọc: ${getMetricSortModeLabel(colKey)}` : 'Chọn kiểu lọc');
+        }
+
+        if (dirToggle) {
+            const icon = dirToggle.querySelector('.metric-sort-direction-icon');
+            if (icon) {
+                icon.textContent = active
+                    ? (direction === 'asc' ? 'arrow_upward' : 'arrow_downward')
+                    : 'swap_vert';
+            }
+            dirToggle.classList.toggle('is-active', active);
+            dirToggle.setAttribute('title', active
+                ? (direction === 'asc' ? 'Đang tăng dần' : 'Đang giảm dần')
+                : 'Đổi chiều sắp xếp');
+        }
+
+        if (menu) {
+            const open = state.metricSortMenuOpenKey === colKey;
+            menu.classList.toggle('open', open);
+            menu.querySelectorAll('[data-sort-mode-option]').forEach((btn) => {
+                const optionMode = btn.getAttribute('data-sort-mode-option');
+                const isNoneMode = optionMode === 'none';
+                const isNoneActive = isNoneMode && !state.metricSortColumn;
+                btn.classList.toggle('is-active', isNoneActive || (active && optionMode === mode));
+            });
+        }
+    });
+}
+function closeMetricSortMenu() {
+    if (!state.metricSortMenuOpenKey) return;
+    state.metricSortMenuOpenKey = null;
+    updateMetricSortControlsUI();
+}
+
+function ensureMetricSortControls() {
+    Object.keys(METRIC_SORT_CONFIG).forEach((colKey) => {
+        const cell = document.querySelector(`.list-head .head-cell[data-col-key="${colKey}"]`);
+        if (!cell || cell.querySelector('.metric-sort-controls')) return;
+
+        const controls = document.createElement('div');
+        controls.className = 'metric-sort-controls';
+        controls.dataset.sortCol = colKey;
+        controls.innerHTML = `
+            <button type="button" class="metric-sort-mode-toggle" data-sort-menu-toggle aria-label="Chọn kiểu lọc">
+                <span class="metric-sort-triangle">▼</span>
+            </button>
+            <button type="button" class="metric-sort-direction-toggle" data-sort-direction-toggle aria-label="Đổi chiều sắp xếp">
+                <span class="material-icons-round metric-sort-direction-icon">swap_vert</span>
+            </button>
+            <div class="metric-sort-menu" data-sort-menu>
+                <button type="button" class="metric-sort-menu-item" data-sort-mode-option="none">
+                    <span class="metric-sort-menu-title">None</span>
+                    <span class="metric-sort-menu-subtitle">Danh sách mặc định</span>
+                </button>
+                <button type="button" class="metric-sort-menu-item" data-sort-mode-option="value">
+                    <span class="metric-sort-menu-title">S&#7889; l&#432;&#7907;ng</span>
+                    <span class="metric-sort-menu-subtitle">Gi&#225; tr&#7883; hi&#7879;n t&#7841;i</span>
+                </button>
+                <button type="button" class="metric-sort-menu-item" data-sort-mode-option="delta">
+                    <span class="metric-sort-menu-title">Bi&#7871;n &#273;&#7897;ng</span>
+                    <span class="metric-sort-menu-subtitle">M&#7913;c thay &#273;&#7893;i</span>
+                </button>
+            </div>
+        `;
+        cell.appendChild(controls);
+    });
+
+    const head = document.querySelector('.list-head');
+    if (head && head.dataset.metricSortBound !== 'true') {
+        head.dataset.metricSortBound = 'true';
+        head.addEventListener('click', (event) => {
+            const control = event.target.closest('.metric-sort-controls[data-sort-col]');
+            if (!control) return;
+            const colKey = control.dataset.sortCol;
+            if (!isMetricSortColumn(colKey)) return;
+
+            const menuToggle = event.target.closest('[data-sort-menu-toggle]');
+            const modeOption = event.target.closest('[data-sort-mode-option]');
+            const directionToggle = event.target.closest('[data-sort-direction-toggle]');
+
+            if (menuToggle) {
+                event.preventDefault();
+                event.stopPropagation();
+                state.metricSortMenuOpenKey = state.metricSortMenuOpenKey === colKey ? null : colKey;
+                updateMetricSortControlsUI();
+                return;
+            }
+
+            if (modeOption) {
+                event.preventDefault();
+                event.stopPropagation();
+                const selectedMode = modeOption.getAttribute('data-sort-mode-option');
+                if (selectedMode === 'none') {
+                    state.metricSortColumn = null;
+                    state.metricSortMenuOpenKey = null;
+                    renderList({ preserveScroll: true });
+                    updateMetricSortControlsUI();
+                    return;
+                }
+
+                const mode = selectedMode === 'delta' ? 'delta' : 'value';
+                state.metricSortColumn = colKey;
+                state.metricSortMode = mode;
+                if (!['asc', 'desc'].includes(state.metricSortDirection)) {
+                    state.metricSortDirection = 'desc';
+                }
+                state.metricSortMenuOpenKey = null;
+                renderList({ preserveScroll: true });
+                updateMetricSortControlsUI();
+                return;
+            }
+
+            if (directionToggle) {
+                event.preventDefault();
+                event.stopPropagation();
+                if (state.metricSortColumn !== colKey) {
+                    state.metricSortColumn = colKey;
+                    state.metricSortDirection = 'desc';
+                    state.metricSortMode = state.metricSortMode === 'delta' ? 'delta' : 'value';
+                } else {
+                    state.metricSortDirection = state.metricSortDirection === 'asc' ? 'desc' : 'asc';
+                }
+                state.metricSortMenuOpenKey = null;
+                renderList({ preserveScroll: true });
+                updateMetricSortControlsUI();
+            }
+        });
+    }
+
+    if (!document.body.dataset.metricSortBodyBound) {
+        document.body.dataset.metricSortBodyBound = 'true';
+        document.addEventListener('mousedown', (event) => {
+            const target = event.target;
+            if (target?.closest?.('.metric-sort-controls')) return;
+            closeMetricSortMenu();
+        }, true);
+    }
+
+    updateMetricSortControlsUI();
+}
 /** Escape HTML to prevent XSS */
 function escapeHtml(str) {
     const el = document.createElement('span');
@@ -2429,9 +2635,9 @@ function escapeHtml(str) {
     return el.innerHTML;
 }
 
-// ═══════════════════════════════════════════════════════════════════
+// â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
 // RENDER ENGINE
-// ═══════════════════════════════════════════════════════════════════
+// â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
 
 function renderList(opts = {}) {
     const preserveScroll = Boolean(opts?.preserveScroll);
@@ -2474,6 +2680,7 @@ function renderList(opts = {}) {
                     : 'Add a Spotify link to this group to start monitoring.';
             }
             emptyState.style.display = '';
+            updateMetricSortControlsUI();
             restoreScroll();
             return;
         }
@@ -2484,6 +2691,7 @@ function renderList(opts = {}) {
         noResult.className = 'custom-grid-row text-center py-12 text-secondary-text';
         noResult.innerHTML = `<div class="col-span-2">No results for "${escapeHtml(state.searchQuery)}"</div>`;
         container.appendChild(noResult);
+        updateMetricSortControlsUI();
         restoreScroll();
         return;
     }
@@ -2500,6 +2708,7 @@ function renderList(opts = {}) {
     // Update KPIs
     updateKPIs();
     refreshCheckedLabels();
+    updateMetricSortControlsUI();
     restoreScroll();
 }
 function refreshCheckedLabels() {
@@ -2548,9 +2757,9 @@ function updateApiStatus() {
     }
 }
 
-// ═══════════════════════════════════════════════════════════════════
+// â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
 // LINK / PREVIEW HELPERS
-// ═══════════════════════════════════════════════════════════════════
+// â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
 
 async function copyToClipboard(value, successMessage) {
     if (!value) return;
@@ -2824,7 +3033,7 @@ function getStructuredExportRows(action, items) {
 async function runStructuredExport(action, items, destination) {
     const payload = getStructuredExportRows(action, items);
     if (!payload.rows.length) {
-        showToast('Không có dữ liệu phù hợp cho kiểu xuất này', 'info');
+        showToast('KhÃ´ng cÃ³ dá»¯ liá»‡u phÃ¹ há»£p cho kiá»ƒu xuáº¥t nÃ y', 'info');
         return;
     }
     const text = rowsToDelimitedText(payload.rows, '\t');
@@ -3228,7 +3437,7 @@ function markItemAsRefreshing(item, nowIso) {
 async function handleRefreshItem(item) {
     if (!item) return;
     if (item.id && String(item.id).startsWith('temp-')) {
-        showToast('Link này đang crawl, đợi hoàn tất rồi refresh lại', 'info');
+        showToast('Link nÃ y Ä‘ang crawl, Ä‘á»£i hoÃ n táº¥t rá»“i refresh láº¡i', 'info');
         return;
     }
     if (!state.apiOnline) {
@@ -3399,9 +3608,9 @@ function openSpotifyPopup(url) {
     );
 }
 
-// ═══════════════════════════════════════════════════════════════════
+// â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
 // MODAL HANDLERS
-// ═══════════════════════════════════════════════════════════════════
+// â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
 
 function openModal() {
     document.getElementById('add-link-modal').classList.add('open');
@@ -3500,7 +3709,7 @@ async function submitBatch() {
     return submitSingle();
 }
 // TOAST NOTIFICATIONS
-// ═══════════════════════════════════════════════════════════════════
+// â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
 
 function showToast(message, type = 'info') {
     const container = document.getElementById('toast-container');
@@ -3517,9 +3726,9 @@ function showToast(message, type = 'info') {
     }, 4000);
 }
 
-// ═══════════════════════════════════════════════════════════════════
-// POLLING — Check pending job status
-// ═══════════════════════════════════════════════════════════════════
+// â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
+// POLLING â€” Check pending job status
+// â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
 
 function startPolling() {
     if (state.pollTimer) return;
@@ -3641,20 +3850,20 @@ async function pollJobs() {
     }
 }
 
-// ═══════════════════════════════════════════════════════════════════
+// â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
 // SEARCH
-// ═══════════════════════════════════════════════════════════════════
+// â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
 
 const handleSearch = debounce((query) => {
     state.searchQuery = query;
     renderList();
 }, CONFIG.SEARCH_DEBOUNCE);
 
-// ═══════════════════════════════════════════════════════════════════
+// â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
 // DATA LOADING (with demo fallback)
-// ═══════════════════════════════════════════════════════════════════
+// â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
 
-/** Demo data — shown when backend is not available */
+/** Demo data â€” shown when backend is not available */
 function getDemoData() {
     return [
         {
@@ -3668,7 +3877,7 @@ function getDemoData() {
         },
         {
             id: 'demo-2', spotify_id: '5Rrf7iqB3Pjx', type: 'playlist',
-            name: 'Winter Jazz Café — Cozy Fireplace Ambience',
+            name: 'Winter Jazz CafÃ© â€” Cozy Fireplace Ambience',
             image: 'https://picsum.photos/seed/jazz2/128/128',
             owner_name: 'David Jazz', owner_image: 'https://randomuser.me/api/portraits/women/68.jpg',
             added_date: '10/02 11:20', followers: 4200, saves: 4200, track_count: 95,
@@ -3678,7 +3887,7 @@ function getDemoData() {
         },
         {
             id: 'demo-3', spotify_id: '2N3D9rE', type: 'album',
-            name: 'Midnight Sax — Smooth Saxophone Sessions',
+            name: 'Midnight Sax â€” Smooth Saxophone Sessions',
             image: 'https://picsum.photos/seed/jazz3/128/128',
             owner_name: 'Marc C.', owner_image: null,
             added_date: '09/02 14:44', followers: 1800, saves: 1800, track_count: 12,
@@ -3687,7 +3896,7 @@ function getDemoData() {
         },
         {
             id: 'demo-4', spotify_id: '1A4K', type: 'playlist',
-            name: 'Bebop Essentials — Classic Bebop Jazz Standards',
+            name: 'Bebop Essentials â€” Classic Bebop Jazz Standards',
             image: 'https://picsum.photos/seed/jazz4/128/128',
             owner_name: 'Erik Vance', owner_image: 'https://randomuser.me/api/portraits/men/75.jpg',
             added_date: '06/02 14:29', followers: 28400, saves: 28400, track_count: 210,
@@ -3696,7 +3905,7 @@ function getDemoData() {
         },
         {
             id: 'demo-5', spotify_id: '9Vb2', type: 'playlist',
-            name: 'Nu Jazz Waves — Future Jazz & Electronic Grooves',
+            name: 'Nu Jazz Waves â€” Future Jazz & Electronic Grooves',
             image: 'https://picsum.photos/seed/jazz5/128/128',
             owner_name: 'Liam Stone', owner_image: 'https://randomuser.me/api/portraits/men/22.jpg',
             added_date: '06/02 14:29', followers: 5900, saves: 5900, track_count: 88,
@@ -3705,7 +3914,7 @@ function getDemoData() {
         },
         {
             id: 'demo-6', spotify_id: '6rqhFg', type: 'track',
-            name: "I Won't Never Go — Smooth Jazz Ballad",
+            name: "I Won't Never Go â€” Smooth Jazz Ballad",
             image: 'https://picsum.photos/seed/track1/128/128',
             owner_name: 'Tony Blues', owner_image: 'https://randomuser.me/api/portraits/men/55.jpg',
             added_date: '10/02 11:20', saves: 18200, duration: '4:32',
@@ -3714,7 +3923,7 @@ function getDemoData() {
         },
         {
             id: 'demo-7', spotify_id: '8mXk2j', type: 'track',
-            name: 'All Night Long — Saxophone Lounge Mix',
+            name: 'All Night Long â€” Saxophone Lounge Mix',
             image: 'https://picsum.photos/seed/track2/128/128',
             owner_name: 'Nina Sax', owner_image: 'https://randomuser.me/api/portraits/women/31.jpg',
             added_date: '10/02 11:20', saves: 7400, duration: '3:48',
@@ -3723,7 +3932,7 @@ function getDemoData() {
         },
         {
             id: 'demo-8', spotify_id: '3kLmNp', type: 'track',
-            name: 'Slow Tunes — Late Night Jazz Session',
+            name: 'Slow Tunes â€” Late Night Jazz Session',
             image: 'https://picsum.photos/seed/track3/128/128',
             owner_name: 'Jazz Keys', owner_image: 'https://randomuser.me/api/portraits/men/42.jpg',
             added_date: '10/02 11:20', saves: 12100, duration: '5:12',
@@ -3732,7 +3941,7 @@ function getDemoData() {
         },
         {
             id: 'demo-9', spotify_id: 'Xp4qR8', type: 'playlist',
-            name: 'Late Night Bar — Smooth Saxophone & Whiskey Blues',
+            name: 'Late Night Bar â€” Smooth Saxophone & Whiskey Blues',
             image: 'https://picsum.photos/seed/jazz7/128/128',
             owner_name: 'Chris Miller', owner_image: 'https://randomuser.me/api/portraits/men/85.jpg',
             added_date: '10/02 11:20', followers: 1200, saves: 1200, track_count: 122,
@@ -3741,7 +3950,7 @@ function getDemoData() {
         },
         {
             id: 'demo-10', spotify_id: '0Pq2', type: 'playlist',
-            name: 'Jazz Morning ☕ Positive Energy Bossa Nova & Café Music',
+            name: 'Jazz Morning â˜• Positive Energy Bossa Nova & CafÃ© Music',
             image: 'https://picsum.photos/seed/lofi8/128/128',
             owner_name: 'JazzBot', owner_image: null,
             added_date: '10/02 11:24', followers: 92500, saves: 92500, track_count: 450,
@@ -3899,9 +4108,9 @@ async function loadData(opts = {}) {
     }
 }
 
-// ═══════════════════════════════════════════════════════════════════
+// â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
 // HERO IMAGE
-// ═══════════════════════════════════════════════════════════════════
+// â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
 
 async function runBackgroundSync(opts = {}) {
     const force = Boolean(opts?.force);
@@ -3956,9 +4165,9 @@ function updateHeroImage() {
     hero.style.setProperty('--hero-image', `url('${heroImage}')`);
 }
 
-// ═══════════════════════════════════════════════════════════════════
+// â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
 // STICKY HEADER
-// ═══════════════════════════════════════════════════════════════════
+// â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
 
 function initStickyHeader() {
     const listWrap = document.querySelector('.list-wrap');
@@ -3976,7 +4185,7 @@ function initStickyHeader() {
 
 
 // ===================================================================
-// VIEW MANAGEMENT — single source of truth for panel switching
+// VIEW MANAGEMENT â€” single source of truth for panel switching
 // ===================================================================
 
 state.currentView = 'linkchecker'; // 'linkchecker' | 'settings' | 'users'
@@ -4211,9 +4420,9 @@ async function handleAvatarRemove() {
 
 
 
-// ═══════════════════════════════════════════════════════════════════
+// â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
 // CUSTOM DROPDOWN COMPONENT
-// ═══════════════════════════════════════════════════════════════════
+// â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
 
 /**
  * Creates a custom dropdown replacing a native <select>
@@ -4321,9 +4530,9 @@ document.addEventListener('click', function() {
 });
 
 
-// ═══════════════════════════════════════════════════════════════════
+// â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
 // ADMIN USER MANAGEMENT
-// ═══════════════════════════════════════════════════════════════════
+// â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
 
 let _adminUsersCache = [];
 
@@ -4717,9 +4926,9 @@ window.showAdminUsers = showAdminUsers;
 window.hideAdminUsers = hideAdminUsers;
 
 
-// ═══════════════════════════════════════════════════════════════════
+// â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
 // INIT
-// ═══════════════════════════════════════════════════════════════════
+// â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
 
 document.addEventListener('DOMContentLoaded', async () => {
     if (!requireAuth()) return;
@@ -4728,6 +4937,7 @@ document.addEventListener('DOMContentLoaded', async () => {
     state.columnWidths = loadPersistedColumnWidths();
     applyColumnWidths(state.columnWidths);
     setupColumnResizers();
+    ensureMetricSortControls();
     syncColumnWidthsToViewport();
     window.addEventListener('resize', () => syncColumnWidthsToViewport());
 
@@ -5183,6 +5393,7 @@ document.addEventListener('DOMContentLoaded', async () => {
     document.addEventListener('keydown', (e) => {
         if (e.key === 'Escape') {
             hideRowContextMenu();
+            closeMetricSortMenu();
             closeModal();
             closeImagePreview();
         }
@@ -5257,6 +5468,10 @@ document.addEventListener('DOMContentLoaded', async () => {
 // Fallback hooks for inline onclick handlers
 window.clearList = clearList;
 window.refreshAllItems = refreshAllItems;
+
+
+
+
 
 
 

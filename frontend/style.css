@@ -629,6 +629,19 @@ h3 {
   padding-right: 8px;
 }
 
+.list-head .head-cell[data-col-key="playlistSaves"],
+.list-head .head-cell[data-col-key="playlistCount"],
+.list-head .head-cell[data-col-key="albumCount"],
+.list-head .head-cell[data-col-key="artistFollowers"],
+.list-head .head-cell[data-col-key="artistListeners"],
+.list-head .head-cell[data-col-key="trackViews"] {
+  padding-right: 40px;
+}
+
+.list-head .head-cell:not([data-col-key="asset"]) > .column-resize-handle:not(.column-resize-handle-start) {
+  display: none;
+}
+
 .column-resize-handle {
   position: absolute;
   top: 0;
@@ -644,8 +657,122 @@ h3 {
 }
 
 .column-resize-handle-start {
-  left: -9px;
+  left: 4px;
   right: auto;
+  width: 14px;
+}
+
+.metric-sort-controls {
+  position: absolute;
+  top: 50%;
+  right: 0;
+  transform: translateY(-50%);
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  z-index: 6;
+}
+
+.metric-sort-mode-toggle,
+.metric-sort-direction-toggle {
+  border: none;
+  background: transparent;
+  color: #9eabbe;
+  border-radius: 4px;
+  height: 17px;
+  min-width: 18px;
+  padding: 0 1px;
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.02em;
+  line-height: 1;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  transition: color 120ms ease, background 120ms ease;
+}
+
+.metric-sort-mode-toggle:hover,
+.metric-sort-direction-toggle:hover {
+  color: #d5e1f3;
+  background: rgba(255, 255, 255, 0.04);
+}
+
+.metric-sort-mode-toggle.is-active,
+.metric-sort-direction-toggle.is-active {
+  color: #8fe9b4;
+  background: rgba(143, 233, 180, 0.06);
+}
+
+.metric-sort-triangle {
+  font-size: 9px;
+  line-height: 1;
+  transform: translateY(-1px);
+  opacity: 0.88;
+}
+
+.metric-sort-direction-icon {
+  font-size: 12px;
+}
+
+.metric-sort-menu {
+  position: absolute;
+  top: calc(100% + 6px);
+  right: 0;
+  min-width: 132px;
+  border-radius: 10px;
+  border: 1px solid rgba(255, 255, 255, 0.14);
+  background: rgba(17, 23, 33, 0.98);
+  box-shadow: 0 14px 28px rgba(0, 0, 0, 0.4);
+  padding: 4px;
+  opacity: 0;
+  visibility: hidden;
+  pointer-events: none;
+}
+
+.metric-sort-menu.open {
+  opacity: 1;
+  visibility: visible;
+  pointer-events: auto;
+}
+
+.metric-sort-menu-item {
+  width: 100%;
+  border: none;
+  background: transparent;
+  color: #d7e0ee;
+  border-radius: 7px;
+  padding: 6px 8px;
+  text-align: left;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 1px;
+  font-size: 11px;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.metric-sort-menu-item:hover {
+  background: rgba(255, 255, 255, 0.08);
+}
+
+.metric-sort-menu-item.is-active {
+  color: #8fe9b4;
+  background: rgba(143, 233, 180, 0.08);
+}
+
+.metric-sort-menu-title {
+  font-size: 11px;
+  line-height: 1.2;
+}
+
+.metric-sort-menu-subtitle {
+  font-size: 10px;
+  line-height: 1.2;
+  color: #8fa1b8;
+  font-weight: 500;
 }
 
 .column-resizing,
