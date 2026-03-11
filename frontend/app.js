@@ -4565,17 +4565,25 @@ document.addEventListener('DOMContentLoaded', async () => {
             document.getElementById('search-input').focus();
         }
     });
-    document.addEventListener('mousedown', (e) => {
+    const handleOutsideSelectionClear = (e) => {
         if (e.button !== 0) return;
         if (state.currentView !== 'linkchecker') return;
         if (!state.selectedItemKeys.size) return;
         if (state.draggingRowKeys.length) return;
         const target = e.target;
         if (!target?.closest) return;
-        if (target.closest('#link-list .custom-grid-row')) return;
+        const path = typeof e.composedPath === 'function' ? e.composedPath() : [];
+        const clickedInsideRow = path.some((node) => (
+            node
+            && node.classList
+            && node.classList.contains('custom-grid-row')
+        ));
+        if (clickedInsideRow) return;
         clearRowSelection();
         renderList({ preserveScroll: true });
-    });
+    };
+    // Capture phase avoids clearing selection after row mousedown triggers re-render.
+    document.addEventListener('mousedown', handleOutsideSelectionClear, true);
 
     // Sticky header
     initStickyHeader();
