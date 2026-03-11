@@ -1143,7 +1143,7 @@ function getOwnerCustomGroups(ownerUserId) {
 function setOwnerCustomGroups(ownerUserId, groups) {
     const ownerId = ownerUserId ? String(ownerUserId) : '';
     const cleaned = Array.from(new Set((groups || []).map(normalizeStoredGroupName).filter(Boolean)));
-    if (isAdminAllUsersMode() && ownerId) {
+    if (ownerId) {
         (state.adminUserList || []).forEach((u) => {
             if (String(u.id || u._id || '') === ownerId) {
                 u.custom_groups = cleaned.slice();
@@ -1158,6 +1158,8 @@ function setOwnerCustomGroups(ownerUserId, groups) {
             state.customGroups = cleaned.slice();
             localStorage.setItem(getUserGroupStorageKey(), JSON.stringify(cleaned));
         }
+    }
+    if (isAdminAllUsersMode() && ownerId) {
         return cleaned;
     }
     state.customGroups = cleaned.slice();
@@ -1186,7 +1188,8 @@ async function syncGroupsFromServer(targetUserId) {
 
         if (targetUserId) {
             // Admin viewing another user's groups
-            state.customGroups = serverGroups;
+            setOwnerCustomGroups(String(targetUserId), serverGroups);
+            state.customGroups = serverGroups.slice();
         } else {
             // Own groups â€” server is source of truth
             // But if server is empty and local has groups, push local to server (first sync)
@@ -1198,6 +1201,10 @@ async function syncGroupsFromServer(targetUserId) {
             } else {
                 // Server has data â€” use server as source of truth
                 state.customGroups = serverGroups;
+            }
+            var currentUser = getAuthUser();
+            if (currentUser?.id) {
+                setOwnerCustomGroups(String(currentUser.id), state.customGroups || []);
             }
             localStorage.setItem(getUserGroupStorageKey(), JSON.stringify(state.customGroups));
         }
@@ -1221,13 +1228,30 @@ async function saveGroupsToServer(groups, targetUserId) {
         } else {
             url += '/auth/me/groups';
         }
-        await fetch(url, {
+        const res = await fetch(url, {
             method: 'PUT',
             headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + token },
             body: JSON.stringify({ groups: groups || state.customGroups }),
         });
+        if (!res.ok) {
+            throw new Error(`HTTP ${res.status}`);
+        }
+        const payload = await res.json().catch(() => null);
+        if (payload && Array.isArray(payload.groups)) {
+            const synced = payload.groups.map(normalizeStoredGroupName).filter(Boolean);
+            if (uid) {
+                setOwnerCustomGroups(String(uid), synced);
+            } else {
+                const meId = currentUser?.id ? String(currentUser.id) : null;
+                if (meId) {
+                    setOwnerCustomGroups(meId, synced);
+                } else {
+                    state.customGroups = synced;
+                }
+            }
+        }
     } catch (err) {
-        // Silently fail
+        console.warn('[Groups Sync] Failed to save groups:', err.message);
     }
 }
 
@@ -1978,7 +2002,7 @@ function handleCreateGroup(rawName) {
     showToast(`Created group: ${name}`, 'success');
 }
 
-function handleDeleteGroup(rawGroupId) {
+async function handleDeleteGroup(rawGroupId) {
     const groupId = normalizeGroupName(rawGroupId);
     if (!groupId || groupId.toLowerCase() === ALL_GROUP_ID) return;
 
@@ -1991,7 +2015,10 @@ function handleDeleteGroup(rawGroupId) {
     const confirmed = window.confirm(`Delete group "${groupName}"?\nAll links in this group will move to All Links.`);
     if (!confirmed) return;
 
-    const ownerUserId = target?.ownerUserId ? String(target.ownerUserId) : getScopedGroupOwnerUserId();
+    const parsedEntry = parseGroupEntryId(groupId);
+    const ownerUserId = target?.ownerUserId
+        ? String(target.ownerUserId)
+        : (parsedEntry?.ownerUserId ? String(parsedEntry.ownerUserId) : getScopedGroupOwnerUserId());
     const groupKey = normalizeStoredGroupName(target?.name || groupId).toLowerCase();
     const nextGroups = getOwnerCustomGroups(ownerUserId).filter((name) => {
         const normalized = normalizeStoredGroupName(name);
@@ -1999,7 +2026,7 @@ function handleDeleteGroup(rawGroupId) {
     });
     if (isAdminAllUsersMode() && ownerUserId) {
         setOwnerCustomGroups(ownerUserId, nextGroups);
-        saveGroupsToServer(nextGroups, ownerUserId);
+        await saveGroupsToServer(nextGroups, ownerUserId);
     } else {
         state.customGroups = nextGroups;
         saveCustomGroups();
@@ -2011,7 +2038,7 @@ function handleDeleteGroup(rawGroupId) {
         if (target?.ownerUserId && !isItemOwnedByUser(item, target.ownerUserId)) return item;
         return { ...item, group: null };
     });
-    syncGroupItemsToServer(target?.name || groupName, '', ownerUserId || null);
+    await syncGroupItemsToServer(target?.name || groupName, '', ownerUserId || null);
 
     if ((state.activeGroup || '').toLowerCase() === groupId.toLowerCase()) {
         state.activeGroup = ALL_GROUP_ID;
@@ -2071,10 +2098,10 @@ function cancelRenameGroupFlow() {
 
 function syncGroupItemsToServer(oldName, newName, ownerUserId = null) {
     const oldGroup = normalizeGroupName(oldName);
-    if (!oldGroup) return;
+    if (!oldGroup) return Promise.resolve();
     const nextGroup = normalizeGroupName(newName);
     const targetUserId = ownerUserId ? String(ownerUserId) : null;
-    api.renameGroup(oldGroup, nextGroup, targetUserId).catch((err) => {
+    return api.renameGroup(oldGroup, nextGroup, targetUserId).catch((err) => {
         console.warn('[Group Sync] Failed:', err.message);
         showToast(`Saved locally, server sync failed: ${err.message}`, 'info');
     });
