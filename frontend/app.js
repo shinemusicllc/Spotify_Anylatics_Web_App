@@ -501,6 +501,15 @@ function itemKey(item) {
     return `${item?.type || ''}:${item?.spotify_id || ''}:${item?.user_id ? String(item.user_id) : ''}`;
 }
 
+function itemIdentity(item) {
+    const id = item?.id;
+    if (id !== undefined && id !== null && String(id) !== '') {
+        return `id:${id}`;
+    }
+    const ownerId = item?.user_id ? String(item.user_id) : '';
+    return `key:${itemKey(item)}:${ownerId}`;
+}
+
 function getCurrentUserIdentity() {
     const user = getAuthUser();
     return {
@@ -1172,6 +1181,14 @@ function updateGroupHeader() {
 function clearRowSelection() {
     state.selectedItemKeys = new Set();
     state.selectionAnchorKey = null;
+}
+
+function getSelectedVisibleItems() {
+    return state.filteredItems.filter((item) => state.selectedItemKeys.has(itemKey(item)));
+}
+
+function getSelectedItems() {
+    return state.items.filter((item) => state.selectedItemKeys.has(itemKey(item)));
 }
 
 function getVisibleItems() {
@@ -2413,39 +2430,94 @@ function closeImagePreview() {
     if (image) image.src = '';
 }
 
-async function handleDeleteItem(item) {
-    if (!item) return;
-    const label = item.name || `${item.type}:${item.spotify_id}`;
-    state.selectedItemKeys.delete(itemKey(item));
-    if (state.selectionAnchorKey === itemKey(item)) {
+async function handleDeleteItems(items) {
+    const uniqueMap = new Map();
+    (items || []).forEach((item) => {
+        if (!item) return;
+        uniqueMap.set(itemIdentity(item), item);
+    });
+    const targets = Array.from(uniqueMap.values());
+    if (!targets.length) return;
+
+    const deletingMany = targets.length > 1;
+    const firstLabel = targets[0].name || `${targets[0].type}:${targets[0].spotify_id}`;
+    const targetKeys = new Set(targets.map((item) => itemKey(item)));
+    const targetIdentitySet = new Set(targets.map((item) => itemIdentity(item)));
+    const targetItemIds = new Set(targets.map((item) => String(item.id)).filter(Boolean));
+
+    state.selectedItemKeys = new Set(
+        Array.from(state.selectedItemKeys).filter((key) => !targetKeys.has(key))
+    );
+    if (state.selectionAnchorKey && targetKeys.has(state.selectionAnchorKey)) {
         state.selectionAnchorKey = null;
     }
-    state.items = state.items.filter((i) => i.id !== item.id);
+    state.items = state.items.filter((item) => !targetIdentitySet.has(itemIdentity(item)));
     persistCurrentItemOrder();
-    state.pendingJobs.delete(item.id);
+
+    for (const id of targetItemIds) {
+        state.pendingJobs.delete(id);
+        const numericId = Number(id);
+        if (Number.isFinite(numericId)) {
+            state.pendingJobs.delete(numericId);
+        }
+    }
     for (const [jobId, itemId] of state.pendingJobToItem.entries()) {
-        if (itemId === item.id || jobId === item.id) {
+        if (targetItemIds.has(String(itemId)) || targetItemIds.has(String(jobId))) {
             state.pendingJobToItem.delete(jobId);
         }
     }
+
     renderList({ preserveScroll: true });
 
-    try {
-        if (state.apiOnline) {
+    if (!state.apiOnline) {
+        if (deletingMany) {
+            showToast(`Deleted ${targets.length} links locally (API offline)`, 'info');
+        } else {
+            showToast(`Deleted local only: ${firstLabel} (API offline)`, 'info');
+        }
+        return;
+    }
+
+    let failed = 0;
+    await Promise.all(targets.map(async (item) => {
+        try {
             if (item.id && !String(item.id).startsWith('temp-')) {
                 await api.deleteItemById(item.id);
             } else {
                 await api.deleteItem(item.type, item.spotify_id, item.user_id || null);
             }
+        } catch {
+            failed += 1;
         }
-        syncGroupUI(true);
-        renderList({ preserveScroll: true });
-        showToast(`Deleted: ${label}`, 'success');
-    } catch (e) {
-        syncGroupUI(true);
-        renderList({ preserveScroll: true });
-        showToast(`Deleted local only: ${label} (${e.message})`, 'info');
+    }));
+
+    syncGroupUI(true);
+    renderList({ preserveScroll: true });
+
+    if (failed === 0) {
+        if (deletingMany) {
+            showToast(`Deleted ${targets.length} links`, 'success');
+        } else {
+            showToast(`Deleted: ${firstLabel}`, 'success');
+        }
+        return;
     }
+
+    if (failed >= targets.length) {
+        if (deletingMany) {
+            showToast(`Deleted ${targets.length} links locally (sync failed)`, 'info');
+        } else {
+            showToast(`Deleted local only: ${firstLabel} (sync failed)`, 'info');
+        }
+        return;
+    }
+
+    showToast(`Deleted ${targets.length - failed}/${targets.length} links (some failed to sync)`, 'info');
+}
+
+async function handleDeleteItem(item) {
+    if (!item) return;
+    await handleDeleteItems([item]);
 }
 
 function markItemAsRefreshing(item, nowIso) {
@@ -2529,7 +2601,7 @@ async function clearList() {
 }
 
 async function refreshAllItems() {
-    const selectedVisibleItems = state.filteredItems.filter((item) => state.selectedItemKeys.has(itemKey(item)));
+    const selectedVisibleItems = getSelectedVisibleItems();
     const useSelectionScope = selectedVisibleItems.length >= 2;
     const targetItems = useSelectionScope
         ? selectedVisibleItems
@@ -4297,7 +4369,14 @@ document.addEventListener('DOMContentLoaded', async () => {
             );
             if (!item) return;
             if (btn) {
-                handleDeleteItem(item);
+                const shouldDeleteSelection =
+                    state.selectedItemKeys.size > 1
+                    && state.selectedItemKeys.has(itemKey(item));
+                if (shouldDeleteSelection) {
+                    handleDeleteItems(getSelectedItems());
+                } else {
+                    handleDeleteItem(item);
+                }
             } else if (refreshBtn) {
                 handleRefreshItem(item);
             }
@@ -4464,6 +4543,16 @@ document.addEventListener('DOMContentLoaded', async () => {
             e.preventDefault();
             document.getElementById('search-input').focus();
         }
+    });
+    document.addEventListener('mousedown', (e) => {
+        if (e.button !== 0) return;
+        if (!state.selectedItemKeys.size) return;
+        if (state.draggingRowKeys.length) return;
+        const target = e.target;
+        if (!target?.closest) return;
+        if (target.closest('.custom-grid-row')) return;
+        clearRowSelection();
+        renderList({ preserveScroll: true });
     });
 
     // Sticky header
