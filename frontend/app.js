@@ -507,7 +507,13 @@ function itemIdentity(item) {
         return `id:${id}`;
     }
     const ownerId = item?.user_id ? String(item.user_id) : '';
-    return `key:${itemKey(item)}:${ownerId}`;
+    const group = item?.group ? String(item.group) : '';
+    const createdAt = item?.created_at ? String(item.created_at) : '';
+    return `key:${itemKey(item)}:${ownerId}:${group}:${createdAt}`;
+}
+
+function selectionKey(item) {
+    return itemIdentity(item);
 }
 
 function getCurrentUserIdentity() {
@@ -899,7 +905,7 @@ function persistCurrentItemOrder() {
 }
 
 function syncSelectedItemsWithState() {
-    const existing = new Set(state.items.map((item) => itemKey(item)));
+    const existing = new Set(state.items.map((item) => selectionKey(item)));
     state.selectedItemKeys = new Set(
         Array.from(state.selectedItemKeys).filter((key) => existing.has(key))
     );
@@ -1184,11 +1190,11 @@ function clearRowSelection() {
 }
 
 function getSelectedVisibleItems() {
-    return state.filteredItems.filter((item) => state.selectedItemKeys.has(itemKey(item)));
+    return state.filteredItems.filter((item) => state.selectedItemKeys.has(selectionKey(item)));
 }
 
 function getSelectedItems() {
-    return state.items.filter((item) => state.selectedItemKeys.has(itemKey(item)));
+    return state.items.filter((item) => state.selectedItemKeys.has(selectionKey(item)));
 }
 
 function getVisibleItems() {
@@ -1218,8 +1224,8 @@ function isInteractiveRowTarget(target) {
 
 function handleRowSelection(item, event) {
     if (!item) return;
-    const key = itemKey(item);
-    const visibleKeys = state.filteredItems.map((it) => itemKey(it));
+    const key = selectionKey(item);
+    const visibleKeys = state.filteredItems.map((it) => selectionKey(it));
 
     if (event.shiftKey && state.selectionAnchorKey && visibleKeys.includes(state.selectionAnchorKey)) {
         const start = visibleKeys.indexOf(state.selectionAnchorKey);
@@ -2147,7 +2153,8 @@ function renderRow(item) {
     const checkedAt = item.last_checked || item.created_at || '';
     const updatedAt = formatUpdatedAt(checkedAt);
     const key = itemKey(item);
-    const isSelected = state.selectedItemKeys.has(key);
+    const rowSelectionKey = selectionKey(item);
+    const isSelected = state.selectedItemKeys.has(rowSelectionKey);
     const isDragging = state.draggingRowKeys.includes(key);
     const isDropTarget = state.dragOverRowKey === key && !isDragging;
 
@@ -2166,6 +2173,7 @@ function renderRow(item) {
     row.dataset.spotifyId = item.spotify_id;
     row.dataset.userId = item.user_id ? String(item.user_id) : '';
     row.dataset.itemKey = key;
+    row.dataset.selectionKey = rowSelectionKey;
     row.draggable = true;
 
     row.innerHTML = `
@@ -2441,14 +2449,14 @@ async function handleDeleteItems(items) {
 
     const deletingMany = targets.length > 1;
     const firstLabel = targets[0].name || `${targets[0].type}:${targets[0].spotify_id}`;
-    const targetKeys = new Set(targets.map((item) => itemKey(item)));
+    const targetSelectionKeys = new Set(targets.map((item) => selectionKey(item)));
     const targetIdentitySet = new Set(targets.map((item) => itemIdentity(item)));
     const targetItemIds = new Set(targets.map((item) => String(item.id)).filter(Boolean));
 
     state.selectedItemKeys = new Set(
-        Array.from(state.selectedItemKeys).filter((key) => !targetKeys.has(key))
+        Array.from(state.selectedItemKeys).filter((key) => !targetSelectionKeys.has(key))
     );
-    if (state.selectionAnchorKey && targetKeys.has(state.selectionAnchorKey)) {
+    if (state.selectionAnchorKey && targetSelectionKeys.has(state.selectionAnchorKey)) {
         state.selectionAnchorKey = null;
     }
     state.items = state.items.filter((item) => !targetIdentitySet.has(itemIdentity(item)));
@@ -4316,13 +4324,13 @@ document.addEventListener('DOMContentLoaded', async () => {
             if (isInteractiveRowTarget(e.target)) return;
             const row = e.target.closest('.custom-grid-row');
             if (!row) return;
-            const rowKey = row.dataset.itemKey;
+            const rowSelectionKey = row.dataset.selectionKey;
             const keepMultiSelection =
                 !e.shiftKey
                 && !e.ctrlKey
                 && !e.metaKey
                 && state.selectedItemKeys.size > 1
-                && state.selectedItemKeys.has(rowKey);
+                && state.selectedItemKeys.has(rowSelectionKey);
             if (keepMultiSelection) return;
             const item = state.items.find((i) =>
                 String(i.id) === String(row.dataset.itemId)
@@ -4371,7 +4379,7 @@ document.addEventListener('DOMContentLoaded', async () => {
             if (btn) {
                 const shouldDeleteSelection =
                     state.selectedItemKeys.size > 1
-                    && state.selectedItemKeys.has(itemKey(item));
+                    && state.selectedItemKeys.has(selectionKey(item));
                 if (shouldDeleteSelection) {
                     handleDeleteItems(getSelectedItems());
                 } else {
@@ -4388,8 +4396,11 @@ document.addEventListener('DOMContentLoaded', async () => {
                 return;
             }
             const draggedKey = row.dataset.itemKey;
-            const selectedKeys = state.selectedItemKeys.has(draggedKey)
-                ? state.filteredItems.map((item) => itemKey(item)).filter((key) => state.selectedItemKeys.has(key))
+            const draggedSelectionKey = row.dataset.selectionKey;
+            const selectedKeys = state.selectedItemKeys.has(draggedSelectionKey)
+                ? state.filteredItems
+                    .filter((item) => state.selectedItemKeys.has(selectionKey(item)))
+                    .map((item) => itemKey(item))
                 : [draggedKey];
             state.draggingRowKeys = selectedKeys;
             state.dragOverRowKey = draggedKey;
@@ -4539,6 +4550,16 @@ document.addEventListener('DOMContentLoaded', async () => {
             closeModal();
             closeImagePreview();
         }
+        const isDeleteKey = e.key === 'Delete' || e.key === 'Backspace';
+        if (isDeleteKey && state.currentView === 'linkchecker' && state.selectedItemKeys.size > 0) {
+            const target = e.target;
+            const typingTarget = Boolean(target?.closest?.('input, textarea, select, [contenteditable="true"]'));
+            if (!typingTarget) {
+                e.preventDefault();
+                handleDeleteItems(getSelectedItems());
+                return;
+            }
+        }
         if ((e.ctrlKey || e.metaKey) && e.key === 'k') {
             e.preventDefault();
             document.getElementById('search-input').focus();
@@ -4546,11 +4567,12 @@ document.addEventListener('DOMContentLoaded', async () => {
     });
     document.addEventListener('mousedown', (e) => {
         if (e.button !== 0) return;
+        if (state.currentView !== 'linkchecker') return;
         if (!state.selectedItemKeys.size) return;
         if (state.draggingRowKeys.length) return;
         const target = e.target;
         if (!target?.closest) return;
-        if (target.closest('.custom-grid-row')) return;
+        if (target.closest('#link-list .custom-grid-row')) return;
         clearRowSelection();
         renderList({ preserveScroll: true });
     });
