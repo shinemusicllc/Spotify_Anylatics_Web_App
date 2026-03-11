@@ -2539,16 +2539,13 @@ function ensureMetricSortControls() {
             </button>
             <div class="metric-sort-menu" data-sort-menu>
                 <button type="button" class="metric-sort-menu-item" data-sort-mode-option="none">
-                    <span class="metric-sort-menu-title">None</span>
-                    <span class="metric-sort-menu-subtitle">Danh sách mặc định</span>
+                    <span class="metric-sort-menu-title">None (Mặc định)</span>
                 </button>
                 <button type="button" class="metric-sort-menu-item" data-sort-mode-option="value">
                     <span class="metric-sort-menu-title">S&#7889; l&#432;&#7907;ng</span>
-                    <span class="metric-sort-menu-subtitle">Gi&#225; tr&#7883; hi&#7879;n t&#7841;i</span>
                 </button>
                 <button type="button" class="metric-sort-menu-item" data-sort-mode-option="delta">
                     <span class="metric-sort-menu-title">Bi&#7871;n &#273;&#7897;ng</span>
-                    <span class="metric-sort-menu-subtitle">M&#7913;c thay &#273;&#7893;i</span>
                 </button>
             </div>
         `;
@@ -2837,28 +2834,65 @@ function setExportInProgress(active, label = '') {
 
 function parseResponseFilename(response, fallbackName) {
     const contentDisposition = response?.headers?.get?.('Content-Disposition') || '';
-    if (!contentDisposition) return fallbackName;
+    const safeFallback = (fallbackName || '').trim();
+    if (!contentDisposition) return safeFallback;
     const utfMatch = contentDisposition.match(/filename\*=UTF-8''([^;]+)/i);
+    let candidate = '';
     if (utfMatch?.[1]) {
         try {
-            return decodeURIComponent(utfMatch[1].trim());
+            candidate = decodeURIComponent(utfMatch[1].trim());
         } catch {
-            return utfMatch[1].trim();
+            candidate = utfMatch[1].trim();
+        }
+    } else {
+        const plainMatch = contentDisposition.match(/filename="?([^\";]+)"?/i);
+        if (plainMatch?.[1]) {
+            candidate = plainMatch[1].trim();
         }
     }
-    const plainMatch = contentDisposition.match(/filename="?([^\";]+)"?/i);
-    if (plainMatch?.[1]) {
-        return plainMatch[1].trim();
-    }
-    return fallbackName;
+
+    // Strip unsafe filename chars and path separators to avoid browser fallback to blob UUID.
+    candidate = String(candidate || '')
+        .replace(/[\\/:"*?<>|]+/g, '-')
+        .replace(/\s+/g, ' ')
+        .trim()
+        .replace(/^[. ]+|[. ]+$/g, '');
+
+    return candidate || safeFallback;
 }
 
-async function downloadResponseAsFile(response, fallbackName) {
+function ensureDownloadExtension(fileName, contentType = '', fallbackExt = '') {
+    const normalizedName = String(fileName || '').trim();
+    const normalizedType = String(contentType || '').toLowerCase();
+    const fromType = normalizedType.includes('spreadsheetml')
+        ? 'xlsx'
+        : normalizedType.includes('text/plain')
+            ? 'txt'
+            : normalizedType.includes('text/csv')
+                ? 'csv'
+                : '';
+    const ext = (fallbackExt || fromType || '').replace(/^\./, '').trim().toLowerCase();
+    if (!ext) return normalizedName;
+    if (/\.[a-z0-9]{1,8}$/i.test(normalizedName)) return normalizedName;
+    return `${normalizedName || `spoticheck-export-${Date.now()}`}.${ext}`;
+}
+
+async function downloadResponseAsFile(response, fallbackName, expectedFormat = '') {
+    const contentType = response?.headers?.get?.('Content-Type') || '';
+    const lowerType = contentType.toLowerCase();
+    // Guard against accidentally downloading JSON/HTML error payload as random blob file.
+    if (lowerType.includes('application/json') || lowerType.includes('text/html')) {
+        const bodyText = await response.clone().text().catch(() => '');
+        throw new Error(bodyText || `Unexpected export response type: ${contentType || 'unknown'}`);
+    }
+
     const blob = await response.blob();
     const objectUrl = URL.createObjectURL(blob);
     const a = document.createElement('a');
     a.href = objectUrl;
-    a.download = parseResponseFilename(response, fallbackName);
+    const resolvedName = parseResponseFilename(response, fallbackName);
+    const finalName = ensureDownloadExtension(resolvedName, contentType, expectedFormat);
+    a.download = finalName || fallbackName || `spoticheck-export-${Date.now()}`;
     document.body.appendChild(a);
     a.click();
     a.remove();
@@ -3124,7 +3158,7 @@ async function runServerExport(contextAction, selectedItems) {
             request.exportAction === 'listview-excel' ? 'spoticheck-listview' : `spoticheck-${request.exportAction}`,
             request.format
         );
-        await downloadResponseAsFile(response, fallbackName);
+        await downloadResponseAsFile(response, fallbackName, request.format);
         showToast('Export completed', 'success');
         return true;
     } catch (err) {
