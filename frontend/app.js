@@ -1608,6 +1608,71 @@ function getAdminUserLabelById(userId) {
     return (match && (match.display_name || match.username)) || '';
 }
 
+function getOwnerGroupLabelCandidates(ownerUserId) {
+    const ownerId = ownerUserId ? String(ownerUserId) : '';
+    const labels = new Set();
+    const push = (value) => {
+        const v = normalizeGroupName(value);
+        if (v) labels.add(v);
+    };
+
+    if (ownerId) {
+        const owner = (state.adminUserList || []).find((u) => String(u.id || u._id || '') === ownerId);
+        if (owner) {
+            push(owner.display_name);
+            push(owner.username);
+        }
+    }
+
+    push(getAdminUserLabelById(ownerId));
+    const me = getAuthUser();
+    if (me && (!ownerId || String(me.id || '') === ownerId)) {
+        push(me.display_name);
+        push(me.username);
+    }
+
+    return Array.from(labels);
+}
+
+function buildGroupNameVariants(groupName, ownerUserId = null) {
+    const variants = new Set();
+    const base = normalizeStoredGroupName(groupName);
+    const raw = normalizeGroupName(groupName);
+    const push = (value) => {
+        const v = normalizeGroupName(value);
+        if (!v) return;
+        variants.add(v);
+    };
+
+    push(raw);
+    push(base);
+
+    if (raw.includes(' - ')) {
+        const suffix = normalizeGroupName(raw.split(' - ').slice(1).join(' - '));
+        push(suffix);
+    }
+
+    getOwnerGroupLabelCandidates(ownerUserId).forEach((label) => {
+        push(`${label} - ${base}`);
+        push(`${label.toUpperCase()} - ${base}`);
+        push(`${label.toLowerCase()} - ${base}`);
+    });
+
+    return Array.from(variants);
+}
+
+function groupNameMatchesVariants(value, variants) {
+    const all = Array.isArray(variants) ? variants : [];
+    if (!all.length) return false;
+    const normalizedValue = normalizeGroupName(value).toLowerCase();
+    const storedValue = normalizeStoredGroupName(value).toLowerCase();
+    return all.some((v) => {
+        const n = normalizeGroupName(v).toLowerCase();
+        const s = normalizeStoredGroupName(v).toLowerCase();
+        return Boolean(n) && (n === normalizedValue || n === storedValue || s === normalizedValue || s === storedValue);
+    });
+}
+
 function isUuidLike(value) {
     return /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(String(value || '').trim());
 }
@@ -2019,10 +2084,13 @@ async function handleDeleteGroup(rawGroupId) {
     const ownerUserId = target?.ownerUserId
         ? String(target.ownerUserId)
         : (parsedEntry?.ownerUserId ? String(parsedEntry.ownerUserId) : getScopedGroupOwnerUserId());
+    const groupNameVariants = buildGroupNameVariants(target?.name || groupId, ownerUserId);
     const groupKey = normalizeStoredGroupName(target?.name || groupId).toLowerCase();
     const nextGroups = getOwnerCustomGroups(ownerUserId).filter((name) => {
-        const normalized = normalizeStoredGroupName(name);
-        return normalized && normalized.toLowerCase() !== groupKey;
+        const normalized = normalizeStoredGroupName(name).toLowerCase();
+        if (!normalized) return false;
+        if (normalized === groupKey) return false;
+        return !groupNameMatchesVariants(name, groupNameVariants);
     });
     if (isAdminAllUsersMode() && ownerUserId) {
         setOwnerCustomGroups(ownerUserId, nextGroups);
@@ -2034,11 +2102,12 @@ async function handleDeleteGroup(rawGroupId) {
 
     state.items = state.items.map((item) => {
         const itemGroup = normalizeStoredGroupName(item.group);
-        if (!itemGroup || itemGroup.toLowerCase() !== groupKey) return item;
+        if (!itemGroup) return item;
+        if (itemGroup.toLowerCase() !== groupKey && !groupNameMatchesVariants(item.group, groupNameVariants)) return item;
         if (target?.ownerUserId && !isItemOwnedByUser(item, target.ownerUserId)) return item;
         return { ...item, group: null };
     });
-    await syncGroupItemsToServer(target?.name || groupName, '', ownerUserId || null);
+    await syncGroupItemsToServer(target?.name || groupName, '', ownerUserId || null, groupNameVariants);
 
     if ((state.activeGroup || '').toLowerCase() === groupId.toLowerCase()) {
         state.activeGroup = ALL_GROUP_ID;
@@ -2096,15 +2165,27 @@ function cancelRenameGroupFlow() {
     renderGroups();
 }
 
-function syncGroupItemsToServer(oldName, newName, ownerUserId = null) {
+async function syncGroupItemsToServer(oldName, newName, ownerUserId = null, oldNameVariants = null) {
     const oldGroup = normalizeGroupName(oldName);
     if (!oldGroup) return Promise.resolve();
     const nextGroup = normalizeGroupName(newName);
     const targetUserId = ownerUserId ? String(ownerUserId) : null;
-    return api.renameGroup(oldGroup, nextGroup, targetUserId).catch((err) => {
-        console.warn('[Group Sync] Failed:', err.message);
-        showToast(`Saved locally, server sync failed: ${err.message}`, 'info');
-    });
+    const candidates = Array.from(new Set([
+        oldGroup,
+        ...((Array.isArray(oldNameVariants) ? oldNameVariants : []).map((v) => normalizeGroupName(v)).filter(Boolean)),
+    ]));
+    let lastErr = null;
+    for (const candidate of candidates) {
+        try {
+            await api.renameGroup(candidate, nextGroup, targetUserId);
+        } catch (err) {
+            lastErr = err;
+            console.warn('[Group Sync] Failed for candidate:', candidate, err.message);
+        }
+    }
+    if (lastErr) {
+        showToast(`Saved locally, server sync failed: ${lastErr.message}`, 'info');
+    }
 }
 
 function handleRenameGroup(rawGroupId, rawName, opts = {}) {
