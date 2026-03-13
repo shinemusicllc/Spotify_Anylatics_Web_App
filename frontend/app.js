@@ -3216,6 +3216,8 @@ function buildExportTrackTitle(artistLabel, trackName) {
     const cleanTrackName = cleanExportText(trackName) || '-';
     const cleanArtistLabel = cleanExportText(artistLabel) || '';
     if (!cleanArtistLabel || cleanArtistLabel === '-') return cleanTrackName;
+    const prefix = `${cleanArtistLabel} - `;
+    if (cleanTrackName.toLowerCase().startsWith(prefix.toLowerCase())) return cleanTrackName;
     return `${cleanArtistLabel} - ${cleanTrackName}`;
 }
 
@@ -3494,6 +3496,7 @@ function inferStructuredClipboardAction(items) {
     if (type === 'playlist') return 'clipboard-playlist-type3';
     if (type === 'album') return 'clipboard-album-type0';
     if (type === 'track') return 'clipboard-track-offline';
+    if (type === 'artist') return 'clipboard-artist-basic';
     return null;
 }
 
@@ -3502,6 +3505,7 @@ function getClipboardContextLabel(items) {
     if (action === 'clipboard-playlist-type3') return 'Clipboard (Playlist)';
     if (action === 'clipboard-album-type0') return 'Clipboard (Album)';
     if (action === 'clipboard-track-offline') return 'Clipboard (Track)';
+    if (action === 'clipboard-artist-basic') return 'Clipboard (Artist)';
     if ((items || []).length > 0) return 'Clipboard (Chọn cùng 1 loại)';
     return 'Clipboard';
 }
@@ -3588,7 +3592,7 @@ function buildAlbumType0ExportRows(items) {
                     blockRows.push([
                         albumName,
                         String(index + 1),
-                        cleanExportText(track.track_name || '-'),
+                        buildExportTrackTitle(track.artist_names || '-', track.track_name || '-'),
                         cleanExportText(track.spotify_url || ''),
                         formatExportMetricPlain(track.playcount_estimate ?? ''),
                     ]);
@@ -3598,7 +3602,7 @@ function buildAlbumType0ExportRows(items) {
             blockRows.push([
                 albumName,
                 '1',
-                cleanExportText(item.name || '-'),
+                buildExportTrackTitle(getItemArtistsLabel(item) || item.owner_name || '-', item.name || '-'),
                 getItemSpotifyUrlForExport(item),
                 formatExportMetricPlain(item.playcount),
             ]);
@@ -3625,6 +3629,17 @@ function buildTrackOfflineExportRows(items) {
                 firstArtistListenPerMonthCount,
             ];
         });
+}
+
+function buildArtistBasicExportRows(items) {
+    return (items || [])
+        .filter((item) => item?.type === 'artist')
+        .map((item) => [
+            cleanExportText(item.name || '-'),
+            getItemSpotifyUrlForExport(item),
+            formatExportMetricPlain(item.followers),
+            formatExportMetricPlain(item.monthly_listeners),
+        ]);
 }
 
 function rowsToDelimitedText(rows, delimiter = '\t') {
@@ -3666,6 +3681,13 @@ function getStructuredExportRows(action, items) {
             title: 'track offline',
         };
     }
+    if (action.endsWith('artist-basic')) {
+        return {
+            rows: buildArtistBasicExportRows(items),
+            filePrefix: 'spoticheck-artist-basic',
+            title: 'artist',
+        };
+    }
     return { rows: [], filePrefix: 'spoticheck-export', title: 'export' };
 }
 
@@ -3698,6 +3720,9 @@ function mapContextActionToExportRequest(action) {
     if (action === 'clipboard-track-offline') {
         return { exportAction: 'track-offline', format: 'json', deepFetch: false };
     }
+    if (action === 'clipboard-artist-basic') {
+        return { exportAction: 'artist-basic', format: 'json', deepFetch: false };
+    }
     if (action === 'txt-playlist-type3') {
         return { exportAction: 'playlist-type3', format: 'txt', deepFetch: true };
     }
@@ -3706,6 +3731,9 @@ function mapContextActionToExportRequest(action) {
     }
     if (action === 'txt-track-offline') {
         return { exportAction: 'track-offline', format: 'txt', deepFetch: false };
+    }
+    if (action === 'txt-artist-basic') {
+        return { exportAction: 'artist-basic', format: 'txt', deepFetch: false };
     }
     return null;
 }
@@ -3860,6 +3888,7 @@ function updateRowContextMenuLabels() {
         'txt-playlist-type3',
         'txt-album-type0',
         'txt-track-offline',
+        'txt-artist-basic',
     ].forEach((action) => setContextActionDisabled(menu, action, !hasSelection || disableForExport));
     setContextActionDisabled(menu, 'clipboard-auto', !hasSelection || disableForExport || !clipboardAction);
     menu.querySelectorAll('[data-context-group]').forEach((groupEl) => {

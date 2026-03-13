@@ -30,6 +30,7 @@ EXPORT_ACTIONS = {
     "playlist-type3",
     "album-type0",
     "track-offline",
+    "artist-basic",
 }
 EXPORT_FORMATS = {"json", "txt", "xlsx"}
 
@@ -140,6 +141,7 @@ def _build_album_export_tracks(raw_data: dict | None) -> list[dict]:
                 "artist_names": ", ".join(artist_names) if artist_names else "-",
                 "track_name": track_name.strip(),
                 "spotify_url": spotify_url,
+                "playcount_estimate": track.get("playcount_estimate"),
             }
         )
 
@@ -393,6 +395,9 @@ def _build_export_track_title(artist_label: str, track_name: str) -> str:
     clean_artist_label = _safe_export_text(artist_label) or ""
     if not clean_artist_label or clean_artist_label == "-":
         return clean_track_name
+    prefix = f"{clean_artist_label} - "
+    if clean_track_name.lower().startswith(prefix.lower()):
+        return clean_track_name
     return f"{clean_artist_label} - {clean_track_name}"
 
 
@@ -421,6 +426,26 @@ def _merge_export_blocks(blocks: list[list[list[str]]]) -> list[list[str]]:
         merged_rows.append(merged_row)
 
     return merged_rows
+
+
+def _build_artist_basic_rows(
+    items: list[Item],
+    raw_map: dict[str, dict],
+) -> tuple[list[str], list[list[str]], str]:
+    headers: list[str] = []
+    rows: list[list[str]] = []
+    for item in items:
+        if item.item_type != "artist":
+            continue
+        rows.append(
+            [
+                _safe_export_text(item.name) or "-",
+                _spotify_url("artist", item.spotify_id),
+                _format_export_metric(item.followers),
+                _format_export_metric(item.monthly_listeners),
+            ]
+        )
+    return headers, rows, "spoticheck-artist-basic"
 
 
 def _extract_playlist_owner(item: Item, raw_data: dict | None) -> str:
@@ -544,18 +569,21 @@ def _build_album_type0_rows(
                     [
                         album_name,
                         str(index),
-                        track_name,
+                        _build_export_track_title(_extract_export_track_artists(track), track_name),
                         _extract_export_track_url(track),
                         _format_export_metric(track.get("playcount_estimate")),
                     ]
                 )
                 index += 1
         else:
+            fallback_artist = _safe_export_text(item.owner_name) or _safe_export_text(
+                ", ".join(_extract_artist_names(raw_data))
+            ) or "-"
             block_rows.append(
                 [
                     album_name,
                     "1",
-                    _safe_export_text(item.name) or "-",
+                    _build_export_track_title(fallback_artist, _safe_export_text(item.name) or "-"),
                     _spotify_url("album", item.spotify_id),
                     _format_export_metric(item.playcount),
                 ]
@@ -602,6 +630,8 @@ def _build_export_rows(
         return _build_album_type0_rows(items, raw_map)
     if action == "track-offline":
         return _build_track_offline_rows(items, raw_map)
+    if action == "artist-basic":
+        return _build_artist_basic_rows(items, raw_map)
     raise HTTPException(status_code=400, detail="Unsupported export action")
 
 

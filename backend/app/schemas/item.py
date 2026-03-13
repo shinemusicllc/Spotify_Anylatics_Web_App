@@ -10,6 +10,7 @@ class AlbumTrackExport(BaseModel):
     artist_names: str
     track_name: str
     spotify_url: str | None = None
+    playcount_estimate: int | None = None
 
 
 class ItemResponse(BaseModel):
