@@ -1461,8 +1461,7 @@ h3 {
   background: #eab308;
 }
 .status-dot.crawling {
-  background: #3b82f6;
-  animation: pulse-dot 1.2s ease-in-out infinite;
+  display: none;
 }
 
 @keyframes pulse-dot {
