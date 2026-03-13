@@ -884,22 +884,12 @@ async def fetch_playlist(playlist_id: str) -> dict[str, Any] | None:
 
 async def fetch_album(album_id: str) -> dict[str, Any] | None:
     """Fetch album metadata from Spotify Web API, fallback to oEmbed."""
-    playwright_task: asyncio.Task | None = None
-    if settings.PLAYWRIGHT_ENABLE_FALLBACK and settings.PLAYWRIGHT_INLINE_FALLBACK:
-        playwright_task = asyncio.create_task(spotify_web_scraper.scrape_album_stats(album_id))
-
     pathfinder = await _fetch_album_via_pathfinder(album_id)
     if pathfinder is not None:
-        needs_playwright = (
-            pathfinder.get("name") in (None, "")
-            or pathfinder.get("owner_name") in (None, "")
-            or (pathfinder.get("playcount") is None and pathfinder.get("total_plays") is None)
-        )
-        if not settings.PLAYWRIGHT_INLINE_FALLBACK or not needs_playwright:
-            _cancel_scrape_task(playwright_task)
-            return pathfinder
-        scraped = await _consume_scrape_task(playwright_task, "album")
-        return await _apply_album_playwright_fallback(album_id, pathfinder, scraped)
+        # Album fast-path now mirrors the legacy desktop app more closely:
+        # prefer Pathfinder/network data and return immediately instead of
+        # waiting for Playwright when aggregate playcount is still missing.
+        return pathfinder
 
     status, data = await _get_json(f"/albums/{album_id}")
     if status == 200 and data:
@@ -916,32 +906,17 @@ async def fetch_album(album_id: str) -> dict[str, Any] | None:
             "total_plays": None,
             "crawl_mode": "webapi_album",
         }
-        needs_playwright = (
-            result.get("name") in (None, "")
-            or result.get("owner_name") in (None, "")
-            or (result.get("playcount") is None and result.get("total_plays") is None)
-        )
-        if not settings.PLAYWRIGHT_INLINE_FALLBACK or not needs_playwright:
-            _cancel_scrape_task(playwright_task)
-            return result
-        scraped = await _consume_scrape_task(playwright_task, "album")
-        return await _apply_album_playwright_fallback(album_id, result, scraped)
+        return result
 
     fallback = await _fallback_oembed("album", album_id)
     if fallback:
         fallback["crawl_mode"] = "oembed"
-        needs_playwright = (
-            fallback.get("name") in (None, "")
-            or fallback.get("owner_name") in (None, "")
-            or (fallback.get("playcount") is None and fallback.get("total_plays") is None)
-        )
-        if not settings.PLAYWRIGHT_INLINE_FALLBACK or not needs_playwright:
-            _cancel_scrape_task(playwright_task)
-            return fallback
-        scraped = await _consume_scrape_task(playwright_task, "album")
-        return await _apply_album_playwright_fallback(album_id, fallback, scraped)
+        return fallback
 
-    scraped = await _consume_scrape_task(playwright_task, "album")
+    if settings.PLAYWRIGHT_ENABLE_FALLBACK:
+        scraped = await spotify_web_scraper.scrape_album_stats(album_id)
+    else:
+        scraped = None
     if scraped:
         return {
             "name": scraped.get("name"),
@@ -1167,7 +1142,7 @@ async def _hydrate_album_track_playcounts_via_pathfinder(tracks: list[dict[str, 
     if not missing_ids:
         return tracks, False
 
-    semaphore = asyncio.Semaphore(6)
+    semaphore = asyncio.Semaphore(12)
 
     async def fetch_one(track_id: str) -> tuple[str, dict[str, Any] | None]:
         async with semaphore:

@@ -244,6 +244,8 @@ const state = {
     textSortColumn: null,
     textSortDirection: 'asc',
     textSortMenuOpenKey: null,
+    lastGroupRenderSignature: '',
+    lastListRenderSignature: '',
 };
 
 // â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
@@ -1946,11 +1948,37 @@ function rebuildGroups() {
     state.activeGroup = remapped ? remapped.id : ALL_GROUP_ID;
 }
 
-function renderGroups() {
+function getGroupRenderSignature(groups) {
+    return JSON.stringify({
+        activeGroup: normalizeGroupName(state.activeGroup) || ALL_GROUP_ID,
+        selectedGroupIds: Array.from(state.selectedGroupIds).sort(),
+        renamingGroupId: state.renamingGroupId || '',
+        isCreatingGroup: Boolean(state.isCreatingGroup),
+        draggingGroupIds: state.draggingGroupIds.slice(),
+        dragOverGroupId: state.dragOverGroupId || '',
+        dragOverGroupPlacement: state.dragOverGroupPlacement || '',
+        groupSearchQuery: state.groupSearchQuery || '',
+        groups: groups.map((group) => [
+            String(group.id || ''),
+            String(group.name || ''),
+            String(group.displayName || group.name || ''),
+            String(group.ownerUserId || ''),
+            Number(group.count || 0),
+        ].join('|')),
+    });
+}
+
+function renderGroups(opts = {}) {
     const container = document.getElementById('group-list');
     if (!container) return;
 
     const groups = getVisibleSidebarGroups();
+    const nextSignature = getGroupRenderSignature(groups);
+    const hasRenderedContent = container.childElementCount > 0;
+    if (!opts.force && hasRenderedContent && nextSignature === state.lastGroupRenderSignature) {
+        return;
+    }
+    state.lastGroupRenderSignature = nextSignature;
 
     const groupButtons = groups.map((g) => {
         const isActive = g.id === state.activeGroup;
@@ -3047,6 +3075,7 @@ function escapeHtml(str) {
 
 function renderList(opts = {}) {
     const preserveScroll = Boolean(opts?.preserveScroll);
+    const force = Boolean(opts?.force);
     const container = document.getElementById('link-list');
     const skeleton = document.getElementById('skeleton-container');
     const emptyState = document.getElementById('empty-state');
@@ -3067,6 +3096,67 @@ function renderList(opts = {}) {
 
     const items = getVisibleItems();
     state.filteredItems = items;
+    const listRenderSignature = JSON.stringify({
+        activeGroup: normalizeGroupName(state.activeGroup) || ALL_GROUP_ID,
+        searchQuery: state.searchQuery || '',
+        selectedItemKeys: Array.from(state.selectedItemKeys).sort(),
+        draggingRowKeys: state.draggingRowKeys.slice(),
+        dragOverRowKey: state.dragOverRowKey || '',
+        dragOverRowPlacement: state.dragOverRowPlacement || '',
+        metricSortColumn: state.metricSortColumn || '',
+        metricSortMode: state.metricSortMode || '',
+        metricSortDirection: state.metricSortDirection || '',
+        metricSortMenuOpenKey: state.metricSortMenuOpenKey || '',
+        textSortColumn: state.textSortColumn || '',
+        textSortDirection: state.textSortDirection || '',
+        textSortMenuOpenKey: state.textSortMenuOpenKey || '',
+        totalItemCount: state.items.length,
+        visibleItems: items.map((item) => {
+            const excel = getExcelColumnValues(item);
+            return [
+                selectionKey(item),
+                String(item.id || ''),
+                String(item.type || ''),
+                String(item.spotify_id || ''),
+                String(item.user_id || ''),
+                String(getDisplayTitle(item) || ''),
+                String(getItemSubtitle(item) || ''),
+                String(item.owner_name || ''),
+                String(item.owner_image || ''),
+                String(item.image || ''),
+                String(item.status || ''),
+                String(item.error_code || ''),
+                String(item.error_message || ''),
+                String(item.last_checked || ''),
+                String(item.created_at || ''),
+                String(item.group || ''),
+                String(excel.playlistSaves ?? ''),
+                String(excel.playlistSavesDelta ?? ''),
+                String(excel.playlistTrackCount ?? ''),
+                String(excel.playlistTrackCountDelta ?? ''),
+                String(excel.albumTrackCount ?? ''),
+                String(excel.albumTrackCountDelta ?? ''),
+                String(excel.artistFollowers ?? ''),
+                String(excel.artistFollowersDelta ?? ''),
+                String(excel.artistListeners ?? ''),
+                String(excel.artistListenersDelta ?? ''),
+                String(excel.trackViews ?? ''),
+                String(excel.trackViewsDelta ?? ''),
+                String(excel.deltaDays ?? ''),
+            ].join('|');
+        }),
+    });
+    const hasRenderedRows = container.querySelector('.custom-grid-row') || (emptyState && emptyState.style.display !== 'none');
+    if (!force && hasRenderedRows && listRenderSignature === state.lastListRenderSignature) {
+        if (skeleton) skeleton.style.display = 'none';
+        updateKPIs();
+        refreshCheckedLabels();
+        updateMetricSortControlsUI();
+        updateTextSortControlsUI();
+        restoreScroll();
+        return;
+    }
+    state.lastListRenderSignature = listRenderSignature;
 
     // Clear previous rows (keep skeleton and empty state)
     container.querySelectorAll('.custom-grid-row').forEach(el => el.remove());
@@ -4586,7 +4676,7 @@ async function pollJobs() {
     } else if (hasTerminalUpdate) {
         renderList({ preserveScroll: true });
     } else {
-        renderList({ preserveScroll: true });
+        refreshCheckedLabels();
     }
 }
 

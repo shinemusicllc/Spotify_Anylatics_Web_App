@@ -168,7 +168,9 @@ async def _apply_direct_playwright_fallback(
         if item_type == "album":
             if already_playwright and not had_error:
                 return merged
-            existing_has_core = existing.get("playcount") is not None
+            existing_track_rows = merged.get("tracks")
+            existing_has_track_rows = isinstance(existing_track_rows, list) and len(existing_track_rows) > 0
+            existing_has_core = existing.get("playcount") is not None or existing_has_track_rows
             if had_error and settings.PLAYWRIGHT_FAST_FAIL_ERRORS and not existing_has_core:
                 return merged
             if existing_has_core:
@@ -185,7 +187,7 @@ async def _apply_direct_playwright_fallback(
                 had_error
                 or merged.get("name") in (None, "")
                 or merged.get("owner_name") in (None, "")
-                or (merged.get("playcount") is None and merged.get("total_plays") is None)
+                or merged.get("track_count") is None
             )
             if not needs:
                 return merged
