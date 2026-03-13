@@ -398,7 +398,7 @@
                 <span class="flex items-center gap-1"><b class="text-white">Crawling:</b> <span id="footer-crawling">0</span></span>
             </div>
             <div class="flex items-center gap-4">
-                <button id="btn-clear-list" onclick="clearList()" class="hover:text-white transition-colors cursor-pointer">Clear List</button>
+                <button id="btn-clear-list" onclick="clearList()" class="hidden hover:text-white transition-colors cursor-pointer">Clear List</button>
                 <div class="w-[1px] h-3 bg-white/10"></div>
                 <span>API Status: <span id="api-status" class="text-primary font-bold uppercase">Connecting...</span></span>
             </div>
@@ -419,6 +419,18 @@
                     <label class="block text-sm font-medium text-secondary-text mb-2">Spotify URL or URI (one per line)</label>
                     <textarea id="modal-batch-input" class="modal-input resize-none" rows="6" placeholder="https://open.spotify.com/playlist/...\nhttps://open.spotify.com/track/...\nspotify:album:..."></textarea>
                     <p id="modal-url-hint" class="text-xs text-secondary-text mt-2">Supports: playlist, track, album, and artist links</p>
+                    <label class="modal-option-card mt-3 cursor-pointer select-none" for="modal-dedupe-links">
+                        <span class="modal-option-check">
+                            <input id="modal-dedupe-links" type="checkbox" checked>
+                            <span class="modal-option-box" aria-hidden="true">
+                                <span class="material-icons-round">check</span>
+                            </span>
+                        </span>
+                        <span class="modal-option-copy">
+                            <span class="modal-option-title">Skip duplicate links</span>
+                            <span class="modal-option-description">Ignore repeated Spotify URLs in the pasted list before crawling.</span>
+                        </span>
+                    </label>
                 </div>
                 <div>
                     <label class="block text-sm font-medium text-secondary-text mb-2">Group (optional)</label>
@@ -565,7 +577,7 @@
             </button>
             <button type="button" class="row-context-item" data-context-action="clear-list">
                 <span class="material-icons-round">clear_all</span>
-                <span>Clear List</span>
+                <span data-context-label="clear-list">Clear List</span>
             </button>
 
             <button type="button" class="row-context-item" data-context-action="export-listview-excel">
@@ -574,24 +586,10 @@
             </button>
             <div class="row-context-separator"></div>
 
-            <div class="row-context-parent" data-context-group="clipboard">
-                <button type="button" class="row-context-item row-context-submenu-trigger">
-                    <span class="material-icons-round">content_paste</span>
-                    <span>Clipboard</span>
-                    <span class="material-icons-round row-context-chevron">chevron_right</span>
-                </button>
-                <div class="row-context-submenu">
-                    <button type="button" class="row-context-item row-context-submenu-item" data-context-action="clipboard-playlist-type3">
-                        <span>Playlist: Nghe si - Ten track | Link track | PlayCount</span>
-                    </button>
-                    <button type="button" class="row-context-item row-context-submenu-item" data-context-action="clipboard-album-type0">
-                        <span>Album: Ten album | STT track | Ten track | Link track | PlayCount</span>
-                    </button>
-                    <button type="button" class="row-context-item row-context-submenu-item" data-context-action="clipboard-track-offline">
-                        <span>Track Offline: Nghe si - Ten track | Link track | PlayCount | Listener/thang</span>
-                    </button>
-                </div>
-            </div>
+            <button type="button" class="row-context-item" data-context-action="clipboard-auto">
+                <span class="material-icons-round">content_paste</span>
+                <span data-context-label="clipboard">Clipboard</span>
+            </button>
 
             <div class="row-context-parent" data-context-group="txt">
                 <button type="button" class="row-context-item row-context-submenu-trigger">

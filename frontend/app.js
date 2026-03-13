@@ -213,10 +213,14 @@ const state = {
     adminUsersPromise: null,
     selectedItemKeys: new Set(),
     selectionAnchorKey: null,
+    selectedGroupIds: new Set(),
+    groupSelectionAnchorId: null,
+    selectionScope: 'items',
     draggingRowKeys: [],
     dragOverRowKey: null,
     dragOverRowPlacement: 'before',
     draggingGroupId: null,
+    draggingGroupIds: [],
     dragOverGroupId: null,
     dragOverGroupPlacement: 'before',
     suppressNextGroupClick: false,
@@ -237,6 +241,9 @@ const state = {
     metricSortMode: 'value',
     metricSortDirection: 'desc',
     metricSortMenuOpenKey: null,
+    textSortColumn: null,
+    textSortDirection: 'asc',
+    textSortMenuOpenKey: null,
 };
 
 // â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
@@ -313,7 +320,13 @@ class SpotiCheckAPI {
         const suffix = qs.toString() ? `?${qs.toString()}` : '';
         return this._fetch(`/items/${type}/${id}${suffix}`, { method: 'DELETE' });
     }
-    clearItems()          { return this._fetch('/items', { method: 'DELETE' }); }
+    clearItems(group = null, userId = null) {
+        const qs = new URLSearchParams();
+        if (group) qs.set('group', String(group));
+        if (userId) qs.set('user_id', String(userId));
+        const suffix = qs.toString() ? `?${qs.toString()}` : '';
+        return this._fetch(`/items${suffix}`, { method: 'DELETE' });
+    }
     getMyPreferences()    { return this._fetch('/auth/me/preferences'); }
     saveMyPreferences(preferences = {}) {
         return this._fetch('/auth/me/preferences', {
@@ -925,14 +938,30 @@ function getItemUserAvatar(item) {
     return match?.avatar || null;
 }
 
+function getItemArtistNames(item) {
+    const artists = Array.isArray(item?.artist_names)
+        ? item.artist_names.map((name) => normalizeStoredGroupName(name)).filter(Boolean)
+        : [];
+    return Array.from(new Set(artists));
+}
+
+function buildPrefixedTitle(prefix, baseTitle) {
+    const base = normalizeStoredGroupName(baseTitle) || 'Unknown';
+    const prefixLabel = normalizeStoredGroupName(prefix);
+    if (!prefixLabel) return base;
+    if (base.toLowerCase().startsWith(`${prefixLabel.toLowerCase()} -`)) return base;
+    return `${prefixLabel} - ${base}`;
+}
+
 function getDisplayTitle(item) {
     const baseTitle = item.name || 'Unknown';
-    if (item.type !== 'playlist') return baseTitle;
-
-    const artistOrOwner = (item.owner_name || (Array.isArray(item.artist_names) ? item.artist_names[0] : '') || '').trim();
-    if (!artistOrOwner) return baseTitle;
-    if (baseTitle.toLowerCase().startsWith(`${artistOrOwner.toLowerCase()} -`)) return baseTitle;
-    return `${artistOrOwner} - ${baseTitle}`;
+    if (item.type === 'playlist') {
+        const artistOrOwner = normalizeStoredGroupName(
+            item.owner_name || getItemArtistNames(item)[0] || ''
+        );
+        return buildPrefixedTitle(artistOrOwner, baseTitle);
+    }
+    return baseTitle;
 }
 
 function renderOwnerUpdatedCell(item, ownerUrl, updatedAt) {
@@ -964,6 +993,19 @@ function getPlaylistOwnerLabel(item) {
 function getPlaylistOwnerAvatar(item) {
     if (!item || item.type !== 'playlist') return null;
     return item.owner_image || item.playlist_owner_image || null;
+}
+
+function isTextSortColumn(colKey) {
+    return colKey === 'playlistOwner';
+}
+
+function getTextSortValue(item, colKey) {
+    if (colKey === 'playlistOwner') {
+        const owner = getPlaylistOwnerLabel(item);
+        if (!owner || owner === '-') return null;
+        return owner.toLocaleLowerCase();
+    }
+    return null;
 }
 
 function renderPlaylistOwnerCell(item) {
@@ -1354,12 +1396,52 @@ function clearRowSelection() {
     state.selectionAnchorKey = null;
 }
 
+function clearGroupSelection() {
+    state.selectedGroupIds = new Set();
+    state.groupSelectionAnchorId = null;
+}
+
+function getPreferredSelectionScope(target) {
+    const eventTarget = target instanceof Element ? target : null;
+    const activeElement = document.activeElement instanceof Element ? document.activeElement : null;
+    if (eventTarget?.closest?.('#group-panel') || activeElement?.closest?.('#group-panel')) {
+        return 'groups';
+    }
+    if (eventTarget?.closest?.('.list-wrap, #link-list') || activeElement?.closest?.('.list-wrap, #link-list')) {
+        return 'items';
+    }
+    return state.selectionScope === 'groups' ? 'groups' : 'items';
+}
+
 function getSelectedVisibleItems() {
     return state.filteredItems.filter((item) => state.selectedItemKeys.has(selectionKey(item)));
 }
 
 function getSelectedItems() {
     return state.items.filter((item) => state.selectedItemKeys.has(selectionKey(item)));
+}
+
+function getVisibleSidebarGroups() {
+    const q = state.groupSearchQuery.trim().toLowerCase();
+    return state.groups.filter((g) => {
+        if (g.id === ALL_GROUP_ID) return true;
+        if (!q) return true;
+        return (g.displayName || g.name).toLowerCase().includes(q);
+    });
+}
+
+function getSelectedGroupEntries() {
+    return state.groups.filter((group) => state.selectedGroupIds.has(group.id));
+}
+
+function syncSelectedGroupsWithState() {
+    const valid = new Set(state.groups.map((group) => String(group.id)));
+    state.selectedGroupIds = new Set(
+        Array.from(state.selectedGroupIds).filter((groupId) => valid.has(String(groupId)))
+    );
+    if (state.groupSelectionAnchorId && !valid.has(String(state.groupSelectionAnchorId))) {
+        state.groupSelectionAnchorId = null;
+    }
 }
 
 function findItemFromRow(row) {
@@ -1423,6 +1505,23 @@ function getVisibleItems() {
         return sortedItems;
     }
 
+    if (state.textSortColumn && isTextSortColumn(state.textSortColumn)) {
+        const colKey = state.textSortColumn;
+        const direction = state.textSortDirection === 'desc' ? 'desc' : 'asc';
+        const sortFactor = direction === 'asc' ? 1 : -1;
+        const sortedItems = [...items];
+        sortedItems.sort((a, b) => {
+            const left = getTextSortValue(a, colKey);
+            const right = getTextSortValue(b, colKey);
+            if (!left && !right) return 0;
+            if (!left) return 1;
+            if (!right) return -1;
+            if (left === right) return 0;
+            return left > right ? sortFactor : -sortFactor;
+        });
+        return sortedItems;
+    }
+
     return items;
 }
 
@@ -1432,6 +1531,7 @@ function isInteractiveRowTarget(target) {
 
 function handleRowSelection(item, event) {
     if (!item) return;
+    state.selectionScope = 'items';
     const key = selectionKey(item);
     const visibleKeys = state.filteredItems.map((it) => selectionKey(it));
 
@@ -1533,7 +1633,7 @@ function syncGroupDragUi(container) {
     host.querySelectorAll('.group-item[data-group]').forEach((groupBtn) => {
         const groupId = normalizeGroupName(groupBtn.getAttribute('data-group'));
         const isDropTarget = Boolean(groupId && state.dragOverGroupId === groupId && state.draggingGroupId !== groupId);
-        groupBtn.classList.toggle('group-item-dragging', Boolean(groupId && state.draggingGroupId === groupId));
+        groupBtn.classList.toggle('group-item-dragging', Boolean(groupId && state.draggingGroupIds.includes(groupId)));
         groupBtn.classList.toggle('group-item-drop-target', isDropTarget);
         groupBtn.classList.toggle('group-drop-before', isDropTarget && state.dragOverGroupPlacement !== 'after');
         groupBtn.classList.toggle('group-drop-after', isDropTarget && state.dragOverGroupPlacement === 'after');
@@ -1850,17 +1950,13 @@ function renderGroups() {
     const container = document.getElementById('group-list');
     if (!container) return;
 
-    const q = state.groupSearchQuery.trim().toLowerCase();
-    const groups = state.groups.filter((g) => {
-        if (g.id === ALL_GROUP_ID) return true;
-        if (!q) return true;
-        return (g.displayName || g.name).toLowerCase().includes(q);
-    });
+    const groups = getVisibleSidebarGroups();
 
     const groupButtons = groups.map((g) => {
         const isActive = g.id === state.activeGroup;
+        const isSelected = state.selectedGroupIds.has(g.id);
         const canDelete = canManageGroupEntry(g);
-        const isDragging = state.draggingGroupId === g.id;
+        const isDragging = state.draggingGroupIds.includes(g.id);
         const isDropTarget = state.dragOverGroupId === g.id && !isDragging;
         const isRenaming = Boolean(
             state.renamingGroupId
@@ -1868,7 +1964,7 @@ function renderGroups() {
         );
         return `
             <button
-                class="group-item ${canDelete ? 'group-item-has-delete' : ''} ${isDragging ? 'group-item-dragging' : ''} ${isDropTarget ? 'group-item-drop-target' : ''} w-full flex items-center justify-between px-3 py-3 rounded-lg transition-colors ${isActive ? 'bg-primary/10 text-white' : 'text-secondary-text hover:text-white hover:bg-white/5'}"
+                class="group-item ${canDelete ? 'group-item-has-delete' : ''} ${isSelected ? 'group-item-selected' : ''} ${isDragging ? 'group-item-dragging' : ''} ${isDropTarget ? 'group-item-drop-target' : ''} w-full flex items-center justify-between px-3 py-3 rounded-lg transition-colors ${isActive ? 'bg-primary/10 text-white' : 'text-secondary-text hover:text-white hover:bg-white/5'}"
                 data-group="${escapeHtml(g.id)}"
                 draggable="${canDelete ? 'true' : 'false'}"
             >
@@ -1907,7 +2003,7 @@ function renderGroups() {
                             ${canDelete ? `
                             <span
                                 class="group-delete-btn material-icons-round"
-                                title="Delete group"
+                                title="${isSelected && state.selectedGroupIds.size > 1 && !state.selectedGroupIds.has(ALL_GROUP_ID) ? 'Delete selected groups' : 'Delete group'}"
                                 data-action="delete-group"
                                 data-group-id="${escapeHtml(g.id)}"
                             >delete</span>` : ''}
@@ -2029,6 +2125,198 @@ function resolveSelectedGroup() {
     return resolveSelectedGroupContext().group;
 }
 
+function getCurrentListScope() {
+    const activeEntry = getGroupEntryById(state.activeGroup);
+    const currentUser = getAuthUser();
+    const activeGroupName = activeEntry && activeEntry.id !== ALL_GROUP_ID
+        ? normalizeStoredGroupName(activeEntry.name)
+        : null;
+    let targetUserId = null;
+    if (currentUser?.role === 'admin') {
+        targetUserId = state.adminFilterUserId
+            ? String(state.adminFilterUserId)
+            : (activeEntry?.ownerUserId ? String(activeEntry.ownerUserId) : null);
+    }
+    return {
+        activeEntry,
+        group: activeGroupName,
+        targetUserId,
+        items: activeEntry && activeEntry.id !== ALL_GROUP_ID
+            ? state.items.filter((item) => doesItemMatchGroupEntry(item, activeEntry))
+            : state.items.slice(),
+        label: activeEntry && activeEntry.id !== ALL_GROUP_ID
+            ? (activeEntry.displayName || activeEntry.name)
+            : ALL_GROUP_LABEL,
+    };
+}
+
+function handleGroupSelection(groupId, event) {
+    const normalizedGroupId = normalizeGroupName(groupId) || ALL_GROUP_ID;
+    state.selectionScope = 'groups';
+    const visibleGroups = getVisibleSidebarGroups();
+    const visibleIds = visibleGroups.map((group) => group.id);
+    const anchorId = state.groupSelectionAnchorId && visibleIds.includes(state.groupSelectionAnchorId)
+        ? state.groupSelectionAnchorId
+        : normalizedGroupId;
+
+    if (normalizedGroupId.toLowerCase() === ALL_GROUP_ID) {
+        state.activeGroup = ALL_GROUP_ID;
+        state.selectedGroupIds = new Set([ALL_GROUP_ID]);
+        state.groupSelectionAnchorId = ALL_GROUP_ID;
+        return;
+    }
+
+    if (event?.shiftKey && visibleIds.includes(anchorId) && visibleIds.includes(normalizedGroupId)) {
+        const start = visibleIds.indexOf(anchorId);
+        const end = visibleIds.indexOf(normalizedGroupId);
+        const from = Math.min(start, end);
+        const to = Math.max(start, end);
+        state.selectedGroupIds = new Set(visibleIds.slice(from, to + 1));
+    } else if (event?.ctrlKey || event?.metaKey) {
+        const next = new Set(state.selectedGroupIds);
+        next.delete(ALL_GROUP_ID);
+        if (next.has(normalizedGroupId)) next.delete(normalizedGroupId);
+        else next.add(normalizedGroupId);
+        state.selectedGroupIds = next;
+    } else {
+        state.selectedGroupIds = new Set([normalizedGroupId]);
+    }
+
+    state.groupSelectionAnchorId = normalizedGroupId;
+    if (!state.selectedGroupIds.size) {
+        state.selectedGroupIds = new Set([normalizedGroupId]);
+    }
+    state.activeGroup = normalizedGroupId;
+}
+
+async function handleDeleteGroups(groupIds, opts = {}) {
+    const normalizedIds = Array.from(new Set((groupIds || [])
+        .map((groupId) => normalizeGroupName(groupId))
+        .filter(Boolean)))
+        .filter((groupId) => groupId.toLowerCase() !== ALL_GROUP_ID);
+    if (!normalizedIds.length) return;
+
+    const targets = normalizedIds
+        .map((groupId) => state.groups.find((group) => String(group.id).toLowerCase() === String(groupId).toLowerCase()))
+        .filter(Boolean)
+        .filter((group) => canManageGroupEntry(group));
+    if (!targets.length) return;
+
+    const confirmed = opts.confirm === false
+        ? true
+        : window.confirm(
+            targets.length > 1
+                ? `Delete ${targets.length} selected groups?\nAll links in those groups will move to All Links.`
+                : `Delete group "${targets[0].name}"?\nAll links in this group will move to All Links.`
+        );
+    if (!confirmed) return;
+
+    for (const target of targets) {
+        const groupId = normalizeGroupName(target.id);
+        const groupName = target.name || groupId;
+        const parsedEntry = parseGroupEntryId(groupId);
+        const ownerUserId = target?.ownerUserId
+            ? String(target.ownerUserId)
+            : (parsedEntry?.ownerUserId ? String(parsedEntry.ownerUserId) : getScopedGroupOwnerUserId());
+        const groupNameVariants = buildGroupNameVariants(target?.name || groupId, ownerUserId);
+        const groupKey = normalizeStoredGroupName(target?.name || groupId).toLowerCase();
+        const nextGroups = getOwnerCustomGroups(ownerUserId).filter((name) => {
+            const normalized = normalizeStoredGroupName(name).toLowerCase();
+            if (!normalized) return false;
+            if (normalized === groupKey) return false;
+            return !groupNameMatchesVariants(name, groupNameVariants);
+        });
+
+        if (isAdminAllUsersMode() && ownerUserId) {
+            setOwnerCustomGroups(ownerUserId, nextGroups);
+            await saveGroupsToServer(nextGroups, ownerUserId);
+        } else {
+            state.customGroups = nextGroups;
+            saveCustomGroups();
+        }
+
+        state.items = state.items.map((item) => {
+            const itemGroup = normalizeStoredGroupName(item.group);
+            if (!itemGroup) return item;
+            if (itemGroup.toLowerCase() !== groupKey && !groupNameMatchesVariants(item.group, groupNameVariants)) return item;
+            if (target?.ownerUserId && !isItemOwnedByUser(item, target.ownerUserId)) return item;
+            return { ...item, group: null };
+        });
+
+        await syncGroupItemsToServer(target?.name || groupName, '', ownerUserId || null, groupNameVariants);
+    }
+
+    const deletedIdSet = new Set(targets.map((target) => String(target.id)));
+    state.selectedGroupIds = new Set(
+        Array.from(state.selectedGroupIds).filter((groupId) => !deletedIdSet.has(String(groupId)))
+    );
+    if (deletedIdSet.has(String(state.activeGroup))) {
+        state.activeGroup = ALL_GROUP_ID;
+    }
+    if (state.renamingGroupId && deletedIdSet.has(String(state.renamingGroupId))) {
+        state.renamingGroupId = null;
+    }
+    state.isCreatingGroup = false;
+    syncGroupUI(true);
+    renderList({ preserveScroll: true });
+    showToast(
+        targets.length > 1
+            ? `Deleted ${targets.length} groups`
+            : `Deleted group: ${targets[0].name}`,
+        'success'
+    );
+}
+
+async function moveCustomGroupsBefore(draggedGroupIds, targetGroupId, placement = 'before') {
+    const draggedIds = Array.from(new Set((Array.isArray(draggedGroupIds) ? draggedGroupIds : [draggedGroupIds])
+        .map((groupId) => normalizeGroupName(groupId))
+        .filter(Boolean)))
+        .filter((groupId) => groupId.toLowerCase() !== ALL_GROUP_ID);
+    const target = normalizeGroupName(targetGroupId);
+    if (!draggedIds.length || !target || target.toLowerCase() === ALL_GROUP_ID) return false;
+    if (draggedIds.includes(target)) return false;
+
+    const draggedEntries = draggedIds
+        .map((groupId) => getGroupEntryById(groupId) || parseGroupEntryId(groupId))
+        .filter(Boolean);
+    const targetEntry = getGroupEntryById(target) || parseGroupEntryId(target);
+    if (!draggedEntries.length || !targetEntry) return false;
+
+    const ownerIds = Array.from(new Set(draggedEntries.map((entry) => String(entry.ownerUserId || ''))));
+    const targetOwnerId = String(targetEntry.ownerUserId || '');
+    if (ownerIds.length !== 1 || ownerIds[0] !== targetOwnerId) {
+        showToast('Only groups from the same owner can be moved together', 'info');
+        return false;
+    }
+
+    const ownerUserId = ownerIds[0] || null;
+    const current = Array.from(new Set(getOwnerCustomGroups(ownerUserId).map(normalizeStoredGroupName).filter(Boolean)));
+    const targetGroupName = normalizeStoredGroupName(targetEntry.name || target);
+    const draggedNames = draggedEntries
+        .map((entry) => normalizeStoredGroupName(entry.name || entry.id))
+        .filter(Boolean);
+    if (!targetGroupName || !draggedNames.length) return false;
+
+    const draggedNameSet = new Set(draggedNames.map((name) => name.toLowerCase()));
+    const remaining = current.filter((name) => !draggedNameSet.has(name.toLowerCase()));
+    const targetIndex = remaining.findIndex((name) => name.toLowerCase() === targetGroupName.toLowerCase());
+    if (targetIndex === -1) return false;
+    const insertIndex = placement === 'after' ? targetIndex + 1 : targetIndex;
+    remaining.splice(insertIndex, 0, ...draggedNames);
+
+    if (isAdminAllUsersMode() && ownerUserId) {
+        setOwnerCustomGroups(ownerUserId, remaining);
+        await saveGroupsToServer(remaining, ownerUserId);
+    } else {
+        state.customGroups = remaining;
+        saveCustomGroups();
+    }
+
+    state.selectedGroupIds = new Set(draggedIds);
+    syncGroupUI(true);
+    return true;
+}
+
 function handleCreateGroup(rawName) {
     const name = normalizeGroupName(rawName);
     if (!name) return;
@@ -2070,55 +2358,10 @@ function handleCreateGroup(rawName) {
 async function handleDeleteGroup(rawGroupId) {
     const groupId = normalizeGroupName(rawGroupId);
     if (!groupId || groupId.toLowerCase() === ALL_GROUP_ID) return;
-
-    const target = state.groups.find((g) => g.id.toLowerCase() === groupId.toLowerCase());
-    if (!canManageGroupEntry(target)) {
-        showToast('Select that user in Filter by User to manage this group', 'info');
-        return;
-    }
-    const groupName = target?.name || groupId;
-    const confirmed = window.confirm(`Delete group "${groupName}"?\nAll links in this group will move to All Links.`);
-    if (!confirmed) return;
-
-    const parsedEntry = parseGroupEntryId(groupId);
-    const ownerUserId = target?.ownerUserId
-        ? String(target.ownerUserId)
-        : (parsedEntry?.ownerUserId ? String(parsedEntry.ownerUserId) : getScopedGroupOwnerUserId());
-    const groupNameVariants = buildGroupNameVariants(target?.name || groupId, ownerUserId);
-    const groupKey = normalizeStoredGroupName(target?.name || groupId).toLowerCase();
-    const nextGroups = getOwnerCustomGroups(ownerUserId).filter((name) => {
-        const normalized = normalizeStoredGroupName(name).toLowerCase();
-        if (!normalized) return false;
-        if (normalized === groupKey) return false;
-        return !groupNameMatchesVariants(name, groupNameVariants);
-    });
-    if (isAdminAllUsersMode() && ownerUserId) {
-        setOwnerCustomGroups(ownerUserId, nextGroups);
-        await saveGroupsToServer(nextGroups, ownerUserId);
-    } else {
-        state.customGroups = nextGroups;
-        saveCustomGroups();
-    }
-
-    state.items = state.items.map((item) => {
-        const itemGroup = normalizeStoredGroupName(item.group);
-        if (!itemGroup) return item;
-        if (itemGroup.toLowerCase() !== groupKey && !groupNameMatchesVariants(item.group, groupNameVariants)) return item;
-        if (target?.ownerUserId && !isItemOwnedByUser(item, target.ownerUserId)) return item;
-        return { ...item, group: null };
-    });
-    await syncGroupItemsToServer(target?.name || groupName, '', ownerUserId || null, groupNameVariants);
-
-    if ((state.activeGroup || '').toLowerCase() === groupId.toLowerCase()) {
-        state.activeGroup = ALL_GROUP_ID;
-    }
-    state.isCreatingGroup = false;
-    if ((state.renamingGroupId || '').toLowerCase() === groupId.toLowerCase()) {
-        state.renamingGroupId = null;
-    }
-    syncGroupUI(true);
-    renderList();
-    showToast(`Deleted group: ${groupName}`, 'success');
+    const selected = state.selectedGroupIds.has(groupId)
+        ? Array.from(state.selectedGroupIds).filter((id) => String(id).toLowerCase() !== ALL_GROUP_ID)
+        : [groupId];
+    await handleDeleteGroups(selected);
 }
 
 function startCreateGroupFlow() {
@@ -2270,6 +2513,7 @@ function handleRenameGroup(rawGroupId, rawName, opts = {}) {
 
 function syncGroupUI(syncSelect = false) {
     rebuildGroups();
+    syncSelectedGroupsWithState();
     renderGroups();
     updateGroupHeader();
     if (syncSelect) populateGroupSelect();
@@ -2463,7 +2707,7 @@ function renderRow(item) {
     const displayTitle = getDisplayTitle(item);
 
     const row = document.createElement('div');
-    row.className = `custom-grid-row px-4 py-3 bg-white/5 rounded-lg border border-transparent hover:bg-row-hover hover:border-white/10 transition-all group ${isSelected ? 'row-selected' : ''} ${isDragging ? 'row-dragging' : ''} ${isDropTarget ? 'row-drop-target' : ''} ${isDropBefore ? 'row-drop-before' : ''} ${isDropAfter ? 'row-drop-after' : ''}`;
+    row.className = `custom-grid-row px-4 py-3 bg-white/5 rounded-lg border border-transparent transition-colors group ${isSelected ? 'row-selected' : ''} ${isDragging ? 'row-dragging' : ''} ${isDropTarget ? 'row-drop-target' : ''} ${isDropBefore ? 'row-drop-before' : ''} ${isDropAfter ? 'row-drop-after' : ''}`;
     row.dataset.itemId = item.id;
     row.dataset.type = item.type;
     row.dataset.spotifyId = item.spotify_id;
@@ -2624,10 +2868,61 @@ function updateMetricSortControlsUI() {
         }
     });
 }
+
+function updateTextSortControlsUI() {
+    const controls = document.querySelectorAll('.text-sort-controls[data-text-sort-col]');
+    controls.forEach((control) => {
+        const colKey = control.dataset.textSortCol;
+        const toggle = control.querySelector('[data-text-sort-menu-toggle]');
+        const dirToggle = control.querySelector('[data-text-sort-direction-toggle]');
+        const menu = control.querySelector('[data-text-sort-menu]');
+        const active = state.textSortColumn === colKey;
+        if (!toggle) return;
+        toggle.classList.toggle('is-active', active);
+        toggle.setAttribute(
+            'title',
+            active
+                ? (state.textSortDirection === 'asc' ? 'Playlist Owner A-Z' : 'Playlist Owner Z-A')
+                : 'Sort Playlist Owner A-Z'
+        );
+        if (dirToggle) {
+            const icon = dirToggle.querySelector('.metric-sort-direction-icon');
+            if (icon) {
+                icon.textContent = active
+                    ? (state.textSortDirection === 'asc' ? 'arrow_upward' : 'arrow_downward')
+                    : 'swap_vert';
+            }
+            dirToggle.classList.toggle('is-active', active);
+            dirToggle.setAttribute(
+                'title',
+                active
+                    ? (state.textSortDirection === 'asc' ? 'Đang A-Z' : 'Đang Z-A')
+                    : 'Đổi chiều sắp xếp Playlist Owner'
+            );
+        }
+        if (menu) {
+            menu.classList.toggle('open', state.textSortMenuOpenKey === colKey);
+            menu.querySelectorAll('[data-text-sort-option]').forEach((btn) => {
+                const option = btn.getAttribute('data-text-sort-option');
+                const isActive = option === 'none'
+                    ? !active
+                    : (active && option === state.textSortDirection);
+                btn.classList.toggle('is-active', isActive);
+            });
+        }
+    });
+}
+
 function closeMetricSortMenu() {
     if (!state.metricSortMenuOpenKey) return;
     state.metricSortMenuOpenKey = null;
     updateMetricSortControlsUI();
+}
+
+function closeTextSortMenu() {
+    if (!state.textSortMenuOpenKey) return;
+    state.textSortMenuOpenKey = null;
+    updateTextSortControlsUI();
 }
 
 function ensureMetricSortControls() {
@@ -2676,6 +2971,7 @@ function ensureMetricSortControls() {
             if (menuToggle) {
                 event.preventDefault();
                 event.stopPropagation();
+                closeTextSortMenu();
                 state.metricSortMenuOpenKey = state.metricSortMenuOpenKey === colKey ? null : colKey;
                 updateMetricSortControlsUI();
                 return;
@@ -2688,6 +2984,7 @@ function ensureMetricSortControls() {
                 if (selectedMode === 'none') {
                     state.metricSortColumn = null;
                     state.metricSortMenuOpenKey = null;
+                    closeTextSortMenu();
                     renderList({ preserveScroll: true });
                     updateMetricSortControlsUI();
                     return;
@@ -2696,6 +2993,8 @@ function ensureMetricSortControls() {
                 const mode = selectedMode === 'delta' ? 'delta' : 'value';
                 state.metricSortColumn = colKey;
                 state.metricSortMode = mode;
+                state.textSortColumn = null;
+                state.textSortMenuOpenKey = null;
                 if (!['asc', 'desc'].includes(state.metricSortDirection)) {
                     state.metricSortDirection = 'desc';
                 }
@@ -2712,6 +3011,8 @@ function ensureMetricSortControls() {
                     state.metricSortColumn = colKey;
                     state.metricSortDirection = 'desc';
                     state.metricSortMode = state.metricSortMode === 'delta' ? 'delta' : 'value';
+                    state.textSortColumn = null;
+                    state.textSortMenuOpenKey = null;
                 } else {
                     state.metricSortDirection = state.metricSortDirection === 'asc' ? 'desc' : 'asc';
                 }
@@ -2786,6 +3087,7 @@ function renderList(opts = {}) {
             }
             emptyState.style.display = '';
             updateMetricSortControlsUI();
+            updateTextSortControlsUI();
             restoreScroll();
             return;
         }
@@ -2797,6 +3099,7 @@ function renderList(opts = {}) {
         noResult.innerHTML = `<div class="col-span-2">No results for "${escapeHtml(state.searchQuery)}"</div>`;
         container.appendChild(noResult);
         updateMetricSortControlsUI();
+        updateTextSortControlsUI();
         restoreScroll();
         return;
     }
@@ -2814,6 +3117,7 @@ function renderList(opts = {}) {
     updateKPIs();
     refreshCheckedLabels();
     updateMetricSortControlsUI();
+    updateTextSortControlsUI();
     restoreScroll();
 }
 function refreshCheckedLabels() {
@@ -2895,6 +3199,54 @@ function closeImagePreview() {
 function cleanExportText(value) {
     if (value == null) return '';
     return String(value).replace(/\r?\n/g, ' ').trim();
+}
+
+function formatExportMetricPlain(value) {
+    if (value == null || value === '') return '';
+    if (typeof value === 'boolean') return value ? '1' : '0';
+    const numeric = Number(value);
+    if (Number.isFinite(numeric)) {
+        if (Number.isInteger(numeric)) return String(numeric);
+        return String(numeric);
+    }
+    return cleanExportText(value);
+}
+
+function buildExportTrackTitle(artistLabel, trackName) {
+    const cleanTrackName = cleanExportText(trackName) || '-';
+    const cleanArtistLabel = cleanExportText(artistLabel) || '';
+    if (!cleanArtistLabel || cleanArtistLabel === '-') return cleanTrackName;
+    const prefix = `${cleanArtistLabel} - `;
+    if (cleanTrackName.toLowerCase().startsWith(prefix.toLowerCase())) return cleanTrackName;
+    return `${cleanArtistLabel} - ${cleanTrackName}`;
+}
+
+function mergeExportBlocks(blocks = []) {
+    const normalizedBlocks = blocks.filter((block) => Array.isArray(block) && block.length);
+    if (!normalizedBlocks.length) return [];
+
+    const widths = normalizedBlocks.map((block) =>
+        block.reduce((max, row) => Math.max(max, Array.isArray(row) ? row.length : 0), 0)
+    );
+    const height = normalizedBlocks.reduce((max, block) => Math.max(max, block.length), 0);
+    const mergedRows = [];
+
+    for (let rowIndex = 0; rowIndex < height; rowIndex += 1) {
+        const mergedRow = [];
+        normalizedBlocks.forEach((block, blockIndex) => {
+            const width = widths[blockIndex];
+            const row = Array.isArray(block[rowIndex]) ? block[rowIndex] : [];
+            for (let columnIndex = 0; columnIndex < width; columnIndex += 1) {
+                mergedRow.push(cleanExportText(row[columnIndex] ?? ''));
+            }
+            if (blockIndex < normalizedBlocks.length - 1) {
+                mergedRow.push('');
+            }
+        });
+        mergedRows.push(mergedRow);
+    }
+
+    return mergedRows;
 }
 
 function csvEscapeCell(value) {
@@ -3020,12 +3372,109 @@ function downloadTextFile(content, fileName, mimeType = 'text/plain;charset=utf-
 }
 
 function getItemArtistsLabel(item) {
-    const artists = Array.isArray(item?.artist_names)
-        ? item.artist_names.map((name) => cleanExportText(name)).filter(Boolean)
-        : [];
+    const artists = getItemArtistNames(item).map((name) => cleanExportText(name)).filter(Boolean);
     if (artists.length) return artists.join(', ');
     const owner = cleanExportText(item?.owner_name || item?.playlist_owner || item?.playlist_owner_name || '');
     return owner || '';
+}
+
+function ensureTextSortControls() {
+    const cell = document.querySelector('.list-head .head-cell[data-col-key="playlistOwner"]');
+    if (cell && !cell.querySelector('.text-sort-controls')) {
+        const controls = document.createElement('div');
+        controls.className = 'metric-sort-controls text-sort-controls';
+        controls.dataset.textSortCol = 'playlistOwner';
+        controls.innerHTML = `
+            <button type="button" class="metric-sort-mode-toggle" data-text-sort-menu-toggle aria-label="Chọn kiểu lọc Playlist Owner">
+                <span class="metric-sort-triangle">▼</span>
+            </button>
+            <button type="button" class="metric-sort-direction-toggle" data-text-sort-direction-toggle aria-label="Đổi chiều sắp xếp Playlist Owner">
+                <span class="material-icons-round metric-sort-direction-icon">swap_vert</span>
+            </button>
+            <div class="metric-sort-menu" data-text-sort-menu>
+                <button type="button" class="metric-sort-menu-item" data-text-sort-option="none">
+                    <span class="metric-sort-menu-title">None</span>
+                </button>
+                <button type="button" class="metric-sort-menu-item" data-text-sort-option="asc">
+                    <span class="metric-sort-menu-title">A-Z</span>
+                </button>
+                <button type="button" class="metric-sort-menu-item" data-text-sort-option="desc">
+                    <span class="metric-sort-menu-title">Z-A</span>
+                </button>
+            </div>
+        `;
+        cell.appendChild(controls);
+    }
+
+    const head = document.querySelector('.list-head');
+    if (head && head.dataset.textSortBound !== 'true') {
+        head.dataset.textSortBound = 'true';
+        head.addEventListener('click', (event) => {
+            const control = event.target.closest('.text-sort-controls[data-text-sort-col]');
+            if (!control) return;
+            const colKey = control.dataset.textSortCol;
+            const menuToggle = event.target.closest('[data-text-sort-menu-toggle]');
+            const directionToggle = event.target.closest('[data-text-sort-direction-toggle]');
+            const option = event.target.closest('[data-text-sort-option]');
+
+            if (menuToggle) {
+                event.preventDefault();
+                event.stopPropagation();
+                closeMetricSortMenu();
+                state.textSortMenuOpenKey = state.textSortMenuOpenKey === colKey ? null : colKey;
+                updateTextSortControlsUI();
+                return;
+            }
+
+            if (directionToggle) {
+                event.preventDefault();
+                event.stopPropagation();
+                closeMetricSortMenu();
+                if (state.textSortColumn !== colKey) {
+                    state.textSortColumn = colKey;
+                    state.textSortDirection = 'asc';
+                } else {
+                    state.textSortDirection = state.textSortDirection === 'asc' ? 'desc' : 'asc';
+                }
+                state.metricSortColumn = null;
+                state.metricSortMenuOpenKey = null;
+                state.textSortMenuOpenKey = null;
+                renderList({ preserveScroll: true });
+                updateMetricSortControlsUI();
+                updateTextSortControlsUI();
+                return;
+            }
+
+            if (option) {
+                event.preventDefault();
+                event.stopPropagation();
+                const next = option.getAttribute('data-text-sort-option');
+                if (next === 'none') {
+                    state.textSortColumn = null;
+                } else {
+                    state.textSortColumn = colKey;
+                    state.textSortDirection = next === 'desc' ? 'desc' : 'asc';
+                }
+                state.metricSortColumn = null;
+                state.metricSortMenuOpenKey = null;
+                state.textSortMenuOpenKey = null;
+                renderList({ preserveScroll: true });
+                updateMetricSortControlsUI();
+                updateTextSortControlsUI();
+            }
+        });
+    }
+
+    if (!document.body.dataset.textSortBodyBound) {
+        document.body.dataset.textSortBodyBound = 'true';
+        document.addEventListener('mousedown', (event) => {
+            const target = event.target;
+            if (target?.closest?.('.text-sort-controls')) return;
+            closeTextSortMenu();
+        }, true);
+    }
+
+    updateTextSortControlsUI();
 }
 
 function getItemSpotifyUrlForExport(item) {
@@ -3041,6 +3490,42 @@ function getContextActionItems(opts = {}) {
         return getVisibleItems();
     }
     return [];
+}
+
+function inferStructuredClipboardAction(items) {
+    const types = Array.from(new Set((items || []).map((item) => item?.type).filter(Boolean)));
+    if (types.length !== 1) return null;
+    const type = types[0];
+    if (type === 'playlist') return 'clipboard-playlist-type3';
+    if (type === 'album') return 'clipboard-album-type0';
+    if (type === 'track') return 'clipboard-track-offline';
+    return null;
+}
+
+function getClipboardContextLabel(items) {
+    const action = inferStructuredClipboardAction(items);
+    if (action === 'clipboard-playlist-type3') return 'Clipboard (Playlist)';
+    if (action === 'clipboard-album-type0') return 'Clipboard (Album)';
+    if (action === 'clipboard-track-offline') return 'Clipboard (Track)';
+    if ((items || []).length > 0) return 'Clipboard (Chọn cùng 1 loại)';
+    return 'Clipboard';
+}
+
+function dedupeSubmittedUrls(urls) {
+    const seen = new Set();
+    const deduped = [];
+    let removed = 0;
+    (urls || []).forEach((rawUrl) => {
+        const parsed = parseSpotifyUrl(rawUrl);
+        const key = parsed ? `${parsed.type}:${parsed.id}` : rawUrl.toLowerCase();
+        if (seen.has(key)) {
+            removed += 1;
+            return;
+        }
+        seen.add(key);
+        deduped.push(rawUrl);
+    });
+    return { urls: deduped, removed };
 }
 
 function buildListViewExportRows(items) {
@@ -3065,49 +3550,70 @@ function buildListViewExportRows(items) {
 }
 
 function buildPlaylistType3ExportRows(items) {
-    return (items || [])
+    const blocks = (items || [])
         .filter((item) => item?.type === 'playlist')
         .map((item) => {
-            const artists = getItemArtistsLabel(item) || '-';
-            const trackName = cleanExportText(item.name || '-');
-            const spotifyLink = getItemSpotifyUrlForExport(item);
-            const trackPlayCount = item.playcount ?? item.followers ?? item.saves ?? '';
-            return [
-                `${artists} - ${trackName}`,
-                spotifyLink,
-                trackPlayCount === '' ? '' : formatDetailedMetric(trackPlayCount),
+            const blockRows = [
+                [cleanExportText(item.name || `Playlist ${item.spotify_id}`), '', ''],
+                ['Artist - Track', 'Track Link', 'PlayCount'],
             ];
+            const tracks = Array.isArray(item.export_tracks) ? item.export_tracks : [];
+            if (tracks.length) {
+                tracks.forEach((track) => {
+                    const artists = cleanExportText(track.artist_names || '-') || '-';
+                    const trackName = cleanExportText(track.track_name || '-');
+                    blockRows.push([
+                        buildExportTrackTitle(artists, trackName),
+                        cleanExportText(track.spotify_url || ''),
+                        formatExportMetricPlain(track.playcount_estimate ?? ''),
+                    ]);
+                });
+            } else {
+                const artists = getItemArtistsLabel(item) || item.owner_name || '-';
+                const trackName = cleanExportText(item.name || '-');
+                const spotifyLink = getItemSpotifyUrlForExport(item);
+                const trackPlayCount = item.playcount ?? item.followers ?? item.saves ?? '';
+                blockRows.push([
+                    buildExportTrackTitle(artists, trackName),
+                    spotifyLink,
+                    formatExportMetricPlain(trackPlayCount),
+                ]);
+            }
+            return blockRows;
         });
+    return mergeExportBlocks(blocks);
 }
 
 function buildAlbumType0ExportRows(items) {
-    const rows = [];
-    (items || [])
+    const blocks = (items || [])
         .filter((item) => item?.type === 'album')
-        .forEach((item) => {
-            const albumName = cleanExportText(item.name || '-');
+        .map((item) => {
+            const albumName = cleanExportText(item.name || `Album ${item.spotify_id}`);
+            const blockRows = [
+                [albumName, '', '', ''],
+                ['Track No', 'Track Name', 'Track Link', 'PlayCount'],
+            ];
             const tracks = Array.isArray(item.export_tracks) ? item.export_tracks : [];
             if (tracks.length) {
                 tracks.forEach((track, index) => {
-                    rows.push([
-                        albumName,
+                    blockRows.push([
                         String(index + 1),
-                        cleanExportText(track.track_name || '-'),
+                        buildExportTrackTitle(track.artist_names || '-', track.track_name || '-'),
                         cleanExportText(track.spotify_url || ''),
-                        '',
+                        formatExportMetricPlain(track.playcount_estimate ?? ''),
                     ]);
                 });
-                return;
+                return blockRows;
             }
-            rows.push([
-                albumName,
+            blockRows.push([
                 '1',
-                cleanExportText(item.name || '-'),
+                buildExportTrackTitle(getItemArtistsLabel(item) || item.owner_name || '-', item.name || '-'),
                 getItemSpotifyUrlForExport(item),
-                item.playcount == null ? '' : formatDetailedMetric(item.playcount),
+                formatExportMetricPlain(item.playcount),
             ]);
+            return blockRows;
         });
-    return rows;
+    return mergeExportBlocks(blocks);
 }
 
 function buildTrackOfflineExportRows(items) {
@@ -3117,12 +3623,12 @@ function buildTrackOfflineExportRows(items) {
             const artists = getItemArtistsLabel(item) || '-';
             const trackName = cleanExportText(item.name || '-');
             const spotifyLink = getItemSpotifyUrlForExport(item);
-            const playCount = item.playcount == null ? '' : formatDetailedMetric(item.playcount);
+            const playCount = formatExportMetricPlain(item.playcount);
             const firstArtistListenPerMonthCount = item.monthly_listeners == null
                 ? ''
-                : formatDetailedMetric(item.monthly_listeners);
+                : formatExportMetricPlain(item.monthly_listeners);
             return [
-                `${artists} - ${trackName}`,
+                buildExportTrackTitle(artists, trackName),
                 spotifyLink,
                 playCount,
                 firstArtistListenPerMonthCount,
@@ -3320,11 +3826,16 @@ function syncRowContextSubmenuDirection(menu) {
 function updateRowContextMenuLabels() {
     const menu = getRowContextMenuElement();
     if (!menu) return;
-    const selectedCount = getSelectedItems().length;
+    const selectedItems = getSelectedItems();
+    const selectedCount = selectedItems.length;
+    const scope = getCurrentListScope();
     const fetchLabels = menu.querySelectorAll('[data-context-label="fetch"]');
     const deleteLabels = menu.querySelectorAll('[data-context-label="delete"]');
     const exportLabels = menu.querySelectorAll('[data-context-label="export-list"]');
+    const clearLabels = menu.querySelectorAll('[data-context-label="clear-list"]');
+    const clipboardLabels = menu.querySelectorAll('[data-context-label="clipboard"]');
     const hasSelection = selectedCount > 0;
+    const clipboardAction = inferStructuredClipboardAction(selectedItems);
     fetchLabels.forEach((label) => {
         label.textContent = selectedCount > 1
             ? `Refresh ${selectedCount} selected`
@@ -3340,38 +3851,49 @@ function updateRowContextMenuLabels() {
             ? `Export ListView to Excel (${selectedCount})`
             : 'Export ListView to Excel';
     });
+    clearLabels.forEach((label) => {
+        label.textContent = scope.group
+            ? `Clear "${scope.label}"`
+            : 'Clear All Links';
+    });
+    clipboardLabels.forEach((label) => {
+        label.textContent = getClipboardContextLabel(selectedItems);
+    });
 
     const disableForExport = state.exportInProgress;
     [
         'delete-selected',
         'fetch-selected',
         'export-listview-excel',
-        'clipboard-playlist-type3',
-        'clipboard-album-type0',
-        'clipboard-track-offline',
+        'clipboard-auto',
         'txt-playlist-type3',
         'txt-album-type0',
         'txt-track-offline',
     ].forEach((action) => setContextActionDisabled(menu, action, !hasSelection || disableForExport));
-
+    setContextActionDisabled(menu, 'clipboard-auto', !hasSelection || disableForExport || !clipboardAction);
     menu.querySelectorAll('[data-context-group]').forEach((groupEl) => {
-        groupEl.classList.toggle('is-disabled', !hasSelection || disableForExport);
+        const isTxtGroup = groupEl.getAttribute('data-context-group') === 'txt';
+        groupEl.classList.toggle('is-disabled', isTxtGroup && (!hasSelection || disableForExport));
     });
 }
 
-function showRowContextMenu(clientX, clientY, row) {
+function showRowContextMenu(clientX, clientY, row = null) {
     const menu = getRowContextMenuElement();
-    if (!menu || !row) return;
-    const item = findItemFromRow(row);
-    if (!item) return;
+    if (!menu) return;
+    if (row) {
+        const item = findItemFromRow(row);
+        if (!item) return;
 
-    const targetSelectionKey = selectionKey(item);
-    if (!state.selectedItemKeys.has(targetSelectionKey)) {
-        state.selectedItemKeys = new Set([targetSelectionKey]);
-        state.selectionAnchorKey = targetSelectionKey;
-        renderList({ preserveScroll: true });
+        const targetSelectionKey = selectionKey(item);
+        if (!state.selectedItemKeys.has(targetSelectionKey)) {
+            state.selectedItemKeys = new Set([targetSelectionKey]);
+            state.selectionAnchorKey = targetSelectionKey;
+            renderList({ preserveScroll: true });
+        }
+        state.contextMenuAnchorSelectionKey = targetSelectionKey;
+    } else {
+        state.contextMenuAnchorSelectionKey = null;
     }
-    state.contextMenuAnchorSelectionKey = targetSelectionKey;
     updateRowContextMenuLabels();
 
     menu.style.display = 'block';
@@ -3411,6 +3933,22 @@ async function executeRowContextMenuAction(action) {
         if (selectedItems.length >= 2) {
             await refreshAllItems();
             return;
+        }
+        return;
+    }
+    if (action === 'clipboard-auto') {
+        if (!selectedItems.length) {
+            showToast('No rows selected', 'info');
+            return;
+        }
+        const inferred = inferStructuredClipboardAction(selectedItems);
+        if (!inferred) {
+            showToast('Clipboard export requires selecting only playlist, only album, or only track rows', 'info');
+            return;
+        }
+        const ok = await runServerExport(inferred, selectedItems);
+        if (!ok) {
+            await runStructuredExport(inferred, selectedItems, 'clipboard');
         }
         return;
     }
@@ -3622,27 +4160,50 @@ async function handleRefreshItem(item) {
 }
 
 async function clearList() {
-    if (state.items.length === 0) {
+    const scope = getCurrentListScope();
+    if (scope.items.length === 0) {
         showToast('List is already empty', 'info');
         return;
     }
-    const confirmed = window.confirm('Clear all links in the current scope?\nThis action cannot be undone.');
+    const confirmed = window.confirm(
+        scope.group
+            ? `Clear all links in "${scope.label}"?\nThis action cannot be undone.`
+            : 'Clear all links in the current scope?\nThis action cannot be undone.'
+    );
     if (!confirmed) return;
 
-    state.items = [];
-    state.filteredItems = [];
-    clearRowSelection();
-    savePersistedRowOrder([]);
-    state.pendingJobs.clear();
-    state.pendingJobToItem.clear();
-    stopPolling();
+    const scopedIdentitySet = new Set(scope.items.map((item) => itemIdentity(item)));
+    const scopedSelectionKeys = new Set(scope.items.map((item) => selectionKey(item)));
+    const scopedItemIds = new Set(scope.items.map((item) => String(item.id)).filter(Boolean));
+
+    state.items = state.items.filter((item) => !scopedIdentitySet.has(itemIdentity(item)));
+    state.filteredItems = state.filteredItems.filter((item) => !scopedIdentitySet.has(itemIdentity(item)));
+    state.selectedItemKeys = new Set(
+        Array.from(state.selectedItemKeys).filter((key) => !scopedSelectionKeys.has(key))
+    );
+    if (state.selectionAnchorKey && scopedSelectionKeys.has(state.selectionAnchorKey)) {
+        state.selectionAnchorKey = null;
+    }
+    persistCurrentItemOrder();
+    for (const itemId of scopedItemIds) {
+        state.pendingJobs.delete(itemId);
+    }
+    for (const [jobId, itemId] of state.pendingJobToItem.entries()) {
+        if (itemId && scopedItemIds.has(String(itemId))) {
+            state.pendingJobToItem.delete(jobId);
+            state.pendingJobs.delete(jobId);
+        }
+    }
+    if (state.pendingJobs.size === 0) {
+        stopPolling();
+    }
     renderList({ preserveScroll: true });
 
     try {
         if (state.apiOnline) {
-            await api.clearItems();
+            await api.clearItems(scope.group, scope.targetUserId);
         }
-        showToast('List cleared', 'success');
+        showToast(scope.group ? `Cleared "${scope.label}"` : 'List cleared', 'success');
     } catch (e) {
         showToast(`Clear list local only: ${e.message}`, 'info');
     }
@@ -3757,6 +4318,8 @@ function openSpotifyPopup(url) {
 function openModal() {
     document.getElementById('add-link-modal').classList.add('open');
     document.getElementById('modal-batch-input').value = '';
+    const dedupeToggle = document.getElementById('modal-dedupe-links');
+    if (dedupeToggle) dedupeToggle.checked = true;
     document.getElementById('modal-batch-input').focus();
     document.getElementById('modal-url-hint').textContent = 'Supports: playlist, track, album, and artist links';
     document.getElementById('modal-url-hint').className = 'text-xs text-secondary-text mt-2';
@@ -3769,7 +4332,8 @@ function closeModal() {
 
 async function submitSingle() {
     const textarea = document.getElementById('modal-batch-input');
-    const urls = textarea.value.split('\n').map((u) => u.trim()).filter(Boolean);
+    const dedupeToggle = document.getElementById('modal-dedupe-links');
+    let urls = textarea.value.split('\n').map((u) => u.trim()).filter(Boolean);
     const hint = document.getElementById('modal-url-hint');
 
     if (urls.length === 0) {
@@ -3783,6 +4347,20 @@ async function submitSingle() {
         hint.textContent = `${invalid.length} invalid Spotify URL(s) found`;
         hint.className = 'text-xs text-red-400 mt-2';
         return;
+    }
+
+    if (dedupeToggle?.checked) {
+        const deduped = dedupeSubmittedUrls(urls);
+        urls = deduped.urls;
+        if (!urls.length) {
+            hint.textContent = 'No valid unique Spotify URLs left after removing duplicates';
+            hint.className = 'text-xs text-red-400 mt-2';
+            return;
+        }
+        if (deduped.removed > 0) {
+            hint.textContent = `Removed ${deduped.removed} duplicate link(s) before crawling`;
+            hint.className = 'text-xs text-primary mt-2';
+        }
     }
 
     const selectedGroup = resolveSelectedGroupContext();
@@ -5080,6 +5658,7 @@ document.addEventListener('DOMContentLoaded', async () => {
     applyColumnWidths(state.columnWidths);
     setupColumnResizers();
     ensureMetricSortControls();
+    ensureTextSortControls();
     syncColumnWidthsToViewport();
     window.addEventListener('resize', () => syncColumnWidthsToViewport());
 
@@ -5122,6 +5701,9 @@ document.addEventListener('DOMContentLoaded', async () => {
     }
     const groupList = document.getElementById('group-list');
     if (groupList) {
+        groupList.addEventListener('mousedown', () => {
+            state.selectionScope = 'groups';
+        });
         groupList.addEventListener('click', (e) => {
             const deleteGroupBtn = e.target.closest('[data-action="delete-group"]');
             const saveRenameBtn = e.target.closest('[data-action="save-rename-group"]');
@@ -5170,14 +5752,24 @@ document.addEventListener('DOMContentLoaded', async () => {
                 state.suppressNextGroupClick = false;
                 return;
             }
-            if (state.renamingGroupId) return;
             const groupId = normalizeGroupName(groupBtn.getAttribute('data-group')) || ALL_GROUP_ID;
+            const groupName = e.target.closest('[data-role="group-name"]');
             const currentGroupId = normalizeGroupName(state.activeGroup) || ALL_GROUP_ID;
-            if (groupId.toLowerCase() === currentGroupId.toLowerCase()) {
-                state.isCreatingGroup = false;
+            const isPurePrimaryClick = !e.shiftKey && !e.ctrlKey && !e.metaKey;
+            if (
+                groupName
+                && e.detail >= 2
+                && isPurePrimaryClick
+                && groupId.toLowerCase() !== ALL_GROUP_ID
+                && groupId.toLowerCase() === currentGroupId.toLowerCase()
+            ) {
+                e.preventDefault();
+                e.stopPropagation();
+                startRenameGroupFlow(groupId);
                 return;
             }
-            state.activeGroup = groupId;
+            if (state.renamingGroupId) return;
+            handleGroupSelection(groupId, e);
             state.isCreatingGroup = false;
             clearRowSelection();
             // If currently on Settings or Users tab, navigate back to Link Checker
@@ -5241,13 +5833,17 @@ document.addEventListener('DOMContentLoaded', async () => {
                 e.preventDefault();
                 return;
             }
+            const selectedGroupIds = state.selectedGroupIds.has(groupId)
+                ? Array.from(state.selectedGroupIds).filter((id) => String(id).toLowerCase() !== ALL_GROUP_ID)
+                : [groupId];
+            state.draggingGroupIds = selectedGroupIds;
             state.draggingGroupId = groupId;
             state.dragOverGroupId = groupId;
             state.dragOverGroupPlacement = 'before';
             state.suppressNextGroupClick = true;
             if (e.dataTransfer) {
                 e.dataTransfer.effectAllowed = 'move';
-                e.dataTransfer.setData('text/plain', groupId);
+                e.dataTransfer.setData('text/plain', selectedGroupIds.join(','));
             }
             syncGroupDragUi(groupList);
         });
@@ -5267,28 +5863,28 @@ document.addEventListener('DOMContentLoaded', async () => {
             state.dragOverGroupPlacement = placement;
             syncGroupDragUi(groupList);
         });
-        groupList.addEventListener('drop', (e) => {
+        groupList.addEventListener('drop', async (e) => {
             const groupBtn = e.target.closest('[data-group]');
             if (!groupBtn || !state.draggingGroupId) return;
             e.preventDefault();
             stopDragAutoScroll();
             const targetGroupId = normalizeGroupName(groupBtn.getAttribute('data-group'));
-            const moved = moveCustomGroupBefore(state.draggingGroupId, targetGroupId, state.dragOverGroupPlacement);
+            const moved = await moveCustomGroupsBefore(state.draggingGroupIds, targetGroupId, state.dragOverGroupPlacement);
+            state.draggingGroupIds = [];
             state.draggingGroupId = null;
             state.dragOverGroupId = null;
             state.dragOverGroupPlacement = 'before';
-            rebuildGroups();
-            renderGroups();
             if (moved) {
-                showToast('Group order updated', 'success');
+                showToast(state.selectedGroupIds.size > 1 ? 'Group cluster moved' : 'Group order updated', 'success');
             }
             window.setTimeout(() => {
                 state.suppressNextGroupClick = false;
             }, 0);
         });
         groupList.addEventListener('dragend', () => {
-            if (!state.draggingGroupId && !state.dragOverGroupId) return;
+            if (!state.draggingGroupId && !state.dragOverGroupId && !state.draggingGroupIds.length) return;
             stopDragAutoScroll();
+            state.draggingGroupIds = [];
             state.draggingGroupId = null;
             state.dragOverGroupId = null;
             state.dragOverGroupPlacement = 'before';
@@ -5318,6 +5914,14 @@ document.addEventListener('DOMContentLoaded', async () => {
     const listElForDelete = document.getElementById('link-list');
     if (listElForDelete) {
         const listScrollWrap = document.querySelector('.list-wrap');
+        if (listScrollWrap) {
+            listScrollWrap.addEventListener('mousedown', () => {
+                state.selectionScope = 'items';
+            });
+        }
+        listElForDelete.addEventListener('mousedown', () => {
+            state.selectionScope = 'items';
+        });
         listElForDelete.addEventListener('mousedown', (e) => {
             if (e.button !== 0) return;
             if (isInteractiveRowTarget(e.target)) return;
@@ -5353,13 +5957,22 @@ document.addEventListener('DOMContentLoaded', async () => {
         });
         listElForDelete.addEventListener('contextmenu', (e) => {
             const row = e.target.closest('.custom-grid-row');
-            if (!row) return;
             // Keep native browser link context-menu on title/anchor right-click.
             if (e.target.closest('a[href]')) return;
             e.preventDefault();
             e.stopPropagation();
-            showRowContextMenu(e.clientX, e.clientY, row);
+            showRowContextMenu(e.clientX, e.clientY, row || null);
         });
+        if (listScrollWrap) {
+            listScrollWrap.addEventListener('contextmenu', (e) => {
+                if (e.target.closest('a[href]')) return;
+                const row = e.target.closest('.custom-grid-row');
+                if (row && row.closest('#link-list')) return;
+                e.preventDefault();
+                e.stopPropagation();
+                showRowContextMenu(e.clientX, e.clientY, null);
+            });
+        }
         listElForDelete.addEventListener('dragstart', (e) => {
             const row = e.target.closest('.custom-grid-row');
             if (!row || isInteractiveRowTarget(e.target)) {
@@ -5539,13 +6152,44 @@ document.addEventListener('DOMContentLoaded', async () => {
             closeModal();
             closeImagePreview();
         }
+        const target = e.target;
+        const typingTarget = Boolean(target?.closest?.('input, textarea, select, [contenteditable="true"]'));
+        const isCtrlA = (e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'a';
+        if (isCtrlA && state.currentView === 'linkchecker' && !typingTarget) {
+            e.preventDefault();
+            const preferredScope = getPreferredSelectionScope(target);
+            if (preferredScope === 'groups') {
+                const selectableGroupIds = getVisibleSidebarGroups()
+                    .map((group) => group.id)
+                    .filter((groupId) => String(groupId).toLowerCase() !== ALL_GROUP_ID);
+                state.selectionScope = 'groups';
+                clearRowSelection();
+                state.selectedGroupIds = new Set(selectableGroupIds);
+                state.groupSelectionAnchorId = selectableGroupIds[selectableGroupIds.length - 1] || null;
+                renderGroups();
+                return;
+            }
+            const visibleKeys = state.filteredItems.map((item) => selectionKey(item));
+            state.selectionScope = 'items';
+            clearGroupSelection();
+            state.selectedItemKeys = new Set(visibleKeys);
+            state.selectionAnchorKey = visibleKeys[0] || null;
+            renderList({ preserveScroll: true });
+            return;
+        }
         const isDeleteKey = e.key === 'Delete' || e.key === 'Backspace';
         if (isDeleteKey && state.currentView === 'linkchecker' && state.selectedItemKeys.size > 0) {
-            const target = e.target;
-            const typingTarget = Boolean(target?.closest?.('input, textarea, select, [contenteditable="true"]'));
             if (!typingTarget) {
                 e.preventDefault();
                 handleDeleteItems(getSelectedItems());
+                return;
+            }
+        }
+        if (isDeleteKey && state.currentView === 'linkchecker' && state.selectedGroupIds.size > 0) {
+            const deletableGroupIds = Array.from(state.selectedGroupIds).filter((groupId) => String(groupId).toLowerCase() !== ALL_GROUP_ID);
+            if (!typingTarget && deletableGroupIds.length > 0) {
+                e.preventDefault();
+                handleDeleteGroups(deletableGroupIds);
                 return;
             }
         }
@@ -5562,8 +6206,6 @@ document.addEventListener('DOMContentLoaded', async () => {
         }
         if (e.button !== 0) return;
         if (state.currentView !== 'linkchecker') return;
-        if (!state.selectedItemKeys.size) return;
-        if (state.draggingRowKeys.length) return;
         const target = e.target;
         if (!target?.closest) return;
         const path = typeof e.composedPath === 'function' ? e.composedPath() : [];
@@ -5574,12 +6216,46 @@ document.addEventListener('DOMContentLoaded', async () => {
             && node.closest
             && node.closest('#link-list')
         ));
-        if (clickedInsideRow) return;
-        clearRowSelection();
-        renderList({ preserveScroll: true });
+        const clickedInsideGroup = path.some((node) => (
+            node
+            && node.classList
+            && node.classList.contains('group-item')
+            && node.closest
+            && node.closest('#group-list')
+        ));
+        let shouldRender = false;
+        if (state.selectedItemKeys.size && !state.draggingRowKeys.length && !clickedInsideRow && !clickedInsideGroup) {
+            clearRowSelection();
+            shouldRender = true;
+        }
+        if (state.selectedGroupIds.size && !state.draggingGroupIds.length && !clickedInsideGroup) {
+            clearGroupSelection();
+            shouldRender = true;
+        }
+        if (shouldRender) {
+            renderGroups();
+            renderList({ preserveScroll: true });
+        }
     };
     // Capture phase avoids clearing selection after row mousedown triggers re-render.
     document.addEventListener('mousedown', handleOutsideSelectionClear, true);
+    document.addEventListener('contextmenu', (e) => {
+        if (state.currentView !== 'linkchecker') return;
+        const target = e.target;
+        if (!target?.closest) return;
+        if (target.closest('#row-context-menu')) return;
+        const listArea = target.closest('.list-wrap');
+        if (!listArea) return;
+        if (target.closest('a[href]')) return;
+        const row = target.closest('.custom-grid-row');
+        e.preventDefault();
+        e.stopPropagation();
+        showRowContextMenu(
+            e.clientX,
+            e.clientY,
+            row && row.closest('#link-list') ? row : null
+        );
+    }, true);
     window.addEventListener('resize', hideRowContextMenu);
     document.addEventListener('scroll', hideRowContextMenu, true);
 

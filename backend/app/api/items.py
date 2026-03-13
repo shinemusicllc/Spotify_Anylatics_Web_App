@@ -333,10 +333,10 @@ def _format_export_metric(value) -> str:
     if isinstance(value, bool):
         return "1" if value else "0"
     if isinstance(value, int):
-        return f"{value:,}".replace(",", ".")
+        return str(value)
     if isinstance(value, float):
         if value.is_integer():
-            return f"{int(value):,}".replace(",", ".")
+            return str(int(value))
         return str(value)
     return _safe_export_text(value)
 
@@ -386,6 +386,46 @@ def _extract_export_track_artists(track: dict, fallback: str = "-") -> str:
         return owner_name.strip()
 
     return fallback
+
+
+def _build_export_track_title(artist_label: str, track_name: str) -> str:
+    clean_track_name = _safe_export_text(track_name) or "-"
+    clean_artist_label = _safe_export_text(artist_label) or ""
+    if not clean_artist_label or clean_artist_label == "-":
+        return clean_track_name
+    prefix = f"{clean_artist_label} - "
+    if clean_track_name.lower().startswith(prefix.lower()):
+        return clean_track_name
+    return f"{clean_artist_label} - {clean_track_name}"
+
+
+def _merge_export_blocks(blocks: list[list[list[str]]]) -> list[list[str]]:
+    normalized_blocks = [block for block in blocks if block]
+    if not normalized_blocks:
+        return []
+
+    widths = [
+        max((len(row) for row in block), default=0)
+        for block in normalized_blocks
+    ]
+    height = max((len(block) for block in normalized_blocks), default=0)
+    merged_rows: list[list[str]] = []
+
+    for row_index in range(height):
+        merged_row: list[str] = []
+        for block_index, block in enumerate(normalized_blocks):
+            width = widths[block_index]
+            raw_row = block[row_index] if row_index < len(block) else []
+            padded_row = [
+                _safe_export_text(raw_row[column_index]) if column_index < len(raw_row) else ""
+                for column_index in range(width)
+            ]
+            merged_row.extend(padded_row)
+            if block_index < len(normalized_blocks) - 1:
+                merged_row.append("")
+        merged_rows.append(merged_row)
+
+    return merged_rows
 
 
 def _extract_playlist_owner(item: Item, raw_data: dict | None) -> str:
@@ -450,11 +490,15 @@ def _build_playlist_type3_rows(
     items: list[Item],
     raw_map: dict[str, dict],
 ) -> tuple[list[str], list[list[str]], str]:
-    headers = ["Artist - Track", "Track Link", "PlayCount"]
-    rows: list[list[str]] = []
+    headers: list[str] = []
+    blocks: list[list[list[str]]] = []
     for item in items:
         if item.item_type != "playlist":
             continue
+        block_rows: list[list[str]] = [
+            [_safe_export_text(item.name) or f"Playlist {item.spotify_id}", "", ""],
+            ["Artist - Track", "Track Link", "PlayCount"],
+        ]
         raw_data = raw_map.get(item.spotify_id)
         tracks = raw_data.get("tracks") if isinstance(raw_data, dict) else None
         if isinstance(tracks, list) and tracks:
@@ -463,38 +507,42 @@ def _build_playlist_type3_rows(
                     continue
                 artist_label = _extract_export_track_artists(track)
                 track_name = _safe_export_text(track.get("name")) or "-"
-                title = f"{artist_label} - {track_name}" if artist_label and artist_label != "-" else track_name
-                rows.append(
+                title = _build_export_track_title(artist_label, track_name)
+                block_rows.append(
                     [
                         title,
                         _extract_export_track_url(track),
                         _format_export_metric(track.get("playcount_estimate")),
                     ]
                 )
-            continue
-
-        fallback_artist = _safe_export_text(item.owner_name) or "-"
-        fallback_title = _safe_export_text(item.name) or "-"
-        rows.append(
-            [
-                f"{fallback_artist} - {fallback_title}",
-                _spotify_url("playlist", item.spotify_id),
-                _format_export_metric(item.playcount),
-            ]
-        )
-    return headers, rows, "spoticheck-playlist-type3"
+        else:
+            fallback_artist = _safe_export_text(item.owner_name) or "-"
+            fallback_title = _build_export_track_title(fallback_artist, _safe_export_text(item.name) or "-")
+            block_rows.append(
+                [
+                    fallback_title,
+                    _spotify_url("playlist", item.spotify_id),
+                    _format_export_metric(item.playcount),
+                ]
+            )
+        blocks.append(block_rows)
+    return headers, _merge_export_blocks(blocks), "spoticheck-playlist-type3"
 
 
 def _build_album_type0_rows(
     items: list[Item],
     raw_map: dict[str, dict],
 ) -> tuple[list[str], list[list[str]], str]:
-    headers = ["Album", "Track No", "Track Name", "Track Link", "PlayCount"]
-    rows: list[list[str]] = []
+    headers: list[str] = []
+    blocks: list[list[list[str]]] = []
     for item in items:
         if item.item_type != "album":
             continue
-        album_name = _safe_export_text(item.name) or "-"
+        album_name = _safe_export_text(item.name) or f"Album {item.spotify_id}"
+        block_rows: list[list[str]] = [
+            [album_name, "", "", ""],
+            ["Track No", "Track Name", "Track Link", "PlayCount"],
+        ]
         raw_data = raw_map.get(item.spotify_id)
         tracks = raw_data.get("tracks") if isinstance(raw_data, dict) else None
         if isinstance(tracks, list) and tracks:
@@ -503,28 +551,30 @@ def _build_album_type0_rows(
                 if not isinstance(track, dict):
                     continue
                 track_name = _safe_export_text(track.get("name")) or "-"
-                rows.append(
+                artist_label = _extract_export_track_artists(track)
+                block_rows.append(
                     [
-                        album_name,
                         str(index),
-                        track_name,
+                        _build_export_track_title(artist_label, track_name),
                         _extract_export_track_url(track),
                         _format_export_metric(track.get("playcount_estimate")),
                     ]
                 )
                 index += 1
-            continue
-
-        rows.append(
-            [
-                album_name,
-                "1",
-                _safe_export_text(item.name) or "-",
-                _spotify_url("album", item.spotify_id),
-                _format_export_metric(item.playcount),
-            ]
-        )
-    return headers, rows, "spoticheck-album-type0"
+        else:
+            fallback_artist = _safe_export_text(item.owner_name) or _safe_export_text(
+                ", ".join(_extract_artist_names(raw_data))
+            ) or "-"
+            block_rows.append(
+                [
+                    "1",
+                    _build_export_track_title(fallback_artist, _safe_export_text(item.name) or "-"),
+                    _spotify_url("album", item.spotify_id),
+                    _format_export_metric(item.playcount),
+                ]
+            )
+        blocks.append(block_rows)
+    return headers, _merge_export_blocks(blocks), "spoticheck-album-type0"
 
 
 def _build_track_offline_rows(
@@ -542,7 +592,7 @@ def _build_track_offline_rows(
         track_name = _safe_export_text(item.name) or "-"
         rows.append(
             [
-                f"{artist_label} - {track_name}",
+                _build_export_track_title(artist_label, track_name),
                 _spotify_url("track", item.spotify_id),
                 _format_export_metric(item.playcount),
                 _format_export_metric(item.monthly_listeners),
