@@ -1134,9 +1134,12 @@ h3 {
   align-items: center;
   justify-content: flex-end;
   gap: 6px;
+  min-height: 14px;
+  padding-left: 2px;
   font-size: 12px;
-  line-height: 1;
+  line-height: 1.2;
   font-weight: 500;
+  overflow: visible;
 }
 
 .metric-stack {
@@ -1440,6 +1443,7 @@ h3 {
 
 /* ── Status Dots ───────────────────────────────────────────────── */
 .status-dot {
+  display: inline-block;
   width: 8px;
   height: 8px;
   border-radius: 50%;

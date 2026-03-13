@@ -2783,7 +2783,7 @@ function renderRow(item) {
                 <div class="checked-stack">
                     <span class="list-checked-text text-secondary-text row-checked" data-checked-at="${escapeHtml(checkedAt)}">${timeAgo(checkedAt)}</span>
                     <span class="checked-status ${status.color}">
-                        ${status.dot === 'crawling' ? '' : `<span class="status-dot ${status.dot}"></span>`}
+                        <span class="status-dot ${status.dot}"></span>
                         <span class="truncate">${status.label}</span>
                     </span>
                 </div>
@@ -3480,7 +3480,7 @@ function ensureTextSortControls() {
             </button>
             <div class="metric-sort-menu" data-text-sort-menu>
                 <button type="button" class="metric-sort-menu-item" data-text-sort-option="none">
-                    <span class="metric-sort-menu-title">None</span>
+                    <span class="metric-sort-menu-title">None (Mặc định)</span>
                 </button>
                 <button type="button" class="metric-sort-menu-item" data-text-sort-option="asc">
                     <span class="metric-sort-menu-title">A-Z</span>
