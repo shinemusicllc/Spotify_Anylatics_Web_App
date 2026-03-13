@@ -14,6 +14,7 @@ from app.services.rate_limiter import rate_limit
 logger = logging.getLogger(__name__)
 SPOTIFY_WEB_API = "https://api.spotify.com/v1"
 SPOTIFY_PATHFINDER_API = "https://api-partner.spotify.com/pathfinder/v1/query"
+SPOTIFY_PATHFINDER_V2_API = "https://api-partner.spotify.com/pathfinder/v2/query"
 SPOTIFY_OPEN = "https://open.spotify.com"
 _DEFAULT_UA = (
     "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
@@ -25,8 +26,8 @@ _PLAYLIST_TRACK_FIELDS = (
     "total,limit,offset,next"
 )
 _PATHFINDER_QUERY_PLAYLIST_HASH = "2888863ae48f035d0177d73c88f389e7946a95d49a8883a26e86aebd02f2ed24"
-_PATHFINDER_QUERY_TRACK_HASH = "cc31bfe16d74df1e9f6f880a908bb3880674deca34c8b67576ecbf8246e967ba"
-_PATHFINDER_QUERY_ALBUM_HASH = "ce390dbf7ca6b61a23aec210619e1094fe9d23d7f101ff773ce1146f84d4dd10"
+_PATHFINDER_QUERY_TRACK_HASH = "612585ae06ba435ad26369870deaae23b5c8800a256cd8a57e08eddc25a37294"
+_PATHFINDER_QUERY_ALBUM_HASH = "b9bfabef66ed756e5e13f68a942deb60bd4125ec1f1be8cc42769dc0259b4b10"
 _PATHFINDER_QUERY_ARTIST_HASH = "a55d895740a6ea09d6f34a39ee6a1e8a4c66c6889361710bd01560d1c314f1f4"
 
 
@@ -232,7 +233,10 @@ async def _get_json(path: str, params: dict[str, Any] | None = None) -> tuple[in
         return 502, None
 
 
-async def _get_pathfinder_json(payload: dict[str, Any]) -> tuple[int, dict[str, Any] | None]:
+async def _get_pathfinder_json(
+    payload: dict[str, Any],
+    endpoint: str = SPOTIFY_PATHFINDER_API,
+) -> tuple[int, dict[str, Any] | None]:
     try:
         headers = await get_auth_headers()
     except Exception as ex:
@@ -250,7 +254,7 @@ async def _get_pathfinder_json(payload: dict[str, Any]) -> tuple[int, dict[str, 
 
     await rate_limit()
     async with httpx.AsyncClient(timeout=settings.SPOTIFY_HTTP_TIMEOUT_SECONDS) as client:
-        res = await client.post(SPOTIFY_PATHFINDER_API, headers=req_headers, json=payload)
+        res = await client.post(endpoint, headers=req_headers, json=payload)
 
     if res.status_code == 401:
         await invalidate_tokens()
@@ -279,6 +283,7 @@ async def _pathfinder_query(
     operation_name: str,
     query_hash: str,
     variables: dict[str, Any],
+    endpoint: str = SPOTIFY_PATHFINDER_API,
 ) -> tuple[int, dict[str, Any] | None]:
     payload = {
         "operationName": operation_name,
@@ -290,7 +295,7 @@ async def _pathfinder_query(
             }
         },
     }
-    return await _get_pathfinder_json(payload)
+    return await _get_pathfinder_json(payload, endpoint=endpoint)
 
 
 async def _fallback_oembed(item_type: str, spotify_id: str) -> dict[str, Any] | None:
@@ -991,9 +996,10 @@ def _pathfinder_extract_preview_url(previews_container: Any) -> str | None:
 
 async def _fetch_track_via_pathfinder(track_id: str) -> dict[str, Any] | None:
     status, payload = await _pathfinder_query(
-        operation_name="queryTrack",
+        operation_name="getTrack",
         query_hash=_PATHFINDER_QUERY_TRACK_HASH,
         variables={"uri": f"spotify:track:{track_id}"},
+        endpoint=SPOTIFY_PATHFINDER_V2_API,
     )
     if status != 200 or not payload:
         return None
@@ -1200,13 +1206,15 @@ async def _fetch_album_via_pathfinder(album_id: str) -> dict[str, Any] | None:
     while offset < max_tracks:
         current_offset = offset
         status, payload = await _pathfinder_query(
-            operation_name="queryAlbum",
+            operation_name="getAlbum",
             query_hash=_PATHFINDER_QUERY_ALBUM_HASH,
             variables={
                 "uri": f"spotify:album:{album_id}",
+                "locale": "",
                 "offset": current_offset,
                 "limit": page_size,
             },
+            endpoint=SPOTIFY_PATHFINDER_V2_API,
         )
         if status != 200 or not payload:
             if pages_fetched == 0:
@@ -1265,6 +1273,8 @@ async def _fetch_album_via_pathfinder(album_id: str) -> dict[str, Any] | None:
             break
 
         next_offset = _safe_int((tracks_v2.get("pagingInfo") or {}).get("nextOffset"))
+        if next_offset is None and rows:
+            next_offset = current_offset + len(rows)
         if next_offset is None or next_offset <= current_offset:
             break
         offset = next_offset
