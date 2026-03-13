@@ -3216,8 +3216,6 @@ function buildExportTrackTitle(artistLabel, trackName) {
     const cleanTrackName = cleanExportText(trackName) || '-';
     const cleanArtistLabel = cleanExportText(artistLabel) || '';
     if (!cleanArtistLabel || cleanArtistLabel === '-') return cleanTrackName;
-    const prefix = `${cleanArtistLabel} - `;
-    if (cleanTrackName.toLowerCase().startsWith(prefix.toLowerCase())) return cleanTrackName;
     return `${cleanArtistLabel} - ${cleanTrackName}`;
 }
 
@@ -3238,9 +3236,6 @@ function mergeExportBlocks(blocks = []) {
             const row = Array.isArray(block[rowIndex]) ? block[rowIndex] : [];
             for (let columnIndex = 0; columnIndex < width; columnIndex += 1) {
                 mergedRow.push(cleanExportText(row[columnIndex] ?? ''));
-            }
-            if (blockIndex < normalizedBlocks.length - 1) {
-                mergedRow.push('');
             }
         });
         mergedRows.push(mergedRow);
@@ -3553,10 +3548,7 @@ function buildPlaylistType3ExportRows(items) {
     const blocks = (items || [])
         .filter((item) => item?.type === 'playlist')
         .map((item) => {
-            const blockRows = [
-                [cleanExportText(item.name || `Playlist ${item.spotify_id}`), '', ''],
-                ['Artist - Track', 'Track Link', 'PlayCount'],
-            ];
+            const blockRows = [];
             const tracks = Array.isArray(item.export_tracks) ? item.export_tracks : [];
             if (tracks.length) {
                 tracks.forEach((track) => {
@@ -3588,17 +3580,15 @@ function buildAlbumType0ExportRows(items) {
     const blocks = (items || [])
         .filter((item) => item?.type === 'album')
         .map((item) => {
-            const albumName = cleanExportText(item.name || `Album ${item.spotify_id}`);
-            const blockRows = [
-                [albumName, '', '', ''],
-                ['Track No', 'Track Name', 'Track Link', 'PlayCount'],
-            ];
+            const albumName = cleanExportText(item.name || '-');
+            const blockRows = [];
             const tracks = Array.isArray(item.export_tracks) ? item.export_tracks : [];
             if (tracks.length) {
                 tracks.forEach((track, index) => {
                     blockRows.push([
+                        albumName,
                         String(index + 1),
-                        buildExportTrackTitle(track.artist_names || '-', track.track_name || '-'),
+                        cleanExportText(track.track_name || '-'),
                         cleanExportText(track.spotify_url || ''),
                         formatExportMetricPlain(track.playcount_estimate ?? ''),
                     ]);
@@ -3606,8 +3596,9 @@ function buildAlbumType0ExportRows(items) {
                 return blockRows;
             }
             blockRows.push([
+                albumName,
                 '1',
-                buildExportTrackTitle(getItemArtistsLabel(item) || item.owner_name || '-', item.name || '-'),
+                cleanExportText(item.name || '-'),
                 getItemSpotifyUrlForExport(item),
                 formatExportMetricPlain(item.playcount),
             ]);

@@ -393,9 +393,6 @@ def _build_export_track_title(artist_label: str, track_name: str) -> str:
     clean_artist_label = _safe_export_text(artist_label) or ""
     if not clean_artist_label or clean_artist_label == "-":
         return clean_track_name
-    prefix = f"{clean_artist_label} - "
-    if clean_track_name.lower().startswith(prefix.lower()):
-        return clean_track_name
     return f"{clean_artist_label} - {clean_track_name}"
 
 
@@ -421,8 +418,6 @@ def _merge_export_blocks(blocks: list[list[list[str]]]) -> list[list[str]]:
                 for column_index in range(width)
             ]
             merged_row.extend(padded_row)
-            if block_index < len(normalized_blocks) - 1:
-                merged_row.append("")
         merged_rows.append(merged_row)
 
     return merged_rows
@@ -495,10 +490,7 @@ def _build_playlist_type3_rows(
     for item in items:
         if item.item_type != "playlist":
             continue
-        block_rows: list[list[str]] = [
-            [_safe_export_text(item.name) or f"Playlist {item.spotify_id}", "", ""],
-            ["Artist - Track", "Track Link", "PlayCount"],
-        ]
+        block_rows: list[list[str]] = []
         raw_data = raw_map.get(item.spotify_id)
         tracks = raw_data.get("tracks") if isinstance(raw_data, dict) else None
         if isinstance(tracks, list) and tracks:
@@ -538,11 +530,8 @@ def _build_album_type0_rows(
     for item in items:
         if item.item_type != "album":
             continue
-        album_name = _safe_export_text(item.name) or f"Album {item.spotify_id}"
-        block_rows: list[list[str]] = [
-            [album_name, "", "", ""],
-            ["Track No", "Track Name", "Track Link", "PlayCount"],
-        ]
+        album_name = _safe_export_text(item.name) or "-"
+        block_rows: list[list[str]] = []
         raw_data = raw_map.get(item.spotify_id)
         tracks = raw_data.get("tracks") if isinstance(raw_data, dict) else None
         if isinstance(tracks, list) and tracks:
@@ -551,24 +540,22 @@ def _build_album_type0_rows(
                 if not isinstance(track, dict):
                     continue
                 track_name = _safe_export_text(track.get("name")) or "-"
-                artist_label = _extract_export_track_artists(track)
                 block_rows.append(
                     [
+                        album_name,
                         str(index),
-                        _build_export_track_title(artist_label, track_name),
+                        track_name,
                         _extract_export_track_url(track),
                         _format_export_metric(track.get("playcount_estimate")),
                     ]
                 )
                 index += 1
         else:
-            fallback_artist = _safe_export_text(item.owner_name) or _safe_export_text(
-                ", ".join(_extract_artist_names(raw_data))
-            ) or "-"
             block_rows.append(
                 [
+                    album_name,
                     "1",
-                    _build_export_track_title(fallback_artist, _safe_export_text(item.name) or "-"),
+                    _safe_export_text(item.name) or "-",
                     _spotify_url("album", item.spotify_id),
                     _format_export_metric(item.playcount),
                 ]
@@ -581,7 +568,7 @@ def _build_track_offline_rows(
     items: list[Item],
     raw_map: dict[str, dict],
 ) -> tuple[list[str], list[list[str]], str]:
-    headers = ["Artist - Track", "Track Link", "PlayCount", "Listener/Month"]
+    headers: list[str] = []
     rows: list[list[str]] = []
     for item in items:
         if item.item_type != "track":
