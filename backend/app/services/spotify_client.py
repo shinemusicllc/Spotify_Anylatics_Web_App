@@ -7,7 +7,6 @@ from typing import Any
 import httpx
 
 from app.config import settings
-from app.services import spotify_web_scraper
 from app.services.auth_manager import get_auth_headers, invalidate_tokens
 from app.services.rate_limiter import rate_limit
 
@@ -54,150 +53,6 @@ def _first_image_from_sources(sources: list[dict[str, Any]] | None) -> str | Non
         return None
     first = sources[0] or {}
     return first.get("url")
-
-
-def _append_crawl_mode(base_mode: str | None, suffix: str) -> str:
-    if not base_mode:
-        return suffix
-    if suffix in base_mode:
-        return base_mode
-    return f"{base_mode}+{suffix}"
-
-
-async def _consume_scrape_task(task: asyncio.Task | None, label: str) -> dict[str, Any] | None:
-    if task is None:
-        return None
-    try:
-        return await task
-    except Exception as ex:
-        logger.warning("Playwright %s scrape task failed: %s", label, ex)
-        return None
-
-
-def _cancel_scrape_task(task: asyncio.Task | None) -> None:
-    if task is None:
-        return
-    if task.done():
-        return
-    task.cancel()
-
-
-async def _apply_track_playwright_fallback(
-    track_id: str,
-    result: dict[str, Any],
-    scraped_data: dict[str, Any] | None = None,
-) -> dict[str, Any]:
-    if not settings.PLAYWRIGHT_ENABLE_FALLBACK:
-        return result
-    if result.get("error"):
-        return result
-
-    needs_playcount = result.get("playcount") is None
-    needs_duration = result.get("duration_ms") is None
-    should_compare_visible_playcount = bool(settings.PLAYWRIGHT_COMPARE_VISIBLE_PLAYCOUNT)
-    if not (needs_playcount or needs_duration or should_compare_visible_playcount):
-        return result
-
-    scraped = scraped_data or await spotify_web_scraper.scrape_track_stats(track_id)
-    if not scraped:
-        return result
-
-    merged = dict(result)
-    scraped_playcount = scraped.get("playcount")
-    if scraped_playcount is not None:
-        # Prefer visible playcount from open.spotify page when available.
-        if needs_playcount or merged.get("playcount") != scraped_playcount:
-            merged["playcount"] = scraped_playcount
-    if needs_duration and scraped.get("duration_ms") is not None:
-        merged["duration_ms"] = scraped.get("duration_ms")
-    if merged.get("name") in (None, "") and scraped.get("name"):
-        merged["name"] = scraped.get("name")
-    if scraped_playcount is not None or scraped.get("duration_ms") is not None:
-        merged["crawl_mode"] = _append_crawl_mode(merged.get("crawl_mode"), "playwright")
-    return merged
-
-
-async def _apply_artist_playwright_fallback(
-    artist_id: str,
-    result: dict[str, Any],
-    scraped_data: dict[str, Any] | None = None,
-) -> dict[str, Any]:
-    if not settings.PLAYWRIGHT_ENABLE_FALLBACK:
-        return result
-    if result.get("error"):
-        return result
-    if result.get("monthly_listeners") is not None and result.get("followers") is not None:
-        return result
-
-    scraped = scraped_data or await spotify_web_scraper.scrape_artist_stats(artist_id)
-    if not scraped:
-        return result
-
-    merged = dict(result)
-    if merged.get("monthly_listeners") is None and scraped.get("monthly_listeners") is not None:
-        merged["monthly_listeners"] = scraped.get("monthly_listeners")
-    if merged.get("followers") is None and scraped.get("followers") is not None:
-        merged["followers"] = scraped.get("followers")
-    if merged.get("name") in (None, "") and scraped.get("name"):
-        merged["name"] = scraped.get("name")
-    if merged.get("owner_name") in (None, "") and scraped.get("owner_name"):
-        merged["owner_name"] = scraped.get("owner_name")
-    if (
-        scraped.get("monthly_listeners") is not None
-        or scraped.get("followers") is not None
-    ):
-        merged["crawl_mode"] = _append_crawl_mode(merged.get("crawl_mode"), "playwright")
-    return merged
-
-
-async def _apply_album_playwright_fallback(
-    album_id: str,
-    result: dict[str, Any],
-    scraped_data: dict[str, Any] | None = None,
-) -> dict[str, Any]:
-    if not settings.PLAYWRIGHT_ENABLE_FALLBACK:
-        return result
-    if result.get("error"):
-        return result
-    if result.get("playcount") is not None or result.get("total_plays") is not None:
-        return result
-
-    expected_tracks = _safe_int(result.get("track_count"))
-    seed_track_ids: list[str] | None = None
-    track_rows = result.get("tracks")
-    if isinstance(track_rows, list):
-        seed_track_ids = [
-            row.get("spotify_id")
-            for row in track_rows
-            if isinstance(row, dict) and isinstance(row.get("spotify_id"), str)
-        ]
-    scraped = scraped_data or await spotify_web_scraper.scrape_album_stats(
-        album_id,
-        expected_tracks=expected_tracks,
-        seed_track_ids=seed_track_ids,
-    )
-    if not scraped:
-        return result
-
-    merged = dict(result)
-    if scraped.get("playcount") is not None:
-        merged["playcount"] = scraped.get("playcount")
-        merged["total_plays"] = scraped.get("playcount")
-    if merged.get("track_count") is None and scraped.get("track_count") is not None:
-        merged["track_count"] = scraped.get("track_count")
-    if scraped.get("tracks_crawled") is not None:
-        merged["tracks_crawled"] = scraped.get("tracks_crawled")
-    if scraped.get("tracks_expected") is not None:
-        merged["tracks_expected"] = scraped.get("tracks_expected")
-    if scraped.get("tracks_with_playcount") is not None:
-        merged["tracks_with_playcount"] = scraped.get("tracks_with_playcount")
-    if merged.get("name") in (None, "") and scraped.get("name"):
-        merged["name"] = scraped.get("name")
-    if merged.get("owner_name") in (None, "") and scraped.get("owner_name"):
-        merged["owner_name"] = scraped.get("owner_name")
-    merged["crawl_mode"] = _append_crawl_mode(merged.get("crawl_mode"), "playwright")
-    return merged
-
 
 async def _get_json(path: str, params: dict[str, Any] | None = None) -> tuple[int, dict[str, Any] | None]:
     try:
@@ -596,24 +451,10 @@ async def _fetch_playlist_via_pathfinder(playlist_id: str) -> dict[str, Any] | N
 
 
 async def query_artist(artist_id: str) -> dict[str, Any] | None:
-    """Query artist data from Spotify Web API, fallback to oEmbed."""
-    playwright_task: asyncio.Task | None = None
-    if settings.PLAYWRIGHT_ENABLE_FALLBACK and settings.PLAYWRIGHT_INLINE_FALLBACK:
-        playwright_task = asyncio.create_task(spotify_web_scraper.scrape_artist_stats(artist_id))
-
+    """Query artist data from Spotify APIs with non-browser fallbacks only."""
     pathfinder = await _fetch_artist_via_pathfinder(artist_id)
     if pathfinder is not None:
-        needs_playwright = (
-            pathfinder.get("name") in (None, "")
-            or pathfinder.get("owner_name") in (None, "")
-            or pathfinder.get("monthly_listeners") is None
-            or pathfinder.get("followers") is None
-        )
-        if not settings.PLAYWRIGHT_INLINE_FALLBACK or not needs_playwright:
-            _cancel_scrape_task(playwright_task)
-            return pathfinder
-        scraped = await _consume_scrape_task(playwright_task, "artist")
-        return await _apply_artist_playwright_fallback(artist_id, pathfinder, scraped)
+        return pathfinder
 
     status, data = await _get_json(f"/artists/{artist_id}")
     if status == 200 and data:
@@ -628,18 +469,9 @@ async def query_artist(artist_id: str) -> dict[str, Any] | None:
             "owner_url": f"https://open.spotify.com/artist/{artist_id}",
             "playcount": None,
             "total_plays": None,
+            "crawl_mode": "webapi_artist",
         }
-        needs_playwright = (
-            result.get("name") in (None, "")
-            or result.get("owner_name") in (None, "")
-            or result.get("monthly_listeners") is None
-            or result.get("followers") is None
-        )
-        if not settings.PLAYWRIGHT_INLINE_FALLBACK or not needs_playwright:
-            _cancel_scrape_task(playwright_task)
-            return result
-        scraped = await _consume_scrape_task(playwright_task, "artist")
-        return await _apply_artist_playwright_fallback(artist_id, result, scraped)
+        return result
 
     fallback = await _fallback_oembed("artist", artist_id)
     if fallback:
@@ -647,30 +479,7 @@ async def query_artist(artist_id: str) -> dict[str, Any] | None:
         fallback["playcount"] = None
         fallback["total_plays"] = None
         fallback["crawl_mode"] = "oembed"
-        needs_playwright = (
-            fallback.get("name") in (None, "")
-            or fallback.get("owner_name") in (None, "")
-            or fallback.get("monthly_listeners") is None
-            or fallback.get("followers") is None
-        )
-        if not settings.PLAYWRIGHT_INLINE_FALLBACK or not needs_playwright:
-            _cancel_scrape_task(playwright_task)
-            return fallback
-        scraped = await _consume_scrape_task(playwright_task, "artist")
-        return await _apply_artist_playwright_fallback(artist_id, fallback, scraped)
-
-    scraped = await _consume_scrape_task(playwright_task, "artist")
-    if scraped:
-        return {
-            "name": scraped.get("name"),
-            "owner_name": scraped.get("owner_name") or scraped.get("name"),
-            "owner_url": f"https://open.spotify.com/artist/{artist_id}",
-            "monthly_listeners": scraped.get("monthly_listeners"),
-            "followers": scraped.get("followers"),
-            "playcount": None,
-            "total_plays": None,
-            "crawl_mode": scraped.get("crawl_mode") or "playwright_artist",
-        }
+        return fallback
 
     if status == 404:
         return {"error": True, "error_code": 404, "error_message": "Artist not found"}
@@ -680,38 +489,10 @@ async def query_artist(artist_id: str) -> dict[str, Any] | None:
 
 
 async def get_track(track_id: str) -> dict[str, Any] | None:
-    """Get track data from Spotify Web API, fallback to oEmbed."""
-    playwright_task: asyncio.Task | None = None
-    if settings.PLAYWRIGHT_ENABLE_FALLBACK and settings.PLAYWRIGHT_INLINE_FALLBACK:
-        playwright_task = asyncio.create_task(spotify_web_scraper.scrape_track_stats(track_id))
-
+    """Get track data from Spotify APIs with non-browser fallbacks only."""
     pathfinder = await _fetch_track_via_pathfinder(track_id)
     if pathfinder is not None:
-        if pathfinder.get("error"):
-            if not settings.PLAYWRIGHT_INLINE_FALLBACK:
-                return pathfinder
-            scraped = await _consume_scrape_task(playwright_task, "track")
-            if scraped:
-                return {
-                    "name": scraped.get("name"),
-                    "duration_ms": scraped.get("duration_ms"),
-                    "playcount": scraped.get("playcount"),
-                    "monthly_plays": None,
-                    "monthly_listeners": None,
-                    "crawl_mode": scraped.get("crawl_mode") or "playwright_track",
-                }
-            return pathfinder
-
-        needs_playwright = (
-            pathfinder.get("name") in (None, "")
-            or pathfinder.get("duration_ms") is None
-            or pathfinder.get("playcount") is None
-        )
-        if not settings.PLAYWRIGHT_INLINE_FALLBACK or not needs_playwright:
-            _cancel_scrape_task(playwright_task)
-            return pathfinder
-        scraped = await _consume_scrape_task(playwright_task, "track")
-        return await _apply_track_playwright_fallback(track_id, pathfinder, scraped)
+        return pathfinder
 
     status, data = await _get_json(f"/tracks/{track_id}")
     if status == 200 and data:
@@ -738,42 +519,12 @@ async def get_track(track_id: str) -> dict[str, Any] | None:
             "monthly_listeners": None,
             "crawl_mode": "webapi_track",
         }
-
-        needs_playwright = (
-            webapi_result.get("name") in (None, "")
-            or webapi_result.get("duration_ms") is None
-            or webapi_result.get("playcount") is None
-        )
-        if not settings.PLAYWRIGHT_INLINE_FALLBACK or not needs_playwright:
-            _cancel_scrape_task(playwright_task)
-            return webapi_result
-        scraped = await _consume_scrape_task(playwright_task, "track")
-        return await _apply_track_playwright_fallback(track_id, webapi_result, scraped)
+        return webapi_result
 
     fallback = await _fallback_oembed("track", track_id)
     if fallback:
         fallback["crawl_mode"] = "oembed"
-        needs_playwright = (
-            fallback.get("name") in (None, "")
-            or fallback.get("duration_ms") is None
-            or fallback.get("playcount") is None
-        )
-        if not settings.PLAYWRIGHT_INLINE_FALLBACK or not needs_playwright:
-            _cancel_scrape_task(playwright_task)
-            return fallback
-        scraped = await _consume_scrape_task(playwright_task, "track")
-        return await _apply_track_playwright_fallback(track_id, fallback, scraped)
-
-    scraped = await _consume_scrape_task(playwright_task, "track")
-    if scraped:
-        return {
-            "name": scraped.get("name"),
-            "duration_ms": scraped.get("duration_ms"),
-            "playcount": scraped.get("playcount"),
-            "monthly_plays": None,
-            "monthly_listeners": None,
-            "crawl_mode": scraped.get("crawl_mode") or "playwright_track",
-        }
+        return fallback
 
     if status == 404:
         return {"error": True, "error_code": 404, "error_message": "Track not found"}
@@ -893,12 +644,9 @@ async def fetch_playlist(playlist_id: str) -> dict[str, Any] | None:
 
 
 async def fetch_album(album_id: str) -> dict[str, Any] | None:
-    """Fetch album metadata from Spotify Web API, fallback to oEmbed."""
+    """Fetch album metadata from Spotify APIs with non-browser fallbacks only."""
     pathfinder = await _fetch_album_via_pathfinder(album_id)
     if pathfinder is not None:
-        # Album fast-path now mirrors the legacy desktop app more closely:
-        # prefer Pathfinder/network data and return immediately instead of
-        # waiting for Playwright when aggregate playcount is still missing.
         return pathfinder
 
     status, data = await _get_json(f"/albums/{album_id}")
@@ -922,24 +670,6 @@ async def fetch_album(album_id: str) -> dict[str, Any] | None:
     if fallback:
         fallback["crawl_mode"] = "oembed"
         return fallback
-
-    if settings.PLAYWRIGHT_ENABLE_FALLBACK:
-        scraped = await spotify_web_scraper.scrape_album_stats(album_id)
-    else:
-        scraped = None
-    if scraped:
-        return {
-            "name": scraped.get("name"),
-            "owner_name": scraped.get("owner_name"),
-            "track_count": scraped.get("track_count"),
-            "tracks_crawled": scraped.get("tracks_crawled"),
-            "tracks_expected": scraped.get("tracks_expected"),
-            "tracks_with_playcount": scraped.get("tracks_with_playcount"),
-            "playcount": scraped.get("playcount"),
-            "total_plays": scraped.get("total_plays"),
-            "deep_crawl_complete": scraped.get("deep_crawl_complete"),
-            "crawl_mode": scraped.get("crawl_mode") or "playwright_album",
-        }
 
     if status == 404:
         return {"error": True, "error_code": 404, "error_message": "Album not found"}

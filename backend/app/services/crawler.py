@@ -17,7 +17,6 @@ from app.models.crawl_job import CrawlJob
 from app.models.metrics_snapshot import MetricsSnapshot
 from app.models.raw_response import RawResponse
 from app.services import spotify_client
-from app.services import spotify_web_scraper
 from app.config import settings
 
 logger = logging.getLogger(__name__)
@@ -29,220 +28,6 @@ FETCHERS = {
     "playlist": spotify_client.fetch_playlist,
     "album": spotify_client.fetch_album,
 }
-
-
-def _append_crawl_mode(base_mode: str | None, suffix: str) -> str:
-    if not base_mode:
-        return suffix
-    if suffix in base_mode:
-        return base_mode
-    return f"{base_mode}+{suffix}"
-
-
-async def _apply_direct_playwright_fallback(
-    item_type: str,
-    spotify_id: str,
-    data: dict,
-    existing: dict | None = None,
-) -> dict:
-    """
-    Force a last-mile Playwright enrichment when core fields are still missing.
-
-    This runs at crawler level so it still works even if upstream API flow
-    returns partial payloads.
-    """
-    if data is None:
-        merged: dict = {}
-    elif not isinstance(data, dict):
-        return data
-    else:
-        merged = dict(data)
-
-    had_error = bool(merged.get("error"))
-    already_playwright = "playwright" in str(merged.get("crawl_mode") or "").lower()
-    existing = existing or {}
-
-    def _clear_error_state() -> None:
-        merged.pop("error", None)
-        merged.pop("error_code", None)
-        merged.pop("error_message", None)
-
-    try:
-        if item_type == "track":
-            if already_playwright and not had_error:
-                return merged
-            existing_has_core = (
-                existing.get("playcount") is not None
-                or existing.get("duration_ms") is not None
-            )
-            if had_error and settings.PLAYWRIGHT_FAST_FAIL_ERRORS and not existing_has_core:
-                return merged
-            if existing_has_core:
-                # Fast path: keep trusted existing values and avoid slow Playwright fallback.
-                merged["playcount"] = _prefer_existing_on_none(existing.get("playcount"), merged.get("playcount"))
-                merged["duration_ms"] = _prefer_existing_on_none(existing.get("duration_ms"), merged.get("duration_ms"))
-                merged["name"] = _prefer_existing_on_none(existing.get("name"), merged.get("name"))
-                if had_error:
-                    _clear_error_state()
-                return merged
-
-            needs = had_error or merged.get("playcount") is None or merged.get("duration_ms") is None
-            if not needs:
-                return merged
-            scraped = await spotify_web_scraper.scrape_track_stats(spotify_id)
-            if not scraped:
-                return merged
-            recovered = False
-            if merged.get("name") in (None, "") and scraped.get("name"):
-                merged["name"] = scraped.get("name")
-                recovered = True
-            if merged.get("duration_ms") is None and scraped.get("duration_ms") is not None:
-                merged["duration_ms"] = scraped.get("duration_ms")
-                recovered = True
-            if scraped.get("playcount") is not None:
-                merged["playcount"] = scraped.get("playcount")
-                recovered = True
-            if scraped.get("playcount") is not None or scraped.get("duration_ms") is not None or scraped.get("name"):
-                merged["crawl_mode"] = _append_crawl_mode(merged.get("crawl_mode"), "playwright")
-            if recovered:
-                _clear_error_state()
-            return merged
-
-        if item_type == "artist":
-            if already_playwright and not had_error:
-                return merged
-            existing_has_core = (
-                existing.get("monthly_listeners") is not None
-                or existing.get("followers") is not None
-            )
-            if had_error and settings.PLAYWRIGHT_FAST_FAIL_ERRORS and not existing_has_core:
-                return merged
-            if existing_has_core:
-                merged["monthly_listeners"] = _prefer_existing_on_none(
-                    existing.get("monthly_listeners"),
-                    merged.get("monthly_listeners"),
-                )
-                merged["followers"] = _prefer_existing_on_none(existing.get("followers"), merged.get("followers"))
-                merged["name"] = _prefer_existing_on_none(existing.get("name"), merged.get("name"))
-                merged["owner_name"] = _prefer_existing_on_none(existing.get("owner_name"), merged.get("owner_name"))
-                if had_error:
-                    _clear_error_state()
-                return merged
-
-            needs = (
-                had_error
-                or merged.get("name") in (None, "")
-                or merged.get("owner_name") in (None, "")
-                or
-                merged.get("monthly_listeners") is None
-                or merged.get("followers") is None
-            )
-            if not needs:
-                return merged
-            scraped = await spotify_web_scraper.scrape_artist_stats(spotify_id)
-            if not scraped:
-                return merged
-            recovered = False
-            if merged.get("name") in (None, "") and scraped.get("name"):
-                merged["name"] = scraped.get("name")
-                recovered = True
-            if merged.get("owner_name") in (None, "") and scraped.get("owner_name"):
-                merged["owner_name"] = scraped.get("owner_name")
-                recovered = True
-            if merged.get("monthly_listeners") is None and scraped.get("monthly_listeners") is not None:
-                merged["monthly_listeners"] = scraped.get("monthly_listeners")
-                recovered = True
-            if merged.get("followers") is None and scraped.get("followers") is not None:
-                merged["followers"] = scraped.get("followers")
-                recovered = True
-            if (
-                scraped.get("monthly_listeners") is not None
-                or scraped.get("followers") is not None
-                or scraped.get("name")
-            ):
-                merged["crawl_mode"] = _append_crawl_mode(merged.get("crawl_mode"), "playwright")
-            if recovered:
-                _clear_error_state()
-            return merged
-
-        if item_type == "album":
-            if already_playwright and not had_error:
-                return merged
-            existing_track_rows = merged.get("tracks")
-            existing_has_track_rows = isinstance(existing_track_rows, list) and len(existing_track_rows) > 0
-            existing_has_core = existing.get("playcount") is not None or existing_has_track_rows
-            if had_error and settings.PLAYWRIGHT_FAST_FAIL_ERRORS and not existing_has_core:
-                return merged
-            if existing_has_core:
-                merged["playcount"] = _prefer_existing_on_none(existing.get("playcount"), merged.get("playcount"))
-                merged["total_plays"] = _prefer_existing_on_none(existing.get("playcount"), merged.get("total_plays"))
-                merged["track_count"] = _prefer_existing_on_none(existing.get("track_count"), merged.get("track_count"))
-                merged["name"] = _prefer_existing_on_none(existing.get("name"), merged.get("name"))
-                merged["owner_name"] = _prefer_existing_on_none(existing.get("owner_name"), merged.get("owner_name"))
-                if had_error:
-                    _clear_error_state()
-                return merged
-
-            needs = (
-                had_error
-                or merged.get("name") in (None, "")
-                or merged.get("owner_name") in (None, "")
-                or merged.get("track_count") is None
-            )
-            if not needs:
-                return merged
-            expected_tracks = merged.get("track_count")
-            if not isinstance(expected_tracks, int):
-                expected_tracks = None
-            seed_track_ids: list[str] | None = None
-            track_rows = merged.get("tracks")
-            if isinstance(track_rows, list):
-                seed_track_ids = [
-                    row.get("spotify_id")
-                    for row in track_rows
-                    if isinstance(row, dict) and isinstance(row.get("spotify_id"), str)
-                ]
-            scraped = await spotify_web_scraper.scrape_album_stats(
-                spotify_id,
-                expected_tracks=expected_tracks,
-                seed_track_ids=seed_track_ids,
-            )
-            if not scraped:
-                return merged
-            recovered = False
-            if merged.get("name") in (None, "") and scraped.get("name"):
-                merged["name"] = scraped.get("name")
-                recovered = True
-            if merged.get("owner_name") in (None, "") and scraped.get("owner_name"):
-                merged["owner_name"] = scraped.get("owner_name")
-                recovered = True
-            if merged.get("track_count") is None and scraped.get("track_count") is not None:
-                merged["track_count"] = scraped.get("track_count")
-                recovered = True
-            if scraped.get("playcount") is not None:
-                merged["playcount"] = scraped.get("playcount")
-                merged["total_plays"] = scraped.get("playcount")
-                recovered = True
-            if scraped.get("tracks_crawled") is not None:
-                merged["tracks_crawled"] = scraped.get("tracks_crawled")
-            if scraped.get("tracks_expected") is not None:
-                merged["tracks_expected"] = scraped.get("tracks_expected")
-            if scraped.get("tracks_with_playcount") is not None:
-                merged["tracks_with_playcount"] = scraped.get("tracks_with_playcount")
-            merged["crawl_mode"] = _append_crawl_mode(merged.get("crawl_mode"), "playwright")
-            if recovered:
-                _clear_error_state()
-            return merged
-    except Exception as ex:
-        logger.warning(
-            "Direct Playwright fallback failed for %s:%s - %s",
-            item_type,
-            spotify_id,
-            ex,
-        )
-
-    return merged
-
 
 def _has_meaningful_data(data: dict) -> bool:
     """Return True when payload contains any usable field from API/Playwright."""
@@ -447,24 +232,8 @@ async def crawl_item_task(job_id: str, spotify_id: str, item_type: str):
                         await asyncio.sleep(wait)
 
             if data is None:
-                if settings.PLAYWRIGHT_FAST_FAIL_ERRORS and not _has_meaningful_data(existing_data):
-                    raise Exception("No data returned (fast-fail)")
-                data = await _apply_direct_playwright_fallback(
-                    item_type,
-                    spotify_id,
-                    {},
-                    existing=existing_data,
-                )
-                if not _has_meaningful_data(data):
-                    raise Exception("All retry attempts failed - no data returned")
+                raise Exception("All retry attempts failed - no data returned")
 
-            # Last-mile enrichment for track/album/artist if key fields are still missing.
-            data = await _apply_direct_playwright_fallback(
-                item_type,
-                spotify_id,
-                data,
-                existing=existing_data,
-            )
             data = await _finalize_payload(item_type, data)
 
             # 3. Check if response indicates an error
@@ -483,7 +252,7 @@ async def crawl_item_task(job_id: str, spotify_id: str, item_type: str):
                 return
 
             if not _has_meaningful_data(data):
-                raise Exception("No usable data from API/Playwright")
+                raise Exception("No usable data from API")
 
             # 4. Update Item with real data
             item = await _load_job_item(db, job, spotify_id, item_type)
