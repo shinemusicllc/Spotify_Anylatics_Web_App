@@ -25,10 +25,10 @@ _PLAYLIST_TRACK_FIELDS = (
     "artists(id,name),album(id,name,release_date,images),external_urls(spotify))),"
     "total,limit,offset,next"
 )
-_PATHFINDER_QUERY_PLAYLIST_HASH = "2888863ae48f035d0177d73c88f389e7946a95d49a8883a26e86aebd02f2ed24"
+_PATHFINDER_QUERY_PLAYLIST_HASH = "346811f856fb0b7e4f6c59f8ebea78dd081c6e2fb01b77c954b26259d5fc6763"
 _PATHFINDER_QUERY_TRACK_HASH = "612585ae06ba435ad26369870deaae23b5c8800a256cd8a57e08eddc25a37294"
 _PATHFINDER_QUERY_ALBUM_HASH = "b9bfabef66ed756e5e13f68a942deb60bd4125ec1f1be8cc42769dc0259b4b10"
-_PATHFINDER_QUERY_ARTIST_HASH = "a55d895740a6ea09d6f34a39ee6a1e8a4c66c6889361710bd01560d1c314f1f4"
+_PATHFINDER_QUERY_ARTIST_HASH = "5b9e64f43843fa3a9b6a98543600299b0a2cbbbccfdcdcef2402eb9c1017ca4c"
 
 
 def _safe_int(value: Any) -> int | None:
@@ -360,7 +360,7 @@ def _normalize_playlist_track(item: dict[str, Any]) -> dict[str, Any] | None:
 
 def _normalize_pathfinder_track(item: dict[str, Any]) -> dict[str, Any] | None:
     wrapper = item.get("itemV2") or {}
-    data = wrapper.get("data") or {}
+    data = wrapper.get("data") if isinstance(wrapper, dict) and wrapper else item
     if not isinstance(data, dict):
         return None
 
@@ -389,10 +389,15 @@ def _normalize_pathfinder_track(item: dict[str, Any]) -> dict[str, Any] | None:
     preview_items = (((data.get("previews") or {}).get("audioPreviews") or {}).get("items") or [])
     preview_url = preview_items[0].get("url") if preview_items else None
 
-    duration_ms = _safe_int((data.get("duration") or {}).get("totalMilliseconds"))
+    duration_source = data.get("trackDuration") or data.get("duration") or {}
+    duration_ms = _safe_int((duration_source or {}).get("totalMilliseconds"))
     track_number = _safe_int(data.get("trackNumber"))
     playcount = _safe_int(data.get("playcount"))
     content_rating = (data.get("contentRating") or {}).get("label")
+
+    added_at = item.get("addedAt")
+    if isinstance(added_at, dict):
+        added_at = added_at.get("isoString")
 
     return {
         "spotify_id": track_id,
@@ -410,7 +415,7 @@ def _normalize_pathfinder_track(item: dict[str, Any]) -> dict[str, Any] | None:
         "spotify_url": f"https://open.spotify.com/track/{track_id}",
         "popularity": None,
         "playcount_estimate": playcount,
-        "added_at": item.get("addedAt"),
+        "added_at": added_at,
     }
 
 
@@ -469,22 +474,17 @@ async def _fetch_playlist_pathfinder_page(
     offset: int,
     limit: int,
 ) -> tuple[int, dict[str, Any] | None]:
-    payload = {
-        "operationName": "queryPlaylist",
-        "variables": {
+    status, data = await _pathfinder_query(
+        operation_name="fetchPlaylist",
+        query_hash=_PATHFINDER_QUERY_PLAYLIST_HASH,
+        variables={
             "uri": f"spotify:playlist:{playlist_id}",
             "offset": offset,
             "limit": limit,
+            "enableWatchFeedEntrypoint": False,
         },
-        "extensions": {
-            "persistedQuery": {
-                "version": 1,
-                "sha256Hash": _PATHFINDER_QUERY_PLAYLIST_HASH,
-            }
-        },
-    }
-
-    status, data = await _get_pathfinder_json(payload)
+        endpoint=SPOTIFY_PATHFINDER_V2_API,
+    )
     if status != 200 or not data:
         return status, None
 
@@ -515,6 +515,7 @@ async def _fetch_playlist_via_pathfinder(playlist_id: str) -> dict[str, Any] | N
     image: str | None = None
     owner_name: str | None = None
     owner_image: str | None = None
+    owner_url: str | None = None
     followers: int | None = None
 
     offset = 0
@@ -535,6 +536,9 @@ async def _fetch_playlist_via_pathfinder(playlist_id: str) -> dict[str, Any] | N
             owner_data = ((playlist.get("ownerV2") or {}).get("data") or {})
             owner_name = owner_data.get("name") or owner_data.get("username")
             owner_image = _first_image_from_sources((owner_data.get("avatar") or {}).get("sources") or [])
+            owner_uri = owner_data.get("uri")
+            owner_id = _spotify_uri_to_id(owner_uri)
+            owner_url = f"https://open.spotify.com/user/{owner_id}" if owner_id else None
             followers = _safe_int(playlist.get("followers"))
 
         content = playlist.get("content") or {}
@@ -576,6 +580,7 @@ async def _fetch_playlist_via_pathfinder(playlist_id: str) -> dict[str, Any] | N
         "image": image,
         "owner_name": owner_name,
         "owner_image": owner_image,
+        "owner_url": owner_url,
         "followers": followers,
         "track_count": expected,
         "tracks": tracks,
@@ -586,7 +591,7 @@ async def _fetch_playlist_via_pathfinder(playlist_id: str) -> dict[str, Any] | N
         "deep_crawl_complete": deep_complete,
         "total_plays": total_plays,
         "playcount": total_plays,
-        "crawl_mode": "deep_pathfinder",
+        "crawl_mode": "pathfinder_playlist",
     }
 
 
@@ -1056,9 +1061,14 @@ async def _fetch_track_via_pathfinder(track_id: str) -> dict[str, Any] | None:
 
 async def _fetch_artist_via_pathfinder(artist_id: str) -> dict[str, Any] | None:
     status, payload = await _pathfinder_query(
-        operation_name="queryArtist",
+        operation_name="queryArtistOverview",
         query_hash=_PATHFINDER_QUERY_ARTIST_HASH,
-        variables={"uri": f"spotify:artist:{artist_id}"},
+        variables={
+            "uri": f"spotify:artist:{artist_id}",
+            "locale": "",
+            "includePrerelease": True,
+        },
+        endpoint=SPOTIFY_PATHFINDER_V2_API,
     )
     if status != 200 or not payload:
         return None
