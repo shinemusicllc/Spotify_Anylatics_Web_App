@@ -224,6 +224,12 @@ h3 {
   border: 1px solid transparent;
 }
 
+.group-item-selected:hover,
+.group-item-selected:focus-visible {
+  background: rgba(29, 185, 84, 0.1) !important;
+  color: #f8fbff !important;
+}
+
 .group-item-selected .material-icons-round:first-child {
   color: #6ee7a8 !important;
 }

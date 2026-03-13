@@ -2755,7 +2755,7 @@ function renderRow(item) {
                 <div class="checked-stack">
                     <span class="list-checked-text text-secondary-text row-checked" data-checked-at="${escapeHtml(checkedAt)}">${timeAgo(checkedAt)}</span>
                     <span class="checked-status ${status.color}">
-                        <span class="status-dot ${status.dot}"></span>
+                        ${status.dot === 'crawling' ? '' : `<span class="status-dot ${status.dot}"></span>`}
                         <span class="truncate">${status.label}</span>
                     </span>
                 </div>

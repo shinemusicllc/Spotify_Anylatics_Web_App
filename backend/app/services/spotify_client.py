@@ -1150,6 +1150,62 @@ def _normalize_pathfinder_album_track(track_data: dict[str, Any]) -> dict[str, A
     }
 
 
+async def _hydrate_album_track_playcounts_via_pathfinder(tracks: list[dict[str, Any]]) -> tuple[list[dict[str, Any]], bool]:
+    if not isinstance(tracks, list) or not tracks:
+        return tracks, False
+
+    missing_ids: list[str] = []
+    for track in tracks:
+        if not isinstance(track, dict):
+            continue
+        if track.get("playcount_estimate") is not None:
+            continue
+        track_id = track.get("spotify_id")
+        if isinstance(track_id, str) and track_id.strip():
+            missing_ids.append(track_id.strip())
+
+    if not missing_ids:
+        return tracks, False
+
+    semaphore = asyncio.Semaphore(6)
+
+    async def fetch_one(track_id: str) -> tuple[str, dict[str, Any] | None]:
+        async with semaphore:
+            data = await _fetch_track_via_pathfinder(track_id)
+            return track_id, data if isinstance(data, dict) and not data.get("error") else None
+
+    fetched = await asyncio.gather(*(fetch_one(track_id) for track_id in missing_ids), return_exceptions=True)
+    track_map: dict[str, dict[str, Any]] = {}
+    for row in fetched:
+        if isinstance(row, Exception):
+            continue
+        track_id, payload = row
+        if payload:
+            track_map[track_id] = payload
+
+    hydrated = False
+    for track in tracks:
+        if not isinstance(track, dict):
+            continue
+        track_id = track.get("spotify_id")
+        if not isinstance(track_id, str):
+            continue
+        payload = track_map.get(track_id)
+        if not payload:
+            continue
+        if track.get("playcount_estimate") is None and payload.get("playcount") is not None:
+            track["playcount_estimate"] = payload.get("playcount")
+            hydrated = True
+        if not track.get("artist_names") and payload.get("artist_names"):
+            track["artist_names"] = payload.get("artist_names")
+        if not track.get("artists") and payload.get("artists"):
+            track["artists"] = payload.get("artists")
+        if not track.get("spotify_url") and track_id:
+            track["spotify_url"] = f"https://open.spotify.com/track/{track_id}"
+
+    return tracks, hydrated
+
+
 async def _fetch_album_via_pathfinder(album_id: str) -> dict[str, Any] | None:
     page_size = max(1, min(settings.PLAYLIST_PAGE_SIZE, 100))
     max_tracks = max(page_size, settings.PLAYLIST_MAX_TRACKS)
@@ -1241,6 +1297,7 @@ async def _fetch_album_via_pathfinder(album_id: str) -> dict[str, Any] | None:
     if pages_fetched == 0:
         return None
 
+    tracks, hydrated_track_playcounts = await _hydrate_album_track_playcounts_via_pathfinder(tracks)
     expected = total_tracks if total_tracks is not None else len(tracks)
     deep_complete = bool(expected == 0 or len(tracks) >= expected)
     play_values = [t.get("playcount_estimate") for t in tracks if t.get("playcount_estimate") is not None]
@@ -1262,5 +1319,5 @@ async def _fetch_album_via_pathfinder(album_id: str) -> dict[str, Any] | None:
         "deep_crawl_complete": deep_complete,
         "total_plays": total_plays,
         "playcount": total_plays,
-        "crawl_mode": "pathfinder_album",
+        "crawl_mode": "pathfinder_album+pathfinder_track" if hydrated_track_playcounts else "pathfinder_album",
     }
