@@ -1,12 +1,13 @@
-# SpotiCheck Analytics — Decisions Log
+# SpotiCheck Analytics - Decisions Log
 
-| Decision                          | Reason                                                                    | Impact                                     | Date       |
-| --------------------------------- | ------------------------------------------------------------------------- | ------------------------------------------ | ---------- |
-| Chọn FastAPI + Playwright + httpx | Combo phổ biến nhất cho scraping Spotify internal API                     | High — quyết định toàn bộ stack            | 2026-03-06 |
-| Không dùng Redis ở MVP            | Giữ đơn giản, dùng asyncio BackgroundTasks thay thế                       | Medium — dễ thêm sau                       | 2026-03-06 |
-| Phương án A (Hybrid auth)         | 2-layer token: Playwright cold → httpx hot, proactive refresh             | High — giảm RAM, tăng tốc                  | 2026-03-06 |
-| Giữ nguyên layout UI              | User yêu cầu không thay đổi layout, chỉ bổ sung tính năng                 | Medium — ít rework                         | 2026-03-06 |
-| Tách final3.html thành 3 file     | Cần tách concerns (HTML/CSS/JS) để maintain và kết nối API                | Medium                                     | 2026-03-06 |
-| Dynamic column labels theo type   | Monthly Listeners cho Artist, Playcount cho Track, Followers cho Playlist | Medium — UX rõ ràng hơn                    | 2026-03-06 |
-| Đổi "Owner" → "Artist / Owner"    | Track/Album owner thực chất là artist, cần label phản ánh đúng            | Low                                        | 2026-03-06 |
-| Click row mở popup window         | User muốn check nhanh trên Spotify mà vẫn thấy list, không mở tab mới     | Medium — cần window.open() với size params | 2026-03-06 |
+| Decision | Reason | Impact | Date |
+| --- | --- | --- | --- |
+| Choose FastAPI + Playwright + httpx | This stack fits Spotify internal API crawling and fallback browser automation. | High | 2026-03-06 |
+| Skip Redis for MVP | Background tasks are enough for the current scope and keep deployment simpler. | Medium | 2026-03-06 |
+| Use hybrid auth flow | Playwright for cold auth and httpx for hot-path requests reduces runtime overhead. | High | 2026-03-06 |
+| Preserve the original UI layout | User requirement was to keep the familiar layout and only add features carefully. | Medium | 2026-03-06 |
+| Split `final3.html` into frontend files | Separation of concerns is required for maintainability and API wiring. | Medium | 2026-03-06 |
+| Use Shine main as UI source of truth | The user wants the local app to match the deployed web UI before adding new fixes. | High | 2026-03-16 |
+| Build track and album display titles from full `artist_names` | Older rows may still contain a stale single-artist prefix; UI and export must show the full credited list when raw artist data exists. | Medium | 2026-03-16 |
+| Deduplicate tracked links per user, not globally | The same Spotify link must be trackable by different users, but each user should own at most one row for that link. | High | 2026-03-16 |
+| Default admin list scope to admin-owned links | Admin mode should not silently aggregate every user's rows under `All Links`; cross-user inspection must be explicit via the user filter. | High | 2026-03-16 |

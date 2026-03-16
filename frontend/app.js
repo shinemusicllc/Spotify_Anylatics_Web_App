@@ -955,6 +955,81 @@ function buildPrefixedTitle(prefix, baseTitle) {
     return `${prefixLabel} - ${base}`;
 }
 
+function getNormalizedArtistNames(artistNames) {
+    if (!Array.isArray(artistNames)) return [];
+    const normalized = [];
+    const seen = new Set();
+    artistNames.forEach((name) => {
+        const cleaned = normalizeStoredGroupName(name);
+        if (!cleaned) return;
+        const lowered = cleaned.toLowerCase();
+        if (seen.has(lowered)) return;
+        seen.add(lowered);
+        normalized.push(cleaned);
+    });
+    return normalized;
+}
+
+function splitArtistLabel(artistLabel) {
+    if (!artistLabel) return [];
+    return getNormalizedArtistNames(String(artistLabel).split(',').map((part) => part.trim()));
+}
+
+function getArtistPrefixCandidates(artistNames) {
+    const normalized = getNormalizedArtistNames(artistNames);
+    const candidates = [];
+    const seen = new Set();
+    const appendCandidate = (candidate) => {
+        const cleaned = normalizeStoredGroupName(candidate);
+        if (!cleaned) return;
+        const lowered = cleaned.toLowerCase();
+        if (seen.has(lowered)) return;
+        seen.add(lowered);
+        candidates.push(cleaned);
+    };
+    [', ', ' - '].forEach((separator) => {
+        for (let size = normalized.length; size >= 1; size -= 1) {
+            appendCandidate(normalized.slice(0, size).join(separator));
+        }
+    });
+    normalized.forEach((name) => appendCandidate(name));
+    return candidates;
+}
+
+function stripLeadingArtistPrefix(title, artistNames) {
+    let baseTitle = normalizeStoredGroupName(title) || 'Unknown';
+    const candidates = getArtistPrefixCandidates(artistNames);
+    if (!candidates.length) return baseTitle;
+
+    let matched = true;
+    while (matched) {
+        matched = false;
+        const lowered = baseTitle.toLowerCase();
+        for (const prefix of candidates) {
+            const marker = `${prefix} - `;
+            if (lowered.startsWith(marker.toLowerCase())) {
+                baseTitle = normalizeStoredGroupName(baseTitle.slice(marker.length)) || 'Unknown';
+                matched = true;
+                break;
+            }
+        }
+    }
+    return baseTitle;
+}
+
+function buildDisplayTitleWithArtists(artistNames, title, fallbackArtist = '') {
+    let normalizedArtists = getNormalizedArtistNames(artistNames);
+    let artistLabel = normalizedArtists.join(', ');
+    if (!artistLabel) {
+        artistLabel = normalizeStoredGroupName(fallbackArtist);
+        normalizedArtists = splitArtistLabel(artistLabel);
+    }
+
+    const normalizedTitle = stripLeadingArtistPrefix(title, normalizedArtists);
+    if (!artistLabel) return normalizedTitle;
+    return `${artistLabel} - ${normalizedTitle}`;
+}
+
 function getDisplayTitle(item) {
     const baseTitle = item.name || 'Unknown';
     if (item.type === 'playlist') {
@@ -962,6 +1037,13 @@ function getDisplayTitle(item) {
             item.owner_name || getItemArtistNames(item)[0] || ''
         );
         return buildPrefixedTitle(artistOrOwner, baseTitle);
+    }
+    if (item.type === 'track' || item.type === 'album') {
+        return buildDisplayTitleWithArtists(
+            getItemArtistNames(item),
+            baseTitle,
+            item.owner_name || ''
+        );
     }
     return baseTitle;
 }
@@ -1326,8 +1408,7 @@ function getActiveGroupName() {
 }
 
 function isAdminAllUsersMode() {
-    const currentUser = getAuthUser();
-    return Boolean(currentUser?.role === 'admin' && !state.adminFilterUserId);
+    return false;
 }
 
 function buildGroupEntryId(groupName, ownerUserId = null) {
@@ -1784,6 +1865,15 @@ function getCurrentUserLabel() {
     return currentUser?.display_name || currentUser?.username || 'Admin';
 }
 
+function getAdminTargetUserId() {
+    const currentUser = getAuthUser();
+    if (currentUser?.role !== 'admin') return null;
+    if (state.adminFilterUserId) {
+        return String(state.adminFilterUserId);
+    }
+    return currentUser?.id ? String(currentUser.id) : null;
+}
+
 function getScopedGroupOwnerUserId() {
     const currentUser = getAuthUser();
     if (!currentUser?.id) return null;
@@ -2103,10 +2193,7 @@ function resolveSelectedGroupContext() {
     var dd = document.getElementById('modal-group-select-dropdown');
     var picked = normalizeGroupName(dd ? dd.getAttribute('data-value') : null);
     var currentUser = getAuthUser();
-    var adminTargetUserId = null;
-    if (currentUser?.role === 'admin' && state.adminFilterUserId) {
-        adminTargetUserId = String(state.adminFilterUserId);
-    }
+    var adminTargetUserId = currentUser?.role === 'admin' ? getAdminTargetUserId() : null;
     if (!picked || picked.toLowerCase() === GROUP_SELECT_ALL.toLowerCase()) {
         return {
             group: null,
@@ -2161,9 +2248,8 @@ function getCurrentListScope() {
         : null;
     let targetUserId = null;
     if (currentUser?.role === 'admin') {
-        targetUserId = state.adminFilterUserId
-            ? String(state.adminFilterUserId)
-            : (activeEntry?.ownerUserId ? String(activeEntry.ownerUserId) : null);
+        targetUserId = getAdminTargetUserId()
+            || (activeEntry?.ownerUserId ? String(activeEntry.ownerUserId) : null);
     }
     return {
         activeEntry,
@@ -3303,12 +3389,7 @@ function formatExportMetricPlain(value) {
 }
 
 function buildExportTrackTitle(artistLabel, trackName) {
-    const cleanTrackName = cleanExportText(trackName) || '-';
-    const cleanArtistLabel = cleanExportText(artistLabel) || '';
-    if (!cleanArtistLabel || cleanArtistLabel === '-') return cleanTrackName;
-    const prefix = `${cleanArtistLabel} - `;
-    if (cleanTrackName.toLowerCase().startsWith(prefix.toLowerCase())) return cleanTrackName;
-    return `${cleanArtistLabel} - ${cleanTrackName}`;
+    return buildDisplayTitleWithArtists(splitArtistLabel(artistLabel), trackName, artistLabel || '-');
 }
 
 function mergeExportBlocks(blocks = []) {
@@ -3622,7 +3703,7 @@ function buildListViewExportRows(items) {
         const excel = getExcelColumnValues(item);
         return [
             cleanExportText(item.type || ''),
-            cleanExportText(item.name || ''),
+            cleanExportText(getDisplayTitle(item)),
             getItemSpotifyUrlForExport(item),
             cleanExportText(item.group || ''),
             cleanExportText(getItemUserName(item)),
@@ -3674,7 +3755,7 @@ function buildAlbumType0ExportRows(items) {
     const blocks = (items || [])
         .filter((item) => item?.type === 'album')
         .map((item) => {
-            const albumName = cleanExportText(item.name || '-');
+            const albumName = cleanExportText(getDisplayTitle(item) || '-');
             const blockRows = [];
             const tracks = Array.isArray(item.export_tracks) ? item.export_tracks : [];
             if (tracks.length) {
@@ -3692,7 +3773,7 @@ function buildAlbumType0ExportRows(items) {
             blockRows.push([
                 albumName,
                 '1',
-                buildExportTrackTitle(getItemArtistsLabel(item) || item.owner_name || '-', item.name || '-'),
+                albumName,
                 getItemSpotifyUrlForExport(item),
                 formatExportMetricPlain(item.playcount),
             ]);
@@ -3705,15 +3786,14 @@ function buildTrackOfflineExportRows(items) {
     return (items || [])
         .filter((item) => item?.type === 'track')
         .map((item) => {
-            const artists = getItemArtistsLabel(item) || '-';
-            const trackName = cleanExportText(item.name || '-');
+            const trackTitle = cleanExportText(getDisplayTitle(item) || '-');
             const spotifyLink = getItemSpotifyUrlForExport(item);
             const playCount = formatExportMetricPlain(item.playcount);
             const firstArtistListenPerMonthCount = item.monthly_listeners == null
                 ? ''
                 : formatExportMetricPlain(item.monthly_listeners);
             return [
-                buildExportTrackTitle(artists, trackName),
+                trackTitle,
                 spotifyLink,
                 playCount,
                 firstArtistListenPerMonthCount,
@@ -4428,8 +4508,6 @@ function openSpotifyPopup(url) {
 function openModal() {
     document.getElementById('add-link-modal').classList.add('open');
     document.getElementById('modal-batch-input').value = '';
-    const dedupeToggle = document.getElementById('modal-dedupe-links');
-    if (dedupeToggle) dedupeToggle.checked = true;
     document.getElementById('modal-batch-input').focus();
     document.getElementById('modal-url-hint').textContent = 'Supports: playlist, track, album, and artist links';
     document.getElementById('modal-url-hint').className = 'text-xs text-secondary-text mt-2';
@@ -4442,7 +4520,6 @@ function closeModal() {
 
 async function submitSingle() {
     const textarea = document.getElementById('modal-batch-input');
-    const dedupeToggle = document.getElementById('modal-dedupe-links');
     let urls = textarea.value.split('\n').map((u) => u.trim()).filter(Boolean);
     const hint = document.getElementById('modal-url-hint');
 
@@ -4459,45 +4536,57 @@ async function submitSingle() {
         return;
     }
 
-    if (dedupeToggle?.checked) {
-        const deduped = dedupeSubmittedUrls(urls);
-        urls = deduped.urls;
-        if (!urls.length) {
-            hint.textContent = 'No valid unique Spotify URLs left after removing duplicates';
-            hint.className = 'text-xs text-red-400 mt-2';
-            return;
-        }
-        if (deduped.removed > 0) {
-            hint.textContent = `Removed ${deduped.removed} duplicate link(s) before crawling`;
-            hint.className = 'text-xs text-primary mt-2';
-        }
-    }
-
     const selectedGroup = resolveSelectedGroupContext();
     const group = selectedGroup.group;
     const currentIdentity = getUserIdentityById(selectedGroup.targetUserId);
 
     try {
         let jobIds = [];
+        let acceptedIndices = [];
         if (urls.length === 1) {
             const result = await api.crawl(urls[0], group, selectedGroup.targetUserId);
+            if (result?.skipped_duplicate) {
+                showToast('Link already exists for this user, skipped duplicate', 'info');
+                closeModal();
+                return;
+            }
             const singleJobId = result?.job_id;
             if (!singleJobId) {
                 throw new Error('Backend did not return job_id');
             }
             jobIds = [singleJobId];
+            acceptedIndices = [0];
         } else {
             const result = await api.crawlBatch(urls, group, selectedGroup.targetUserId);
             jobIds = Array.isArray(result?.job_ids) ? result.job_ids : [];
+            acceptedIndices = Array.isArray(result?.accepted_indices) ? result.accepted_indices : [];
+            const skippedDuplicates = Number(result?.skipped_duplicates || 0);
+            if (!jobIds.length && skippedDuplicates > 0) {
+                showToast('All submitted links already exist for this user', 'info');
+                closeModal();
+                return;
+            }
             if (!jobIds.length) {
                 throw new Error('Backend did not return job_ids');
             }
+            if (acceptedIndices.length !== jobIds.length) {
+                acceptedIndices = jobIds.map((_, index) => index);
+            }
+            const addedCount = jobIds.length;
+            if (skippedDuplicates > 0) {
+                showToast(`Added ${addedCount} link${addedCount > 1 ? 's' : ''}, skipped ${skippedDuplicates} duplicate${skippedDuplicates > 1 ? 's' : ''}`, 'success');
+            } else {
+                showToast(`Added ${addedCount} links - crawling started`, 'success');
+            }
         }
-        showToast(`Added ${urls.length} link${urls.length > 1 ? 's' : ''} - crawling started`, 'success');
+        if (urls.length === 1) {
+            showToast('Added 1 link - crawling started', 'success');
+        }
 
         const now = new Date().toISOString();
         let mappedJobs = 0;
-        urls.forEach((url, i) => {
+        acceptedIndices.forEach((urlIndex, i) => {
+            const url = urls[urlIndex];
             const parsed = parseSpotifyUrl(url);
             const jobId = jobIds[i];
             if (!parsed || !jobId) return;
@@ -4827,7 +4916,7 @@ async function setupAdminUserFilter() {
     filterLabel.textContent = 'Filter by User';
     filterDiv.appendChild(filterLabel);
 
-    var filterOptions = [{value: '', label: 'All Users'}];
+    var filterOptions = [{value: '', label: 'My Links'}];
     for (var fi = 0; fi < state.adminUserList.length; fi++) {
         var fu = state.adminUserList[fi];
         filterOptions.push({value: fu.id || fu._id || '', label: fu.display_name || fu.username || String(fu.id)});
@@ -4853,7 +4942,7 @@ async function setupAdminUserFilter() {
 function rebuildAdminUserFilterOptions() {
     const filterWrap = document.getElementById('admin-user-filter-dropdown');
     if (!filterWrap) return;
-    const options = [{ value: '', label: 'All Users' }];
+    const options = [{ value: '', label: 'My Links' }];
     (state.adminUserList || []).forEach((user) => {
         options.push({
             value: user.id || user._id || '',
@@ -4910,9 +4999,7 @@ async function loadData(opts = {}) {
         const currentUser = getAuthUser();
         if (currentUser?.role === 'admin') {
             await _fetchAdminUsers({ preferCache: Boolean(state.adminFilterUserId) });
-        }
-        if (currentUser?.role === 'admin' && state.adminFilterUserId) {
-            params.user_id = state.adminFilterUserId;
+            params.user_id = getAdminTargetUserId();
         }
         const data = await api.getItems(params);
         if (!data) return;

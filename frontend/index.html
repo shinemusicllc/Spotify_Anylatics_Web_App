@@ -10,7 +10,7 @@
     <link rel="shortcut icon" type="image/svg+xml" href="favicon.svg?v=1">
     <script src="https://cdn.tailwindcss.com?plugins=forms,container-queries"></script>
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=Inter+Tight:wght@600;700;800&family=Material+Symbols+Rounded:opsz,wght,FILL,GRAD@20..48,500,0..1,0&display=swap" rel="stylesheet">
-    <link rel="stylesheet" href="style.css?v=20260311-64">
+    <link rel="stylesheet" href="style.css?v=20260316-68">
     <script id="tailwind-config">
         tailwind.config = {
             darkMode: "class",
@@ -419,18 +419,6 @@
                     <label class="block text-sm font-medium text-secondary-text mb-2">Spotify URL or URI (one per line)</label>
                     <textarea id="modal-batch-input" class="modal-input resize-none" rows="6" placeholder="https://open.spotify.com/playlist/...\nhttps://open.spotify.com/track/...\nspotify:album:..."></textarea>
                     <p id="modal-url-hint" class="text-xs text-secondary-text mt-2">Supports: playlist, track, album, and artist links</p>
-                    <label class="modal-option-card mt-3 cursor-pointer select-none" for="modal-dedupe-links">
-                        <span class="modal-option-check">
-                            <input id="modal-dedupe-links" type="checkbox" checked>
-                            <span class="modal-option-box" aria-hidden="true">
-                                <span class="material-icons-round">check</span>
-                            </span>
-                        </span>
-                        <span class="modal-option-copy">
-                            <span class="modal-option-title">Skip duplicate links</span>
-                            <span class="modal-option-description">Ignore repeated Spotify URLs in the pasted list before crawling.</span>
-                        </span>
-                    </label>
                 </div>
                 <div>
                     <label class="block text-sm font-medium text-secondary-text mb-2">Group (optional)</label>
@@ -614,6 +602,6 @@
             </div>
         </div>
 
-    <script src="app.js?v=20260311-64"></script>
+    <script src="app.js?v=20260316-68"></script>
 </body>
 </html>

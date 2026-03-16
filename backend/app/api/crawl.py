@@ -4,7 +4,7 @@ import asyncio
 import uuid
 
 from fastapi import APIRouter, Depends, HTTPException
-from sqlalchemy import select
+from sqlalchemy import or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.database import get_db
@@ -66,6 +66,28 @@ async def _resolve_refresh_item(
     return item
 
 
+async def _find_existing_owned_item(
+    db: AsyncSession,
+    current_user: User,
+    target_user_id: uuid.UUID,
+    item_type: str,
+    spotify_id: str,
+) -> Item | None:
+    query = select(Item).where(
+        Item.spotify_id == spotify_id,
+        Item.item_type == item_type,
+    )
+
+    if current_user.role == "admin" and target_user_id == current_user.id:
+        # Legacy admin rows may still have null user_id.
+        query = query.where(or_(Item.user_id == target_user_id, Item.user_id.is_(None)))
+    else:
+        query = query.where(Item.user_id == target_user_id)
+
+    result = await db.execute(query.order_by(Item.updated_at.desc()))
+    return result.scalars().first()
+
+
 @router.post("/crawl", response_model=CrawlResponse)
 async def crawl(
     req: CrawlRequest,
@@ -93,6 +115,21 @@ async def crawl(
         if req.group is not None:
             item.group = requested_group
     else:
+        existing_item = await _find_existing_owned_item(
+            db=db,
+            current_user=current_user,
+            target_user_id=target_user_id,
+            item_type=item_type,
+            spotify_id=spotify_id,
+        )
+        if existing_item:
+            return CrawlResponse(
+                job_id=None,
+                item_id=str(existing_item.id),
+                status="duplicate",
+                skipped_duplicate=True,
+                message="Link already exists for this user",
+            )
         item = Item(
             spotify_id=spotify_id,
             item_type=item_type,
@@ -136,7 +173,9 @@ async def crawl_batch(
 ):
     """Start crawl jobs for multiple Spotify URLs."""
     job_ids = []
+    accepted_indices: list[int] = []
     background_jobs: list[tuple[str, str, str]] = []
+    skipped_duplicates = 0
     target_user_id = await _resolve_target_user_id(db, current_user, req.target_user_id)
     requested_group = (req.group or "").strip() or None
     if req.item_ids is not None and len(req.item_ids) != len(req.urls):
@@ -162,6 +201,16 @@ async def crawl_batch(
             if req.group is not None:
                 item.group = requested_group
         else:
+            existing_item = await _find_existing_owned_item(
+                db=db,
+                current_user=current_user,
+                target_user_id=target_user_id,
+                item_type=item_type,
+                spotify_id=spotify_id,
+            )
+            if existing_item:
+                skipped_duplicates += 1
+                continue
             item = Item(
                 spotify_id=spotify_id,
                 item_type=item_type,
@@ -187,6 +236,7 @@ async def crawl_batch(
 
         job_id = str(job.id)
         job_ids.append(job_id)
+        accepted_indices.append(idx)
         background_jobs.append((job_id, spotify_id, item_type))
 
     # Persist all created jobs before scheduling any background task.
@@ -195,4 +245,14 @@ async def crawl_batch(
     for job_id, spotify_id, item_type in background_jobs:
         asyncio.create_task(crawl_item_task(job_id, spotify_id, item_type))
 
-    return CrawlBatchResponse(job_ids=job_ids, count=len(job_ids))
+    return CrawlBatchResponse(
+        job_ids=job_ids,
+        count=len(job_ids),
+        accepted_indices=accepted_indices,
+        skipped_duplicates=skipped_duplicates,
+        message=(
+            "No new crawl jobs created because all links already exist for this user"
+            if not job_ids and skipped_duplicates
+            else "Batch crawl jobs created"
+        ),
+    )

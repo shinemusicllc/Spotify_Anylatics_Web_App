@@ -26,8 +26,10 @@ class CrawlBatchRequest(BaseModel):
 class CrawlResponse(BaseModel):
     """Crawl job created response."""
 
-    job_id: str
+    job_id: str | None = None
+    item_id: str | None = None
     status: str = "pending"
+    skipped_duplicate: bool = False
     message: str = "Crawl job created"
 
 
@@ -36,4 +38,6 @@ class CrawlBatchResponse(BaseModel):
 
     job_ids: list[str]
     count: int
+    accepted_indices: list[int] = []
+    skipped_duplicates: int = 0
     message: str = "Batch crawl jobs created"

@@ -109,6 +109,98 @@ def _extract_artist_names(raw_data: dict | None) -> list[str]:
     return []
 
 
+def _normalize_artist_name_parts(values: list[str] | None) -> list[str]:
+    if not isinstance(values, list):
+        return []
+
+    normalized: list[str] = []
+    seen: set[str] = set()
+    for value in values:
+        if not isinstance(value, str):
+            continue
+        name = value.strip()
+        if not name:
+            continue
+        lowered = name.lower()
+        if lowered in seen:
+            continue
+        seen.add(lowered)
+        normalized.append(name)
+    return normalized
+
+
+def _split_artist_label(value: str | None) -> list[str]:
+    if not isinstance(value, str):
+        return []
+    return _normalize_artist_name_parts([part.strip() for part in value.split(",")])
+
+
+def _artist_prefix_candidates(artist_names: list[str]) -> list[str]:
+    normalized = _normalize_artist_name_parts(artist_names)
+    candidates: list[str] = []
+    seen: set[str] = set()
+
+    def append_candidate(candidate: str) -> None:
+        text = candidate.strip()
+        if not text:
+            return
+        lowered = text.lower()
+        if lowered in seen:
+            return
+        seen.add(lowered)
+        candidates.append(text)
+
+    for separator in (", ", " - "):
+        for size in range(len(normalized), 0, -1):
+            append_candidate(separator.join(normalized[:size]))
+    for name in normalized:
+        append_candidate(name)
+    return candidates
+
+
+def _strip_leading_artist_prefix(title: str, artist_names: list[str]) -> str:
+    base = _safe_export_text(title) or "-"
+    candidates = _artist_prefix_candidates(artist_names)
+    if not candidates:
+        return base
+
+    while True:
+        lowered = base.lower()
+        matched = False
+        for prefix in candidates:
+            marker = f"{prefix} - "
+            if lowered.startswith(marker.lower()):
+                base = base[len(marker):].strip() or "-"
+                matched = True
+                break
+        if not matched:
+            return base
+
+
+def _build_display_title(artist_names: list[str], title: str, fallback_artist: str = "-") -> str:
+    normalized_artists = _normalize_artist_name_parts(artist_names)
+    artist_label = ", ".join(normalized_artists)
+    if not artist_label:
+        artist_label = _safe_export_text(fallback_artist) or "-"
+        normalized_artists = _split_artist_label(artist_label)
+
+    normalized_title = _strip_leading_artist_prefix(title, normalized_artists)
+    if artist_label == "-":
+        return normalized_title
+    return f"{artist_label} - {normalized_title}" if normalized_title else f"{artist_label} - -"
+
+
+def _build_item_display_title(item: Item, raw_data: dict | None) -> str:
+    item_type = _safe_export_text(getattr(item, "item_type", ""))
+    base_title = _safe_export_text(getattr(item, "name", "")) or "-"
+    if item_type not in {"track", "album"}:
+        return base_title
+
+    artist_names = _extract_artist_names(raw_data)
+    fallback_artist = _safe_export_text(getattr(item, "owner_name", ""))
+    return _build_display_title(artist_names, base_title, fallback_artist)
+
+
 def _build_album_export_tracks(raw_data: dict | None) -> list[dict]:
     if not isinstance(raw_data, dict):
         return []
@@ -391,14 +483,8 @@ def _extract_export_track_artists(track: dict, fallback: str = "-") -> str:
 
 
 def _build_export_track_title(artist_label: str, track_name: str) -> str:
-    clean_track_name = _safe_export_text(track_name) or "-"
-    clean_artist_label = _safe_export_text(artist_label) or ""
-    if not clean_artist_label or clean_artist_label == "-":
-        return clean_track_name
-    prefix = f"{clean_artist_label} - "
-    if clean_track_name.lower().startswith(prefix.lower()):
-        return clean_track_name
-    return f"{clean_artist_label} - {clean_track_name}"
+    artist_names = _split_artist_label(artist_label)
+    return _build_display_title(artist_names, track_name, artist_label)
 
 
 def _merge_export_blocks(blocks: list[list[list[str]]]) -> list[list[str]]:
@@ -489,7 +575,7 @@ def _build_listview_export_rows(
         rows.append(
             [
                 _safe_export_text(item.item_type),
-                _safe_export_text(item.name),
+                _build_item_display_title(item, raw_data),
                 _spotify_url(item.item_type, item.spotify_id),
                 _safe_export_text(item.group),
                 _safe_export_text(user_name),
@@ -555,9 +641,9 @@ def _build_album_type0_rows(
     for item in items:
         if item.item_type != "album":
             continue
-        album_name = _safe_export_text(item.name) or "-"
-        block_rows: list[list[str]] = []
         raw_data = raw_map.get(item.spotify_id)
+        album_name = _build_item_display_title(item, raw_data)
+        block_rows: list[list[str]] = []
         tracks = raw_data.get("tracks") if isinstance(raw_data, dict) else None
         if isinstance(tracks, list) and tracks:
             index = 1
@@ -604,7 +690,7 @@ def _build_track_offline_rows(
         raw_data = raw_map.get(item.spotify_id)
         artist_names = _extract_artist_names(raw_data)
         artist_label = ", ".join(artist_names) if artist_names else (_safe_export_text(item.owner_name) or "-")
-        track_name = _safe_export_text(item.name) or "-"
+        track_name = _build_item_display_title(item, raw_data)
         rows.append(
             [
                 _build_export_track_title(artist_label, track_name),
