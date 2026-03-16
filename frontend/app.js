@@ -4895,6 +4895,11 @@ async function setupAdminUserFilter() {
     try {
         const users = await _fetchAdminUsers({ preferCache: true });
         state.adminUserList = Array.isArray(users) ? users.slice() : [];
+        const currentUserId = String(user.id || '');
+        const hasSelectedUser = state.adminUserList.some((entry) => String(entry.id || entry._id || '') === String(state.adminFilterUserId || ''));
+        if (!hasSelectedUser) {
+            state.adminFilterUserId = currentUserId || null;
+        }
         rebuildAdminUserFilterOptions();
         if (state.items.length) {
             rebuildGroups();
@@ -4916,7 +4921,7 @@ async function setupAdminUserFilter() {
     filterLabel.textContent = 'Filter by User';
     filterDiv.appendChild(filterLabel);
 
-    var filterOptions = [{value: '', label: 'My Links'}];
+    var filterOptions = [];
     for (var fi = 0; fi < state.adminUserList.length; fi++) {
         var fu = state.adminUserList[fi];
         filterOptions.push({value: fu.id || fu._id || '', label: fu.display_name || fu.username || String(fu.id)});
@@ -4924,7 +4929,7 @@ async function setupAdminUserFilter() {
     var filterDropdown = createCustomDropdown({
         id: 'admin-user-filter',
         options: filterOptions,
-        selected: '',
+        selected: state.adminFilterUserId || (user.id ? String(user.id) : ''),
         onChange: handleAdminFilterChange
     });
     filterDiv.appendChild(filterDropdown);
@@ -4942,7 +4947,7 @@ async function setupAdminUserFilter() {
 function rebuildAdminUserFilterOptions() {
     const filterWrap = document.getElementById('admin-user-filter-dropdown');
     if (!filterWrap) return;
-    const options = [{ value: '', label: 'My Links' }];
+    const options = [];
     (state.adminUserList || []).forEach((user) => {
         options.push({
             value: user.id || user._id || '',
@@ -4953,29 +4958,25 @@ function rebuildAdminUserFilterOptions() {
 }
 
 function handleAdminFilterChange(val) {
-    state.adminFilterUserId = val || null;
+    const currentUser = getAuthUser();
+    state.adminFilterUserId = val || (currentUser?.id ? String(currentUser.id) : null);
     state.activeGroup = ALL_GROUP_ID;
     state.groupSearchQuery = '';
     clearRowSelection();
 
     var pageTitle = document.getElementById('page-title');
     var breadcrumb = document.getElementById('breadcrumb-group');
-    if (val) {
-        var selectedUser = state.adminUserList.find(function(u) { return String(u.id || u._id) === val; });
-        var username = (selectedUser && (selectedUser.display_name || selectedUser.username)) || val;
-        if (pageTitle) pageTitle.textContent = ALL_GROUP_LABEL + ' (' + username + ')';
-        if (breadcrumb) breadcrumb.textContent = ALL_GROUP_LABEL + ' (' + username + ')';
-    } else {
-        updateGroupHeader();
-    }
+    var selectedUserId = state.adminFilterUserId;
+    var selectedUser = state.adminUserList.find(function(u) { return String(u.id || u._id) === selectedUserId; });
+    var username = (selectedUser && (selectedUser.display_name || selectedUser.username)) || selectedUserId;
+    if (pageTitle) pageTitle.textContent = ALL_GROUP_LABEL + ' (' + username + ')';
+    if (breadcrumb) breadcrumb.textContent = ALL_GROUP_LABEL + ' (' + username + ')';
 
     loadData({ preserveScroll: false });
-    if (val) {
-        syncGroupsFromServer(val);
-    } else {
+    if (selectedUserId && currentUser && String(selectedUserId) === String(currentUser.id || '')) {
         state.customGroups = loadCustomGroups();
-        syncGroupsFromServer();
     }
+    syncGroupsFromServer(selectedUserId || null);
 }
 
 async function loadData(opts = {}) {

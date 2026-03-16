@@ -12,3 +12,4 @@
 | Deduplicate tracked links per user, not globally | The same Spotify link must be trackable by different users, but each user should own at most one row for that link. | High | 2026-03-16 |
 | Default admin list scope to admin-owned links | Admin mode should not silently aggregate every user's rows under `All Links`; cross-user inspection must be explicit via the user filter. | High | 2026-03-16 |
 | Derive album artist titles from full raw artist lists with track fallback | Some album payloads or legacy rows only expose the complete credited artist list inside track data; display/export must still show all artists. | High | 2026-03-16 |
+| Admin filter should list only real users | Representing the admin's own scope as a fake option is confusing; the selected user should always be an actual account. | Medium | 2026-03-16 |

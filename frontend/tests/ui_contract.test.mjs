@@ -25,8 +25,10 @@ test("add-link flow handles per-user duplicate skips from backend", () => {
 test("admin default scope uses own links instead of all users", () => {
   assert.match(appJs, /function getAdminTargetUserId/);
   assert.match(appJs, /params\.user_id = getAdminTargetUserId\(\)/);
-  assert.match(appJs, /label: 'My Links'/);
+  assert.doesNotMatch(appJs, /label: 'My Links'/);
   assert.doesNotMatch(appJs, /label: 'All Users'/);
+  assert.match(appJs, /state\.adminFilterUserId = currentUserId \|\| null/);
+  assert.match(appJs, /state\.adminFilterUserId = val \|\| \(currentUser\?\.id \? String\(currentUser\.id\) : null\)/);
 });
 
 test("add-link modal no longer renders the duplicate checkbox", () => {

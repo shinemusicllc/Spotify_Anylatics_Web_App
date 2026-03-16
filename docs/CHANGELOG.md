@@ -27,3 +27,10 @@
 - Fixed: UI and export album titles no longer collapse to only the first artist when the raw response still contains the complete credited list.
 - Affected files: `backend/app/api/items.py`, `backend/app/services/spotify_client.py`, `backend/app/services/crawler.py`, `backend/tests/test_multi_artist_titles.py`.
 - Impact/Risk: existing rows still depend on stored raw track artist data for fallback; rows with incomplete raw data may need recrawl.
+
+### 2026-03-16 12:15 - Remove pseudo admin filter option
+- Added: frontend contract coverage for defaulting the admin filter to a real user selection.
+- Changed: the admin user dropdown now lists only actual users and defaults to the admin account itself.
+- Fixed: `All Links` semantics now consistently mean all links of the currently selected user without showing a synthetic `My Links` option.
+- Affected files: `frontend/app.js`, `frontend/index.html`, `frontend/tests/ui_contract.test.mjs`, docs above.
+- Impact/Risk: any workflow expecting an empty admin filter state no longer applies; admin self-scope is now explicit via the selected admin user.

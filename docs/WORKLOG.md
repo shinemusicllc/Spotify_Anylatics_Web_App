@@ -73,3 +73,14 @@
 - Notes:
   - Existing rows should display correctly after reload as long as their raw album tracks contain the full artist list.
   - Newly crawled albums now persist the full album artist list directly in raw responses.
+
+### Task: Simplify admin user filter to real users only
+
+- Status: done
+- Actions:
+  - Removed the pseudo filter option `My Links` from the admin user dropdown.
+  - Defaulted the admin filter selection to the admin account itself so `All Links` always means all links of the selected user.
+  - Kept user switching behavior intact for viewing another user's list and groups.
+  - Bumped the frontend asset version to `v=20260316-69` and re-ran frontend contract checks.
+- Notes:
+  - Admin list scope is still self by default, but now represented by selecting the admin user directly instead of a synthetic option.
