@@ -117,30 +117,75 @@ def _formatted_item_name(item_type: str, data: dict) -> str | None:
         return None
     base_name = name.strip()
 
+    def normalized_artist_names() -> list[str]:
+        raw_artist_names = data.get("artist_names") or []
+        if not isinstance(raw_artist_names, list):
+            return []
+        names: list[str] = []
+        seen: set[str] = set()
+        for artist in raw_artist_names:
+            if not isinstance(artist, str) or not artist.strip():
+                continue
+            cleaned = artist.strip()
+            lowered = cleaned.lower()
+            if lowered in seen:
+                continue
+            seen.add(lowered)
+            names.append(cleaned)
+        return names
+
+    def strip_existing_artist_prefix(title: str, artist_names: list[str]) -> str:
+        if not artist_names:
+            return title
+
+        candidates: list[str] = []
+        seen: set[str] = set()
+        for separator in (", ", " - "):
+            for size in range(len(artist_names), 0, -1):
+                candidate = separator.join(artist_names[:size]).strip()
+                lowered = candidate.lower()
+                if not candidate or lowered in seen:
+                    continue
+                seen.add(lowered)
+                candidates.append(candidate)
+        for name in artist_names:
+            lowered = name.lower()
+            if lowered not in seen:
+                seen.add(lowered)
+                candidates.append(name)
+
+        current = title.strip()
+        while True:
+            lowered = current.lower()
+            matched = False
+            for prefix in candidates:
+                marker = f"{prefix} - "
+                if lowered.startswith(marker.lower()):
+                    current = current[len(marker):].strip()
+                    matched = True
+                    break
+            if not matched:
+                return current or title
+
     if item_type == "track":
-        artist_names = data.get("artist_names") or []
-        if not isinstance(artist_names, list):
-            artist_names = []
-        artist_names = [
-            artist.strip()
-            for artist in artist_names
-            if isinstance(artist, str) and artist.strip()
-        ]
+        artist_names = normalized_artist_names()
         if not artist_names and isinstance(data.get("owner_name"), str) and data.get("owner_name").strip():
             artist_names = [data.get("owner_name").strip()]
         if artist_names:
             prefix = ', '.join(artist_names)
-            if base_name.lower().startswith(f"{prefix.lower()} - "):
-                return base_name
-            return f"{prefix} - {base_name}"
+            stripped = strip_existing_artist_prefix(base_name, artist_names)
+            return f"{prefix} - {stripped}"
 
     if item_type == "album":
-        owner_name = data.get("owner_name")
-        if isinstance(owner_name, str) and owner_name.strip():
-            prefix = owner_name.strip()
-            if base_name.lower().startswith(f"{prefix.lower()} - "):
-                return base_name
-            return f"{prefix} - {base_name}"
+        artist_names = normalized_artist_names()
+        if not artist_names:
+            owner_name = data.get("owner_name")
+            if isinstance(owner_name, str) and owner_name.strip():
+                artist_names = [owner_name.strip()]
+        if artist_names:
+            prefix = ", ".join(artist_names)
+            stripped = strip_existing_artist_prefix(base_name, artist_names)
+            return f"{prefix} - {stripped}"
 
     return base_name
 

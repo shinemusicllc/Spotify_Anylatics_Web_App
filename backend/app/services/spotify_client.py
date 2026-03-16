@@ -1023,6 +1023,7 @@ async def _fetch_album_via_pathfinder(album_id: str) -> dict[str, Any] | None:
         return None
 
     tracks, hydrated_track_playcounts = await _hydrate_album_track_playcounts_via_pathfinder(tracks)
+    album_artists, album_artist_names = _pathfinder_extract_artists((album_union.get("artists") or {}))
     expected = total_tracks if total_tracks is not None else len(tracks)
     deep_complete = bool(expected == 0 or len(tracks) >= expected)
     play_values = [t.get("playcount_estimate") for t in tracks if t.get("playcount_estimate") is not None]
@@ -1034,6 +1035,8 @@ async def _fetch_album_via_pathfinder(album_id: str) -> dict[str, Any] | None:
         "owner_name": owner_name,
         "owner_image": owner_image,
         "owner_url": owner_url,
+        "artist_names": album_artist_names,
+        "artists": album_artists,
         "track_count": expected,
         "release_date": release_date,
         "tracks": tracks,

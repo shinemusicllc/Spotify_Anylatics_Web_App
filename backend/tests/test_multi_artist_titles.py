@@ -2,6 +2,7 @@ from types import SimpleNamespace
 
 from app.api import items as items_api
 from app.models.item import Item
+from app.services import crawler as crawler_service
 
 
 def _album_item(spotify_id: str, name: str, owner_name: str = ""):
@@ -85,3 +86,24 @@ def test_build_album_type0_rows_uses_full_album_artist_list():
         "https://open.spotify.com/track/track-1",
         "11",
     ]]
+
+
+def test_extract_artist_names_falls_back_to_album_tracks():
+    result = items_api._extract_artist_names({
+        "tracks": [
+            {"artist_names": ["Cozy Coffee Shop", "Jazzy Coffee", "Cozy Bedroom"]},
+            {"artist_names": ["Cozy Coffee Shop", "Jazzy Coffee", "Cozy Bedroom"]},
+        ]
+    })
+
+    assert result == ["Cozy Coffee Shop", "Jazzy Coffee", "Cozy Bedroom"]
+
+
+def test_formatted_album_name_uses_full_artist_list_and_strips_stale_single_prefix():
+    result = crawler_service._formatted_item_name("album", {
+        "name": "Cozy Coffee Shop - Jazz Coffee Shop",
+        "owner_name": "Cozy Coffee Shop",
+        "artist_names": ["Cozy Coffee Shop", "Jazzy Coffee", "Cozy Bedroom"],
+    })
+
+    assert result == "Cozy Coffee Shop, Jazzy Coffee, Cozy Bedroom - Jazz Coffee Shop"

@@ -20,3 +20,10 @@
 - Fixed: `All Links` in admin mode no longer shows every user's rows, and the Add Link modal no longer exposes the removed duplicate checkbox.
 - Affected files: `frontend/app.js`, `frontend/index.html`, `frontend/tests/ui_contract.test.mjs`, docs above.
 - Impact/Risk: global all-user aggregation is no longer available from the default admin state; selecting another user remains supported.
+
+### 2026-03-16 12:08 - Fix incomplete album and track artist titles
+- Added: backend regression coverage for album artist extraction from nested track data.
+- Changed: normalized album payloads now keep top-level `artist_names`/`artists`, and crawler formatting uses the full artist list for album titles too.
+- Fixed: UI and export album titles no longer collapse to only the first artist when the raw response still contains the complete credited list.
+- Affected files: `backend/app/api/items.py`, `backend/app/services/spotify_client.py`, `backend/app/services/crawler.py`, `backend/tests/test_multi_artist_titles.py`.
+- Impact/Risk: existing rows still depend on stored raw track artist data for fallback; rows with incomplete raw data may need recrawl.

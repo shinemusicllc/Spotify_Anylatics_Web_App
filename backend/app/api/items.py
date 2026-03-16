@@ -104,7 +104,46 @@ def _extract_artist_names(raw_data: dict | None) -> list[str]:
             name = artist.get("name")
             if isinstance(name, str) and name.strip():
                 names.append(name.strip())
-        return names
+        if names:
+            return names
+
+    tracks = raw_data.get("tracks")
+    if isinstance(tracks, list):
+        names: list[str] = []
+        seen: set[str] = set()
+        for track in tracks:
+            if not isinstance(track, dict):
+                continue
+            nested_artist_names = track.get("artist_names")
+            if isinstance(nested_artist_names, list):
+                for name in nested_artist_names:
+                    if not isinstance(name, str) or not name.strip():
+                        continue
+                    cleaned = name.strip()
+                    lowered = cleaned.lower()
+                    if lowered in seen:
+                        continue
+                    seen.add(lowered)
+                    names.append(cleaned)
+                continue
+
+            nested_artists = track.get("artists")
+            if not isinstance(nested_artists, list):
+                continue
+            for artist in nested_artists:
+                if not isinstance(artist, dict):
+                    continue
+                name = artist.get("name")
+                if not isinstance(name, str) or not name.strip():
+                    continue
+                cleaned = name.strip()
+                lowered = cleaned.lower()
+                if lowered in seen:
+                    continue
+                seen.add(lowered)
+                names.append(cleaned)
+        if names:
+            return names
 
     return []
 

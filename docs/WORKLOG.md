@@ -61,3 +61,15 @@
 - Notes:
   - Admin can still inspect another user's links by selecting that user explicitly in the dropdown.
   - Existing backend dedupe behavior remains active even though the manual UI toggle was removed.
+
+### Task: Restore full album and track artist titles from raw payloads
+
+- Status: done
+- Actions:
+  - Added top-level album `artist_names` and `artists` to the normalized Pathfinder album payload.
+  - Updated stored item title formatting so albums also use the full artist list and strip stale single-artist prefixes.
+  - Added fallback extraction from album track rows so older raw responses without album-level artist arrays still render/export the full artist list.
+  - Added regression tests for album track fallback extraction and stale-prefix cleanup.
+- Notes:
+  - Existing rows should display correctly after reload as long as their raw album tracks contain the full artist list.
+  - Newly crawled albums now persist the full album artist list directly in raw responses.
