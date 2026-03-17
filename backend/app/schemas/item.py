@@ -1,6 +1,7 @@
 """Item schemas — API response models."""
 
 from datetime import datetime
+import uuid
 from pydantic import BaseModel
 
 
@@ -71,3 +72,12 @@ class ItemListResponse(BaseModel):
 
     items: list[ItemResponse]
     total: int
+
+
+class ItemMoveRequest(BaseModel):
+    item_ids: list[uuid.UUID]
+    group: str | None = None
+    user_id: uuid.UUID | None = None
+
+
+ItemMoveRequest.model_rebuild()

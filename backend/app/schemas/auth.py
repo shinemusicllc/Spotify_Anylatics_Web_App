@@ -50,6 +50,7 @@ class UpdateAvatarRequest(BaseModel):
 
 
 class AdminUpdateUserRequest(BaseModel):
+    username: str | None = None
     display_name: str | None = None
     role: str | None = None
     is_active: bool | None = None

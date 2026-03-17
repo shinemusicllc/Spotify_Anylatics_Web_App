@@ -84,3 +84,114 @@
   - Bumped the frontend asset version to `v=20260316-69` and re-ran frontend contract checks.
 - Notes:
   - Admin list scope is still self by default, but now represented by selecting the admin user directly instead of a synthetic option.
+
+## 2026-03-17
+
+### Task: Expand admin user management and remove hidden list cap
+
+- Status: done
+- Actions:
+  - Removed the implicit `100`-item dashboard cap by making the backend item listing endpoint unbounded by default when no `limit` is provided.
+  - Extended admin user editing so `PATCH /auth/users/{user_id}` can update `username`, including duplicate checks and internal-email refresh.
+  - Updated the admin Users modal to allow editing usernames and to refresh local auth UI when the current admin edits their own account.
+  - Removed owner-name prefixes from admin group labels in the sidebar.
+  - Added a resizable `Stt` column before `Asset Details` across the header, row render, and stylesheet layout.
+  - Added backend/frontend regression coverage and restarted the local app on port `8010`.
+- Notes:
+  - The user-facing "100 links" problem came from list loading, not from crawl creation limits.
+  - Changes were kept local only; nothing was pushed to GitHub.
+
+### Task: Verify move-items endpoint coverage
+
+- Status: done
+- Actions:
+  - Confirmed the existing `POST /items/move` endpoint, `ItemMoveRequest` schema, and group reply follow the requested contract for both admins and regular users.
+  - Added focused pytest coverage that enforces 404 responses when a user tries to move another user's items and validates admin move handling.
+  - Ran `backend/tests/test_items_move.py` along with `backend/tests/test_admin_user_updates.py` to ensure the targeted suite passes.
+- Notes:
+  - Tests now simulate query filtering by returning no rows for unauthorized users before asserting the 404.
+
+### Task: Add link move interactions across keyboard, menu, and drag-drop
+
+- Status: done
+- Actions:
+  - Added an internal row-move clipboard in `frontend/app.js` so `Ctrl/Cmd+C`, `Ctrl/Cmd+X`, and `Ctrl/Cmd+V` can move one or many selected links into a target group or before a target row.
+  - Added Enter-to-submit handling for admin edit/create/reset-password modals and settings save/change-password fields while skipping textareas and custom dropdown controls.
+  - Extended the row context menu with a `Move to group` submenu plus a `Move Clipboard` action that uses the live sidebar group list, including `No Group`.
+  - Extended row drag/drop so selected rows can still reorder inside the list and can now be dropped onto sidebar groups to change `item.group`.
+  - Added `Selected` KPI chips to the hero and footer, updated frontend contract tests, and smoke-checked the authenticated dashboard locally on `http://127.0.0.1:8010`.
+- Notes:
+  - The existing structured-export clipboard action remains unchanged; the new move clipboard is app-local state and does not touch the OS clipboard.
+
+### Task: Repair local move flow and restore multi-link copy action
+
+- Status: done
+- Actions:
+  - Verified the running local backend had not been restarted yet, which is why `/api/items/move` was missing from `openapi.json` and drag/group moves returned `Method Not Allowed`.
+  - Restarted the local app on port `8010` and confirmed the live server now exposes `POST /api/items/move`.
+  - Changed the context-menu action formerly labeled `Move Clipboard` into `Copy Link`, copying one or many selected Spotify URLs as newline-separated plain text.
+  - Reassigned `Ctrl/Cmd+C` in `linkchecker` to copy selected Spotify URLs, while keeping `Ctrl/Cmd+X` / `Ctrl/Cmd+V` for cut/paste move behavior.
+  - Moved the footer `Selected` stat to the left side of `API Status`, bumped the frontend asset version to `v=20260317-72`, and re-ran frontend/backend checks.
+- Notes:
+  - A Playwright drag simulation still timed out on synthetic `dragTo`, but the live server route is present and the dashboard reload now shows zero console errors.
+
+### Task: Widen footer Selected spacing
+
+- Status: done
+- Actions:
+  - Increased the footer `Selected` slot width and switched the value span to `tabular-nums` with a right-aligned minimum width.
+  - Bumped the frontend asset version to `v=20260317-73` and reloaded the local app on `http://127.0.0.1:8010`.
+  - Re-ran the frontend contract test suite after the markup update.
+- Notes:
+  - The change is layout-only and specifically protects larger counts like `1000+` from crowding the divider or `API Status`.
+
+### Task: Highlight search results by group color in All Links
+
+- Status: done
+- Actions:
+  - Added deterministic accent colors per group name and reused them across sidebar group cards and list rows.
+  - Updated `renderGroups()` to recalculate sidebar highlight state when searching in `All Links`, including full-card glow on matched groups.
+  - Updated `renderRow()` so rows matching a search in `All Links` show a brighter accent edge and card outline based on their owning group.
+  - Bumped frontend assets to `v=20260317-74`, added frontend contract coverage, and smoke-checked search mode locally with the `jazz` query.
+- Notes:
+  - The accent mode only activates while `searchQuery` is non-empty and `All Links` is the active scope, so normal browsing remains visually unchanged.
+
+### Task: Soften search highlight cards into full-card glow
+
+- Status: done
+- Actions:
+  - Reworked the search-match group card style to remove the hard left stripe and use an even tinted fill with rounded-card glow.
+  - Reworked the search-match row style to use the same full-card tint model instead of a vertical accent bar.
+  - Bumped frontend assets to `v=20260317-75`, re-ran frontend tests, and smoke-checked the `All Links` search view locally.
+- Notes:
+  - The update is purely visual; search/group matching logic and accent color assignment stay unchanged.
+
+### Task: Restore rounded left accent line without card borders
+
+- Status: done
+- Actions:
+  - Restored the left accent line for search-matched group cards and list rows, but inset it inside the card with rounded ends.
+  - Removed the border-like highlight treatment so the active search state now relies on inner fill color plus the rounded accent line.
+  - Bumped frontend assets to `v=20260317-76`, re-ran frontend tests, and smoke-checked `All Links` search locally.
+- Notes:
+  - The accent line is now decorative only; the search highlight emphasis comes from fill color rather than card outline.
+
+### Task: Remove outer glow from search highlight cards
+
+- Status: done
+- Actions:
+  - Removed all outer `box-shadow` glow from search-highlighted group cards and rows.
+  - Tightened the left accent line inset to sit closer to the card edge while keeping rounded ends.
+  - Bumped frontend assets to `v=20260317-77`, re-ran frontend tests, and verified computed styles locally during `All Links` search.
+- Notes:
+  - The search highlight now uses only inner fill color plus the inset rounded left line, with no blur spilling outside the card bounds.
+
+### Task: Refine search accent line shape and add STT header divider
+
+- Status: done
+- Actions:
+  - Adjusted the search-highlight accent stripe for sidebar group cards and list rows into an inset pill with a softer inner edge while keeping all glow clipped inside the card.
+  - Added a vertical divider at the left edge of the `Asset Details` header cell so the `STT` column boundary now matches the other header separators.
+  - Bumped frontend assets to `v=20260317-79`, re-ran the frontend contract tests, and smoke-checked the local UI search state at `http://127.0.0.1:8010`.
+- Notes:
+  - The refinement is visual only; search/group matching logic is unchanged.

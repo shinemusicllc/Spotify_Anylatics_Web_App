@@ -18,7 +18,7 @@ from app.models.item import Item
 from app.models.metrics_snapshot import MetricsSnapshot
 from app.models.raw_response import RawResponse
 from app.models.user import User
-from app.schemas.item import ItemListResponse, ItemResponse
+from app.schemas.item import ItemListResponse, ItemMoveRequest, ItemResponse
 from app.services.auth import get_current_user
 from app.services import spotify_client
 
@@ -854,7 +854,7 @@ async def list_items(
     group: str | None = Query(None, description="Filter by group"),
     status: str | None = Query(None, description="Filter by status"),
     user_id: str | None = Query(None, description="Filter by user (admin only)"),
-    limit: int = Query(100, le=500),
+    limit: int | None = Query(None, ge=1),
     offset: int = Query(0, ge=0),
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
@@ -878,7 +878,10 @@ async def list_items(
     total_result = await db.execute(count_query)
     total = total_result.scalar() or 0
 
-    query = query.limit(limit).offset(offset)
+    if offset:
+        query = query.offset(offset)
+    if limit is not None:
+        query = query.limit(limit)
     result = await db.execute(query)
     items = result.scalars().all()
     raw_map = await _load_latest_raw_data(db, items)
@@ -898,6 +901,39 @@ async def list_items(
         ],
         total=total,
     )
+
+
+@router.post("/items/move")
+async def move_items_group(
+    payload: ItemMoveRequest,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """Move a batch of stored items into a new group (or clear the group)."""
+    if not payload.item_ids:
+        raise HTTPException(status_code=400, detail="item_ids is required")
+
+    target_group = (payload.group or "").strip() or None
+    target_query = select(Item).where(Item.id.in_(payload.item_ids))
+
+    if current_user.role != "admin":
+        target_query = target_query.where(Item.user_id == current_user.id)
+    elif payload.user_id:
+        target_query = target_query.where(Item.user_id == payload.user_id)
+
+    result = await db.execute(target_query)
+    items = result.scalars().all()
+
+    if not items:
+        raise HTTPException(status_code=404, detail="No matching items found")
+
+    moved = 0
+    for item in items:
+        item.group = target_group
+        moved += 1
+
+    await db.commit()
+    return {"ok": True, "moved": moved, "group": target_group}
 
 
 @router.get("/items/{item_type}/{spotify_id}", response_model=ItemResponse)

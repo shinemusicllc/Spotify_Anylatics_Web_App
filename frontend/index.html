@@ -10,7 +10,7 @@
     <link rel="shortcut icon" type="image/svg+xml" href="favicon.svg?v=1">
     <script src="https://cdn.tailwindcss.com?plugins=forms,container-queries"></script>
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=Inter+Tight:wght@600;700;800&family=Material+Symbols+Rounded:opsz,wght,FILL,GRAD@20..48,500,0..1,0&display=swap" rel="stylesheet">
-    <link rel="stylesheet" href="style.css?v=20260316-69">
+    <link rel="stylesheet" href="style.css?v=20260317-79">
     <script id="tailwind-config">
         tailwind.config = {
             darkMode: "class",
@@ -152,6 +152,7 @@
                             <span class="hero-kpi"><b id="kpi-active">0</b><em>Active</em></span>
                             <span class="hero-kpi"><b id="kpi-errors">0</b><em>Errors</em></span>
                             <span class="hero-kpi"><b id="kpi-crawling">0</b><em>Crawling</em></span>
+                            <span class="hero-kpi"><b id="kpi-selected">0</b><em>Selected</em></span>
                         </div>
                     </div>
                 </section>
@@ -159,7 +160,12 @@
                 <!-- Column Headers -->
                 <div class="list-head pt-0 pb-0">
                     <div class="list-columns-head custom-grid-row px-4 py-3 text-[13px] font-medium">
+                        <div class="meta-cell head-cell" data-col-key="stt">
+                            <span class="head-cell-label">STT</span>
+                            <button type="button" class="column-resize-handle" data-col-key="stt" aria-label="Resize STT column"></button>
+                        </div>
                         <div class="meta-cell head-cell" data-col-key="asset">
+                            <button type="button" class="column-resize-handle column-resize-handle-start" data-col-key="asset" data-resize-edge="start" aria-label="Resize Asset Details column from left"></button>
                             <span class="head-cell-label">Asset Details</span>
                             <button type="button" class="column-resize-handle" data-col-key="asset" aria-label="Resize Asset Details column"></button>
                         </div>
@@ -399,6 +405,10 @@
             </div>
             <div class="flex items-center gap-4">
                 <button id="btn-clear-list" onclick="clearList()" class="hidden hover:text-white transition-colors cursor-pointer">Clear List</button>
+                <span class="inline-flex items-center justify-between gap-3 min-w-[50px] shrink-0">
+                    <b class="text-white">Selected:</b>
+                    <span id="footer-selected" class="tabular-nums text-right min-w-[13px]">0</span>
+                </span>
                 <div class="w-[1px] h-3 bg-white/10"></div>
                 <span>API Status: <span id="api-status" class="text-primary font-bold uppercase">Connecting...</span></span>
             </div>
@@ -466,7 +476,7 @@
                 <div class="space-y-4">
                     <div>
                         <label class="block text-[13px] font-semibold text-secondary-text mb-2">Username</label>
-                        <input id="admin-edit-username" type="text" class="settings-input" disabled autocomplete="off" style="opacity:0.5;cursor:not-allowed">
+                        <input id="admin-edit-username" type="text" class="settings-input" autocomplete="off" data-lpignore="true" data-1p-ignore="true">
                     </div>
                     <div>
                         <label class="block text-[13px] font-semibold text-secondary-text mb-2">Display Name</label>
@@ -563,6 +573,18 @@
                 <span class="material-icons-round">delete</span>
                 <span data-context-label="delete">Delete row</span>
             </button>
+            <div class="row-context-parent" data-context-group="move">
+                <button type="button" class="row-context-item row-context-submenu-trigger">
+                    <span class="material-icons-round">drive_file_move</span>
+                    <span data-context-label="move">Move to group</span>
+                    <span class="material-icons-round row-context-chevron">chevron_right</span>
+                </button>
+                <div class="row-context-submenu"></div>
+            </div>
+            <button type="button" class="row-context-item" data-context-action="copy-selected-links">
+                <span class="material-icons-round">content_copy</span>
+                <span data-context-label="copy-links">Copy Link</span>
+            </button>
             <button type="button" class="row-context-item" data-context-action="clear-list">
                 <span class="material-icons-round">clear_all</span>
                 <span data-context-label="clear-list">Clear List</span>
@@ -602,6 +624,6 @@
             </div>
         </div>
 
-    <script src="app.js?v=20260316-69"></script>
+    <script src="app.js?v=20260317-79"></script>
 </body>
 </html>

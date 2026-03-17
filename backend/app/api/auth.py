@@ -393,6 +393,22 @@ async def admin_update_user(
     if not user:
         raise HTTPException(status_code=404, detail="User not found")
 
+    if req.username is not None:
+        next_username = (req.username or "").strip()
+        if not next_username:
+            raise HTTPException(status_code=400, detail="Username is required")
+        if next_username != user.username:
+            existing = await db.execute(
+                select(User).where(User.username == next_username, User.id != user.id)
+            )
+            if existing.scalar_one_or_none():
+                raise HTTPException(
+                    status_code=status.HTTP_409_CONFLICT,
+                    detail="Username already registered",
+                )
+            if (user.email or "").strip().lower().endswith("@" + _INTERNAL_EMAIL_DOMAIN):
+                user.email = _build_internal_email(next_username)
+            user.username = next_username
     if req.display_name is not None:
         user.display_name = req.display_name
     if req.role is not None:

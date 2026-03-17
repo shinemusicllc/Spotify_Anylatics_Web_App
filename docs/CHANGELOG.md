@@ -34,3 +34,57 @@
 - Fixed: `All Links` semantics now consistently mean all links of the currently selected user without showing a synthetic `My Links` option.
 - Affected files: `frontend/app.js`, `frontend/index.html`, `frontend/tests/ui_contract.test.mjs`, docs above.
 - Impact/Risk: any workflow expecting an empty admin filter state no longer applies; admin self-scope is now explicit via the selected admin user.
+### 2026-03-17 16:10 - Expand admin user management and remove hidden list cap
+- Added: Backend regression tests for admin username updates and unbounded item listing; frontend `Stt` column with resize support.
+- Changed: Admin Users modal now edits `username`; admin group labels now show only the base group name; frontend asset bundle version bumped to `v=20260317-70`.
+- Fixed: Removed the hidden `100`-row dashboard cap that made users think they could not add more links.
+- Affected files: `backend/app/api/auth.py`, `backend/app/api/items.py`, `backend/app/schemas/auth.py`, `backend/tests/test_admin_user_updates.py`, `frontend/app.js`, `frontend/index.html`, `frontend/style.css`, `frontend/tests/ui_contract.test.mjs`, `docs/DECISIONS.md`, `docs/WORKLOG.md`, `docs/CHANGELOG.md`
+- Impact/Risk: Low to medium; list loading is now unbounded, so extremely large datasets may cost more render time, but current tests and local smoke checks passed.
+### 2026-03-17 16:45 - Secure move-items contract
+- Added: Focused pytest coverage for `POST /items/move` to assert the `ItemMoveRequest` workflow across user and admin scopes.
+- Changed: Unauthorized move tests now simulate filtered queries (zero rows) so the endpoint consistently returns HTTP 404 instead of updating unrelated rows.
+- Fixed: The backend contract now guarantees a no-op response for a user moving another user's link while still returning the expected `moved` count and `group` payload on successful moves.
+- Affected files: `backend/tests/test_items_move.py`
+- Impact/Risk: Low; reinforces backend authorization before the frontend handles move actions, and no UI changes were required.
+### 2026-03-17 17:00 - Add move interactions for selected links
+- Added: Internal move clipboard shortcuts (`Ctrl/Cmd+C`, `Ctrl/Cmd+X`, `Ctrl/Cmd+V`), row-context `Move to group` submenu, sidebar row-to-group drag/drop, and `Selected` KPI chips in the hero/footer.
+- Changed: Save-style actions in admin/settings inputs can now submit with `Enter`; frontend bundle version bumped to `v=20260317-71`.
+- Fixed: Multi-link moves no longer depend on manual per-row edits because users can paste into a group, paste before a selected row, or drag the current selection onto another group.
+- Affected files: `frontend/app.js`, `frontend/index.html`, `frontend/tests/ui_contract.test.mjs`, `docs/DECISIONS.md`, `docs/WORKLOG.md`, `docs/CHANGELOG.md`
+- Impact/Risk: Medium; keyboard shortcuts now intercept `Ctrl/Cmd+C/X/V` in `linkchecker` when focus is outside text inputs, so future clipboard-related features in that view should reuse the same gating rules.
+### 2026-03-17 17:10 - Widen footer Selected spacing
+- Added: Minimum width and tabular number alignment for the footer `Selected` stat.
+- Changed: Frontend asset bundle version bumped to `v=20260317-73`.
+- Fixed: Larger selected counts no longer crowd the divider and `API Status` area in the footer.
+- Affected files: `frontend/index.html`, `docs/WORKLOG.md`, `docs/CHANGELOG.md`
+- Impact/Risk: Low; purely presentational footer spacing update.
+### 2026-03-17 17:25 - Add group-colored search highlights in All Links
+- Added: Deterministic group accent colors for matched sidebar cards and list rows during `All Links` searches.
+- Changed: Search now forces a sidebar rerender so group cards react immediately to the current query; frontend assets bumped to `v=20260317-74`.
+- Fixed: Search results in `All Links` no longer lose group context because rows and their owning group cards now glow with the same accent color.
+- Affected files: `frontend/app.js`, `frontend/style.css`, `frontend/index.html`, `frontend/tests/ui_contract.test.mjs`, `docs/DECISIONS.md`, `docs/WORKLOG.md`, `docs/CHANGELOG.md`
+- Impact/Risk: Low to medium; adds more visual emphasis only during `All Links` search mode and leaves normal group browsing unchanged.
+### 2026-03-17 17:32 - Smooth search highlight cards
+- Added: More even full-card glow treatment for search-matched group cards and list rows.
+- Changed: Frontend asset bundle version bumped to `v=20260317-75`.
+- Fixed: Search highlights no longer look like a separate vertical line; the tint now follows the card shape more cleanly.
+- Affected files: `frontend/style.css`, `frontend/index.html`, `docs/WORKLOG.md`, `docs/CHANGELOG.md`
+- Impact/Risk: Low; presentational refinement only.
+### 2026-03-17 17:38 - Restore rounded left accent without search borders
+- Added: Rounded inset accent lines on the left edge of search-highlighted group cards and list rows.
+- Changed: Frontend asset bundle version bumped to `v=20260317-76`.
+- Fixed: Search highlight cards now keep the accent stripe while dropping the surrounding border/outline emphasis.
+- Affected files: `frontend/style.css`, `frontend/index.html`, `docs/WORKLOG.md`, `docs/CHANGELOG.md`
+- Impact/Risk: Low; presentational refinement only.
+### 2026-03-17 17:43 - Remove outer glow from search highlights
+- Added: Tighter inset positioning for the rounded left accent line on search-highlighted cards.
+- Changed: Frontend asset bundle version bumped to `v=20260317-77`.
+- Fixed: Search-highlighted group cards and rows no longer bleed glow outside their card bounds.
+- Affected files: `frontend/style.css`, `frontend/index.html`, `docs/WORKLOG.md`, `docs/CHANGELOG.md`
+- Impact/Risk: Low; presentational refinement only.
+### 2026-03-17 17:54 - Refine search accent line and STT divider
+- Added: A dedicated header divider between `STT` and `Asset Details` so the first column boundary now matches the rest of the table header.
+- Changed: Search-highlight accent lines on sidebar group cards and list rows now use an inset pill shape with a softer inner edge; frontend assets bumped to `v=20260317-79`.
+- Fixed: The previous full-height straight stripe looked too rigid inside rounded cards and the header lacked the vertical separator after `STT`.
+- Affected files: `frontend/style.css`, `frontend/index.html`, `docs/WORKLOG.md`, `docs/CHANGELOG.md`
+- Impact/Risk: Low; presentational refinement only.

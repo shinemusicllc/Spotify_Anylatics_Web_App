@@ -20,11 +20,12 @@ const CONFIG = {
 };
 const GROUP_STORAGE_KEY = 'spoticheck_custom_groups_v1';
 const ROW_ORDER_STORAGE_KEY = 'spoticheck_row_order_v1';
-const COLUMN_WIDTH_STORAGE_KEY = 'spoticheck_column_widths_v4';
+const COLUMN_WIDTH_STORAGE_KEY = 'spoticheck_column_widths_v5';
 const ALL_GROUP_ID = 'all';
 const ALL_GROUP_LABEL = 'All Links';
 const GROUP_SELECT_ALL = '__all__';
 const DEFAULT_COLUMN_WIDTHS = Object.freeze({
+    stt: 52,
     asset: 420,
     owner: 160,
     playlistOwner: 160,
@@ -37,6 +38,7 @@ const DEFAULT_COLUMN_WIDTHS = Object.freeze({
     checked: 84,
 });
 const MIN_COLUMN_WIDTHS = Object.freeze({
+    stt: 32,
     asset: 320,
     owner: 132,
     playlistOwner: 132,
@@ -49,6 +51,7 @@ const MIN_COLUMN_WIDTHS = Object.freeze({
     checked: 72,
 });
 const MAX_COLUMN_WIDTHS = Object.freeze({
+    stt: 160,
     asset: 900,
     owner: 360,
     playlistOwner: 360,
@@ -61,6 +64,7 @@ const MAX_COLUMN_WIDTHS = Object.freeze({
     checked: 140,
 });
 const COLUMN_WIDTH_VAR_MAP = Object.freeze({
+    stt: '--stt-col',
     asset: '--asset-col',
     owner: '--owner-col',
     playlistOwner: '--playlist-owner-col',
@@ -73,6 +77,7 @@ const COLUMN_WIDTH_VAR_MAP = Object.freeze({
     checked: '--checked-col',
 });
 const RESIZABLE_COLUMN_KEYS = Object.freeze([
+    'stt',
     'asset',
     'owner',
     'playlistOwner',
@@ -235,6 +240,7 @@ const state = {
     remoteSyncInFlight: false,
     contextMenuVisible: false,
     contextMenuAnchorSelectionKey: null,
+    itemClipboard: { keys: [], mode: null },
     exportInProgress: false,
     exportLabel: '',
     metricSortColumn: null,
@@ -303,6 +309,8 @@ class SpotiCheckAPI {
         const qs = new URLSearchParams();
         if (params.type) qs.set('type', params.type);
         if (params.user_id) qs.set('user_id', params.user_id);
+        if (params.limit != null) qs.set('limit', String(params.limit));
+        if (params.offset != null) qs.set('offset', String(params.offset));
         const suffix = qs.toString() ? `?${qs.toString()}` : '';
         return this._fetch(`/items${suffix}`);
     }
@@ -342,6 +350,16 @@ class SpotiCheckAPI {
         qs.set('new_group', String(newGroup || ''));
         if (userId) qs.set('user_id', String(userId));
         return this._fetch(`/items/group?${qs.toString()}`, { method: 'PATCH' });
+    }
+    moveItems(itemIds = [], group = null, userId = null) {
+        return this._fetch('/items/move', {
+            method: 'POST',
+            body: JSON.stringify({
+                item_ids: Array.isArray(itemIds) ? itemIds : [],
+                group: group || null,
+                user_id: userId || null,
+            }),
+        });
     }
 
     crawl(url, group = null, targetUserId = null, itemId = null) {
@@ -785,12 +803,12 @@ function measureAvailableColumnBudget() {
     const rootStyles = window.getComputedStyle(document.documentElement);
     const outerGap = parseFloat(styles.columnGap || styles.gap || '16') || 16;
     const metaGap = parseFloat(rootStyles.getPropertyValue('--meta-gap') || '12') || 12;
-    const metaColumnCount = RESIZABLE_COLUMN_KEYS.length - 1;
+    const metaColumnCount = Math.max(0, RESIZABLE_COLUMN_KEYS.length - 2);
     const internalMetaGaps = Math.max(0, metaColumnCount - 1) * metaGap;
     const available = row.getBoundingClientRect().width
         - paddingLeft
         - paddingRight
-        - outerGap
+        - (outerGap * 2)
         - internalMetaGaps;
     if (!Number.isFinite(available) || available <= 0) return null;
     return Math.round(available);
@@ -1156,8 +1174,22 @@ function syncSelectedItemsWithState() {
     state.selectedItemKeys = new Set(
         Array.from(state.selectedItemKeys).filter((key) => existing.has(key))
     );
+    state.itemClipboard = {
+        keys: Array.from(state.itemClipboard?.keys || []).filter((key) => existing.has(key)),
+        mode: state.itemClipboard?.mode || null,
+    };
+    if (!state.itemClipboard.keys.length) {
+        state.itemClipboard.mode = null;
+    }
+    state.draggingRowKeys = state.draggingRowKeys.filter((key) => existing.has(key));
+    if (state.dragOverRowKey && !existing.has(state.dragOverRowKey)) {
+        state.dragOverRowKey = null;
+    }
     if (state.selectionAnchorKey && !existing.has(state.selectionAnchorKey)) {
         state.selectionAnchorKey = null;
+    }
+    if (state.contextMenuAnchorSelectionKey && !existing.has(state.contextMenuAnchorSelectionKey)) {
+        state.contextMenuAnchorSelectionKey = null;
     }
 }
 
@@ -1214,6 +1246,46 @@ function splitLegacyGroupName(name) {
 
 function normalizeStoredGroupName(name) {
     return splitLegacyGroupName(name).name;
+}
+
+const GROUP_ACCENT_PALETTE = [
+    '39,214,107',
+    '239,68,68',
+    '56,189,248',
+    '250,204,21',
+    '168,85,247',
+    '249,115,22',
+    '20,184,166',
+    '244,114,182',
+];
+
+function getGroupAccentRgb(groupName) {
+    const normalized = normalizeStoredGroupName(groupName);
+    if (!normalized) return '148,163,184';
+    let hash = 0;
+    for (let index = 0; index < normalized.length; index += 1) {
+        hash = ((hash * 31) + normalized.charCodeAt(index)) >>> 0;
+    }
+    return GROUP_ACCENT_PALETTE[hash % GROUP_ACCENT_PALETTE.length];
+}
+
+function buildGroupAccentStyle(groupName) {
+    return `--group-accent-rgb:${getGroupAccentRgb(groupName)};`;
+}
+
+function isSearchGroupAccentMode() {
+    return state.activeGroup === ALL_GROUP_ID && Boolean((state.searchQuery || '').trim());
+}
+
+function getSearchMatchGroupCounts() {
+    if (!isSearchGroupAccentMode()) return new Map();
+    const counts = new Map();
+    getVisibleItems().forEach((item) => {
+        const groupName = normalizeStoredGroupName(item?.group);
+        if (!groupName) return;
+        counts.set(groupName, (counts.get(groupName) || 0) + 1);
+    });
+    return counts;
 }
 
 function escapeAttrSelectorValue(value) {
@@ -1502,6 +1574,190 @@ function getSelectedVisibleItems() {
 
 function getSelectedItems() {
     return state.items.filter((item) => state.selectedItemKeys.has(selectionKey(item)));
+}
+
+function getClipboardItems() {
+    const clipboardKeys = new Set((state.itemClipboard?.keys || []).filter(Boolean));
+    if (!clipboardKeys.size) return [];
+    return state.items.filter((item) => clipboardKeys.has(selectionKey(item)));
+}
+
+function clearItemClipboard() {
+    state.itemClipboard = { keys: [], mode: null };
+    if (state.contextMenuVisible) {
+        updateRowContextMenuLabels();
+    }
+}
+
+function stageSelectedItemsForClipboard(mode = 'copy') {
+    const selectedItems = getSelectedItems();
+    if (!selectedItems.length) {
+        showToast('No rows selected', 'info');
+        return false;
+    }
+    state.itemClipboard = {
+        keys: selectedItems.map((item) => selectionKey(item)),
+        mode: mode === 'cut' ? 'cut' : 'copy',
+    };
+    if (state.contextMenuVisible) {
+        updateRowContextMenuLabels();
+    }
+    const label = selectedItems.length > 1 ? `${selectedItems.length} links` : '1 link';
+    showToast(`${mode === 'cut' ? 'Cut' : 'Copied'} ${label} for move`, 'success');
+    return true;
+}
+
+async function copySelectedLinksToClipboard(items = getSelectedItems()) {
+    const selectedItems = (items || []).filter(Boolean);
+    if (!selectedItems.length) {
+        showToast('No rows selected', 'info');
+        return false;
+    }
+    const urls = selectedItems
+        .map((item) => getItemSpotifyUrlForExport(item))
+        .filter(Boolean);
+    if (!urls.length) {
+        showToast('No links available to copy', 'info');
+        return false;
+    }
+    await copyToClipboard(
+        urls.join('\r\n'),
+        urls.length > 1 ? `Copied ${urls.length} links` : 'Copied 1 link'
+    );
+    return true;
+}
+
+function getCopyLinkLabel(selectedCount) {
+    if (selectedCount > 1) return `Copy ${selectedCount} links`;
+    return 'Copy Link';
+}
+
+function getMoveTargetGroups() {
+    const ungroupedEntry = {
+        id: '__ungrouped__',
+        name: '',
+        displayName: 'No Group',
+        ownerUserId: null,
+    };
+    return [
+        ungroupedEntry,
+        ...state.groups.filter((group) => String(group.id).toLowerCase() !== ALL_GROUP_ID),
+    ];
+}
+
+async function moveItemsToGroup(items, targetGroupEntry, opts = {}) {
+    const uniqueMap = new Map();
+    (items || []).forEach((item) => {
+        if (!item) return;
+        uniqueMap.set(itemIdentity(item), item);
+    });
+    const targets = Array.from(uniqueMap.values());
+    if (!targets.length) {
+        showToast('No rows selected', 'info');
+        return false;
+    }
+
+    const nextGroupName = targetGroupEntry?.id === '__ungrouped__'
+        ? null
+        : normalizeStoredGroupName(targetGroupEntry?.name || '');
+    const unchanged = targets.every((item) => normalizeStoredGroupName(item.group) === normalizeStoredGroupName(nextGroupName));
+    if (unchanged) {
+        showToast('Links are already in that group', 'info');
+        return false;
+    }
+
+    const previousGroups = new Map(targets.map((item) => [itemIdentity(item), item.group ?? null]));
+    targets.forEach((item) => {
+        item.group = nextGroupName;
+    });
+    persistCurrentItemOrder();
+    renderGroups();
+    renderList({ preserveScroll: true });
+
+    const stableItemIds = targets
+        .filter((item) => item.id && !String(item.id).startsWith('temp-'))
+        .map((item) => String(item.id));
+
+    if (!state.apiOnline || !stableItemIds.length) {
+        if (!state.apiOnline && stableItemIds.length) {
+            showToast('Moved locally only (API offline)', 'info');
+        } else {
+            showToast(
+                nextGroupName
+                    ? `Moved ${targets.length} link${targets.length > 1 ? 's' : ''} to ${targetGroupEntry?.displayName || targetGroupEntry?.name || nextGroupName}`
+                    : `Cleared group for ${targets.length} link${targets.length > 1 ? 's' : ''}`,
+                'success'
+            );
+        }
+        return true;
+    }
+
+    try {
+        await api.moveItems(stableItemIds, nextGroupName);
+        showToast(
+            nextGroupName
+                ? `Moved ${targets.length} link${targets.length > 1 ? 's' : ''} to ${targetGroupEntry?.displayName || targetGroupEntry?.name || nextGroupName}`
+                : `Cleared group for ${targets.length} link${targets.length > 1 ? 's' : ''}`,
+            'success'
+        );
+        return true;
+    } catch (err) {
+        targets.forEach((item) => {
+            item.group = previousGroups.get(itemIdentity(item)) ?? null;
+        });
+        persistCurrentItemOrder();
+        renderGroups();
+        renderList({ preserveScroll: true });
+        showToast(err.message || 'Failed to move links', 'error');
+        return false;
+    } finally {
+        if (opts.clearClipboard !== false) {
+            clearItemClipboard();
+        }
+    }
+}
+
+async function pasteClipboardItems() {
+    const clipboardItems = getClipboardItems();
+    if (!clipboardItems.length) {
+        showToast('Move clipboard is empty', 'info');
+        return false;
+    }
+
+    if (state.selectionScope === 'groups') {
+        const groupTarget = getSelectedGroupEntries()
+            .find((group) => String(group.id).toLowerCase() !== ALL_GROUP_ID);
+        if (groupTarget) {
+            return moveItemsToGroup(clipboardItems, groupTarget);
+        }
+    }
+
+    const targetRowKey = state.selectionAnchorKey
+        || Array.from(state.selectedItemKeys)[0]
+        || state.contextMenuAnchorSelectionKey;
+    const clipboardKeySet = new Set((state.itemClipboard?.keys || []).filter(Boolean));
+    if (targetRowKey && !clipboardKeySet.has(targetRowKey)) {
+        const moved = moveItemsByKeys(Array.from(clipboardKeySet), targetRowKey, 'before');
+        if (moved) {
+            renderList({ preserveScroll: true });
+            clearItemClipboard();
+            showToast(
+                clipboardKeySet.size > 1
+                    ? `Moved ${clipboardKeySet.size} selected links`
+                    : 'Moved selected link',
+                'success'
+            );
+            return true;
+        }
+    }
+
+    const activeEntry = getGroupEntryById(state.activeGroup);
+    if (activeEntry && activeEntry.id !== ALL_GROUP_ID) {
+        return moveItemsToGroup(clipboardItems, activeEntry);
+    }
+
+    showToast('Select a group or a destination row before pasting', 'info');
+    return false;
 }
 
 function getVisibleSidebarGroups() {
@@ -1912,7 +2168,7 @@ function getAdminGroupDisplayName(groupName, ownerUserId = null) {
     }
 
     const baseName = getAdminGroupBaseName(groupName, ownerLabel);
-    return `${ownerLabel} - ${baseName}`;
+    return baseName;
 }
 
 function canManageGroupEntry(groupEntry) {
@@ -2038,7 +2294,7 @@ function rebuildGroups() {
     state.activeGroup = remapped ? remapped.id : ALL_GROUP_ID;
 }
 
-function getGroupRenderSignature(groups) {
+function getGroupRenderSignature(groups, searchMatchCounts = new Map()) {
     return JSON.stringify({
         activeGroup: normalizeGroupName(state.activeGroup) || ALL_GROUP_ID,
         selectedGroupIds: Array.from(state.selectedGroupIds).sort(),
@@ -2048,12 +2304,14 @@ function getGroupRenderSignature(groups) {
         dragOverGroupId: state.dragOverGroupId || '',
         dragOverGroupPlacement: state.dragOverGroupPlacement || '',
         groupSearchQuery: state.groupSearchQuery || '',
+        searchQuery: state.searchQuery || '',
         groups: groups.map((group) => [
             String(group.id || ''),
             String(group.name || ''),
             String(group.displayName || group.name || ''),
             String(group.ownerUserId || ''),
             Number(group.count || 0),
+            Number(searchMatchCounts.get(normalizeStoredGroupName(group.name || group.displayName || '')) || 0),
         ].join('|')),
     });
 }
@@ -2063,7 +2321,8 @@ function renderGroups(opts = {}) {
     if (!container) return;
 
     const groups = getVisibleSidebarGroups();
-    const nextSignature = getGroupRenderSignature(groups);
+    const searchMatchCounts = getSearchMatchGroupCounts();
+    const nextSignature = getGroupRenderSignature(groups, searchMatchCounts);
     const hasRenderedContent = container.childElementCount > 0;
     if (!opts.force && hasRenderedContent && nextSignature === state.lastGroupRenderSignature) {
         return;
@@ -2080,11 +2339,15 @@ function renderGroups(opts = {}) {
             state.renamingGroupId
             && state.renamingGroupId.toLowerCase() === g.id.toLowerCase()
         );
+        const normalizedGroupName = normalizeStoredGroupName(g.name || g.displayName || '');
+        const hasSearchMatch = g.id !== ALL_GROUP_ID && (searchMatchCounts.get(normalizedGroupName) || 0) > 0;
+        const accentStyle = g.id !== ALL_GROUP_ID ? buildGroupAccentStyle(normalizedGroupName) : '';
         return `
             <button
-                class="group-item ${canDelete ? 'group-item-has-delete' : ''} ${isSelected ? 'group-item-selected' : ''} ${isDragging ? 'group-item-dragging' : ''} ${isDropTarget ? 'group-item-drop-target' : ''} w-full flex items-center justify-between px-3 py-3 rounded-lg transition-colors ${isActive ? 'bg-primary/10 text-white' : 'text-secondary-text hover:text-white hover:bg-white/5'}"
+                class="group-item ${canDelete ? 'group-item-has-delete' : ''} ${isSelected ? 'group-item-selected' : ''} ${isDragging ? 'group-item-dragging' : ''} ${isDropTarget ? 'group-item-drop-target' : ''} ${hasSearchMatch ? 'group-item-search-match' : ''} w-full flex items-center justify-between px-3 py-3 rounded-lg transition-colors ${isActive ? 'bg-primary/10 text-white' : 'text-secondary-text hover:text-white hover:bg-white/5'}"
                 data-group="${escapeHtml(g.id)}"
                 draggable="${canDelete ? 'true' : 'false'}"
+                style="${accentStyle}"
             >
                 <div class="flex items-center gap-3 min-w-0">
                     <span class="material-icons-round ${isActive ? 'text-primary' : 'text-secondary-text'} text-sm">folder</span>
@@ -2117,7 +2380,7 @@ function renderGroups(opts = {}) {
                             >close</span>
                         `
                         : `
-                            <span ${g.id === ALL_GROUP_ID ? 'id="group-count-all"' : ''} class="group-count text-xs font-bold ${isActive ? 'bg-primary/20 text-primary' : 'bg-white/10 text-secondary-text'} px-2 py-0.5 rounded-full">${g.count}</span>
+                            <span ${g.id === ALL_GROUP_ID ? 'id="group-count-all"' : ''} class="group-count text-xs font-bold ${isActive ? 'bg-primary/20 text-primary' : 'bg-white/10 text-secondary-text'} ${hasSearchMatch ? 'group-count-search-match' : ''} px-2 py-0.5 rounded-full">${g.count}</span>
                             ${canDelete ? `
                             <span
                                 class="group-delete-btn material-icons-round"
@@ -2798,7 +3061,7 @@ function normalizeJobResult(result, fallback = {}) {
 // ROW RENDERER
 // â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
 
-function renderRow(item) {
+function renderRow(item, rowIndex = 0) {
     const status = getStatusInfo(item);
     const isError = item.status === 'error';
     const spotifyUrl = item.spotify_url || getSpotifyUrl(item.type, item.spotify_id);
@@ -2819,9 +3082,16 @@ function renderRow(item) {
     const titleToneClass = isError ? 'list-asset-title-muted' : getTitleToneClass(item.type);
     const ownerUpdatedCell = renderOwnerUpdatedCell(item, ownerUrl, updatedAt);
     const displayTitle = getDisplayTitle(item);
+    const sttValue = Number.isFinite(rowIndex) ? rowIndex + 1 : '';
+    const sttLabel = sttValue ? String(sttValue) : '';
+    const groupName = normalizeStoredGroupName(item.group);
+    const hasSearchGroupAccent = isSearchGroupAccentMode() && Boolean(groupName);
 
     const row = document.createElement('div');
-    row.className = `custom-grid-row px-4 py-3 bg-white/5 rounded-lg border border-transparent transition-colors group ${isSelected ? 'row-selected' : ''} ${isDragging ? 'row-dragging' : ''} ${isDropTarget ? 'row-drop-target' : ''} ${isDropBefore ? 'row-drop-before' : ''} ${isDropAfter ? 'row-drop-after' : ''}`;
+    row.className = `custom-grid-row px-4 py-3 bg-white/5 rounded-lg border border-transparent transition-colors group ${isSelected ? 'row-selected' : ''} ${isDragging ? 'row-dragging' : ''} ${isDropTarget ? 'row-drop-target' : ''} ${isDropBefore ? 'row-drop-before' : ''} ${isDropAfter ? 'row-drop-after' : ''} ${hasSearchGroupAccent ? 'row-group-search-match' : ''}`;
+    if (hasSearchGroupAccent) {
+        row.style.cssText = buildGroupAccentStyle(groupName);
+    }
     row.dataset.itemId = item.id;
     row.dataset.type = item.type;
     row.dataset.spotifyId = item.spotify_id;
@@ -2831,8 +3101,9 @@ function renderRow(item) {
     row.draggable = true;
 
     row.innerHTML = `
+        <div class="meta-cell stt-cell text-secondary-text" data-col-key="stt">${escapeHtml(sttLabel)}</div>
         <!-- Left: Asset Details -->
-        <div class="flex items-center gap-4">
+        <div class="list-asset-cell flex items-center gap-4">
             <button type="button" class="list-cover-trigger" data-action="preview-image" data-image-url="${escapeHtml(coverUrl)}" aria-label="Preview cover image">
                 <img alt="Cover" class="list-cover-image" src="${coverUrl}">
             </button>
@@ -3272,7 +3543,7 @@ function renderList(opts = {}) {
 
         const noResult = document.createElement('div');
         noResult.className = 'custom-grid-row text-center py-12 text-secondary-text';
-        noResult.innerHTML = `<div class="col-span-2">No results for "${escapeHtml(state.searchQuery)}"</div>`;
+        noResult.innerHTML = `<div class="col-span-3">No results for "${escapeHtml(state.searchQuery)}"</div>`;
         container.appendChild(noResult);
         updateMetricSortControlsUI();
         updateTextSortControlsUI();
@@ -3286,7 +3557,7 @@ function renderList(opts = {}) {
 
     // Render all rows
     const frag = document.createDocumentFragment();
-    items.forEach(item => frag.appendChild(renderRow(item)));
+    items.forEach((item, index) => frag.appendChild(renderRow(item, index)));
     container.appendChild(frag);
 
     // Update KPIs
@@ -3313,15 +3584,18 @@ function updateKPIs() {
     const active = scoped.filter(i => i.status === 'active').length;
     const errors = scoped.filter(i => i.status === 'error').length;
     const crawling = scoped.filter(i => i.status === 'crawling' || i.status === 'pending').length;
+    const selected = getSelectedVisibleItems().length;
 
     setText('kpi-total', scopedTotal);
     setText('kpi-active', active);
     setText('kpi-errors', errors);
     setText('kpi-crawling', crawling);
+    setText('kpi-selected', selected);
     setText('footer-total', scopedTotal);
     setText('footer-active', active);
     setText('footer-errors', errors);
     setText('footer-crawling', crawling);
+    setText('footer-selected', selected);
     setText('group-count-all', state.items.length);
 }
 
@@ -4012,6 +4286,24 @@ function syncRowContextSubmenuDirection(menu) {
     });
 }
 
+function renderMoveGroupSubmenu(menu) {
+    const submenu = menu?.querySelector('[data-context-group="move"] .row-context-submenu');
+    if (!submenu) return;
+    submenu.innerHTML = '';
+
+    getMoveTargetGroups().forEach((group) => {
+        const btn = document.createElement('button');
+        btn.type = 'button';
+        btn.className = 'row-context-item row-context-submenu-item';
+        btn.setAttribute('data-context-action', 'move-selected-to-group');
+        btn.setAttribute('data-context-group-id', String(group.id || '__ungrouped__'));
+        const label = document.createElement('span');
+        label.textContent = group.displayName || group.name || 'No Group';
+        btn.appendChild(label);
+        submenu.appendChild(btn);
+    });
+}
+
 function updateRowContextMenuLabels() {
     const menu = getRowContextMenuElement();
     if (!menu) return;
@@ -4023,8 +4315,11 @@ function updateRowContextMenuLabels() {
     const exportLabels = menu.querySelectorAll('[data-context-label="export-list"]');
     const clearLabels = menu.querySelectorAll('[data-context-label="clear-list"]');
     const clipboardLabels = menu.querySelectorAll('[data-context-label="clipboard"]');
+    const moveLabels = menu.querySelectorAll('[data-context-label="move"]');
+    const copyLinkLabels = menu.querySelectorAll('[data-context-label="copy-links"]');
     const hasSelection = selectedCount > 0;
     const clipboardAction = inferStructuredClipboardAction(selectedItems);
+    renderMoveGroupSubmenu(menu);
     fetchLabels.forEach((label) => {
         label.textContent = selectedCount > 1
             ? `Refresh ${selectedCount} selected`
@@ -4048,12 +4343,21 @@ function updateRowContextMenuLabels() {
     clipboardLabels.forEach((label) => {
         label.textContent = getClipboardContextLabel(selectedItems);
     });
+    moveLabels.forEach((label) => {
+        label.textContent = selectedCount > 1
+            ? `Move ${selectedCount} selected`
+            : 'Move to group';
+    });
+    copyLinkLabels.forEach((label) => {
+        label.textContent = getCopyLinkLabel(selectedCount);
+    });
 
     const disableForExport = state.exportInProgress;
     [
         'delete-selected',
         'fetch-selected',
         'export-listview-excel',
+        'copy-selected-links',
         'clipboard-auto',
         'txt-playlist-type3',
         'txt-album-type0',
@@ -4063,7 +4367,11 @@ function updateRowContextMenuLabels() {
     setContextActionDisabled(menu, 'clipboard-auto', !hasSelection || disableForExport || !clipboardAction);
     menu.querySelectorAll('[data-context-group]').forEach((groupEl) => {
         const isTxtGroup = groupEl.getAttribute('data-context-group') === 'txt';
-        groupEl.classList.toggle('is-disabled', isTxtGroup && (!hasSelection || disableForExport));
+        const isMoveGroup = groupEl.getAttribute('data-context-group') === 'move';
+        groupEl.classList.toggle(
+            'is-disabled',
+            (isTxtGroup || isMoveGroup) && (!hasSelection || disableForExport)
+        );
     });
 }
 
@@ -4099,7 +4407,7 @@ function showRowContextMenu(clientX, clientY, row = null) {
     state.contextMenuVisible = true;
 }
 
-async function executeRowContextMenuAction(action) {
+async function executeRowContextMenuAction(action, opts = {}) {
     if (!action) return;
     if (state.exportInProgress) {
         showToast('Export is running. Please wait.', 'info');
@@ -4148,6 +4456,26 @@ async function executeRowContextMenuAction(action) {
             return;
         }
         await handleDeleteItems(selectedItems);
+        return;
+    }
+    if (action === 'move-selected-to-group') {
+        if (!selectedItems.length) {
+            showToast('No rows selected', 'info');
+            return;
+        }
+        const targetGroupId = String(opts.targetGroupId || '__ungrouped__');
+        const targetGroup = targetGroupId === '__ungrouped__'
+            ? { id: '__ungrouped__', name: '', displayName: 'No Group' }
+            : getGroupEntryById(targetGroupId);
+        if (!targetGroup) {
+            showToast('Target group not found', 'error');
+            return;
+        }
+        await moveItemsToGroup(selectedItems, targetGroup, { clearClipboard: false });
+        return;
+    }
+    if (action === 'copy-selected-links') {
+        await copySelectedLinksToClipboard(selectedItems);
         return;
     }
 
@@ -4776,6 +5104,7 @@ async function pollJobs() {
 const handleSearch = debounce((query) => {
     state.searchQuery = query;
     renderList();
+    renderGroups({ force: true });
 }, CONFIG.SEARCH_DEBOUNCE);
 
 // â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
@@ -5608,6 +5937,7 @@ function openAdminEditModal(userId) {
         }
     }
     document.getElementById('admin-edit-status').style.display = 'none';
+    document.getElementById('admin-edit-status').textContent = '';
 
     var modal = document.getElementById('admin-edit-modal');
     if (modal) modal.classList.add('open');
@@ -5702,21 +6032,38 @@ async function submitAdminCreateUser() {
 async function saveAdminEditUser() {
     var userId = document.getElementById('admin-edit-user-id').value;
     var displayName = document.getElementById('admin-edit-displayname').value.trim();
+    var username = document.getElementById('admin-edit-username').value.trim();
     var roleDD = document.getElementById('admin-edit-role-dropdown');
     var role = roleDD ? roleDD.getAttribute('data-value') : 'user';
     var statusEl = document.getElementById('admin-edit-status');
+
+    statusEl.style.display = 'none';
+    statusEl.textContent = '';
+
+    if (!username) {
+        statusEl.textContent = 'Username is required';
+        statusEl.style.display = '';
+        statusEl.style.color = '#ef4444';
+        return;
+    }
 
     try {
         var token = getAuthToken();
         var res = await fetch(CONFIG.API_BASE + '/auth/users/' + userId, {
             method: 'PATCH',
             headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + token },
-            body: JSON.stringify({ display_name: displayName || null, role: role }),
+            body: JSON.stringify({ username: username, display_name: displayName || null, role: role }),
         });
         var data = await res.json();
         if (!res.ok) throw new Error(data.detail || 'Failed to update user');
 
         showToast('User updated!', 'success');
+        var currentUser = getAuthUser();
+        if (currentUser && String(currentUser.id || '') === String(userId)) {
+            localStorage.setItem('spoticheck_user', JSON.stringify(data));
+            setupAuthUI();
+            loadSettingsData();
+        }
         closeAdminEditModal();
         await loadAdminUsers({ force: true });
         var filterWrap = document.getElementById('admin-user-filter-wrap');
@@ -5775,6 +6122,43 @@ async function submitAdminResetPassword() {
         statusEl.style.color = '#ef4444';
         setTimeout(function() { statusEl.style.display = 'none'; }, 5000);
     }
+}
+
+function handleEnterShortcutSubmit(target) {
+    if (!(target instanceof Element)) return false;
+    if (target.closest('textarea, [contenteditable="true"], .custom-dropdown')) return false;
+
+    const editModalOpen = document.getElementById('admin-edit-modal')?.classList.contains('open');
+    if (editModalOpen && target.closest('#admin-edit-modal')) {
+        saveAdminEditUser();
+        return true;
+    }
+
+    const createModalOpen = document.getElementById('admin-create-modal')?.classList.contains('open');
+    if (createModalOpen && target.closest('#admin-create-modal')) {
+        submitAdminCreateUser();
+        return true;
+    }
+
+    const pwModalOpen = document.getElementById('admin-pw-modal')?.classList.contains('open');
+    if (pwModalOpen && target.closest('#admin-pw-modal')) {
+        submitAdminResetPassword();
+        return true;
+    }
+
+    const settingsPanel = document.getElementById('settings-panel');
+    const settingsVisible = settingsPanel && settingsPanel.style.display !== 'none';
+    if (!settingsVisible || !target.closest('#settings-panel')) return false;
+
+    if (target.closest('#settings-current-pw, #settings-new-pw, #settings-confirm-pw')) {
+        handleChangePassword();
+        return true;
+    }
+    if (target.closest('#settings-displayname')) {
+        handleSaveProfile();
+        return true;
+    }
+    return false;
 }
 
 async function adminToggleActive(userId, username, isCurrentlyActive) {
@@ -6047,13 +6431,22 @@ document.addEventListener('DOMContentLoaded', async () => {
         });
         groupList.addEventListener('dragover', (e) => {
             const groupBtn = e.target.closest('[data-group]');
-            if (!state.draggingGroupId) return;
+            const draggingRows = state.draggingRowKeys.length > 0;
+            if (!state.draggingGroupId && !draggingRows) return;
             updateDragAutoScroll(groupList, e.clientY);
             if (!groupBtn) return;
             const targetGroupId = normalizeGroupName(groupBtn.getAttribute('data-group'));
             if (!targetGroupId) return;
-            if (targetGroupId.toLowerCase() === ALL_GROUP_ID) return;
             e.preventDefault();
+            if (draggingRows) {
+                if (targetGroupId.toLowerCase() === ALL_GROUP_ID) return;
+                if (targetGroupId === state.dragOverGroupId) return;
+                state.dragOverGroupId = targetGroupId;
+                state.dragOverGroupPlacement = 'before';
+                syncGroupDragUi(groupList);
+                return;
+            }
+            if (targetGroupId.toLowerCase() === ALL_GROUP_ID) return;
             const rect = groupBtn.getBoundingClientRect();
             const placement = e.clientY > rect.top + rect.height / 2 ? 'after' : 'before';
             if (targetGroupId === state.dragOverGroupId && placement === state.dragOverGroupPlacement) return;
@@ -6063,10 +6456,31 @@ document.addEventListener('DOMContentLoaded', async () => {
         });
         groupList.addEventListener('drop', async (e) => {
             const groupBtn = e.target.closest('[data-group]');
-            if (!groupBtn || !state.draggingGroupId) return;
+            if (!groupBtn) return;
+            const targetGroupId = normalizeGroupName(groupBtn.getAttribute('data-group'));
+            const draggingRows = state.draggingRowKeys.length > 0;
+            if (draggingRows) {
+                if (!targetGroupId || targetGroupId.toLowerCase() === ALL_GROUP_ID) return;
+                e.preventDefault();
+                stopDragAutoScroll();
+                const targetGroup = getGroupEntryById(targetGroupId);
+                const draggedItems = state.items.filter((item) => state.draggingRowKeys.includes(selectionKey(item)));
+                const moved = await moveItemsToGroup(draggedItems, targetGroup);
+                state.draggingRowKeys = [];
+                state.dragOverRowKey = null;
+                state.dragOverRowPlacement = 'before';
+                state.dragOverGroupId = null;
+                state.dragOverGroupPlacement = 'before';
+                syncGroupDragUi(groupList);
+                renderList({ preserveScroll: true });
+                window.setTimeout(() => {
+                    state.suppressNextRowClick = false;
+                }, 0);
+                return;
+            }
+            if (!state.draggingGroupId) return;
             e.preventDefault();
             stopDragAutoScroll();
-            const targetGroupId = normalizeGroupName(groupBtn.getAttribute('data-group'));
             const moved = await moveCustomGroupsBefore(state.draggingGroupIds, targetGroupId, state.dragOverGroupPlacement);
             state.draggingGroupIds = [];
             state.draggingGroupId = null;
@@ -6092,7 +6506,7 @@ document.addEventListener('DOMContentLoaded', async () => {
             }, 0);
         });
         groupList.addEventListener('dragleave', (e) => {
-            if (!state.draggingGroupId) return;
+            if (!state.draggingGroupId && !state.draggingRowKeys.length) return;
             if (e.currentTarget.contains(e.relatedTarget)) return;
             stopDragAutoScroll();
         });
@@ -6187,6 +6601,7 @@ document.addEventListener('DOMContentLoaded', async () => {
             state.draggingRowKeys = selectedKeys;
             state.dragOverRowKey = draggedSelectionKey;
             state.dragOverRowPlacement = 'before';
+            state.dragOverGroupId = null;
             state.suppressNextRowClick = true;
             if (e.dataTransfer) {
                 e.dataTransfer.effectAllowed = 'move';
@@ -6218,6 +6633,7 @@ document.addEventListener('DOMContentLoaded', async () => {
             state.draggingRowKeys = [];
             state.dragOverRowKey = null;
             state.dragOverRowPlacement = 'before';
+            state.dragOverGroupId = null;
             renderList({ preserveScroll: true });
             if (moved) {
                 showToast('Row order updated', 'success');
@@ -6227,12 +6643,14 @@ document.addEventListener('DOMContentLoaded', async () => {
             }, 0);
         });
         listElForDelete.addEventListener('dragend', () => {
-            if (!state.draggingRowKeys.length && !state.dragOverRowKey) return;
+            if (!state.draggingRowKeys.length && !state.dragOverRowKey && !state.dragOverGroupId) return;
             stopDragAutoScroll();
             state.draggingRowKeys = [];
             state.dragOverRowKey = null;
             state.dragOverRowPlacement = 'before';
+            state.dragOverGroupId = null;
             syncRowDragUi(listElForDelete);
+            syncGroupDragUi(document.getElementById('group-list'));
             window.setTimeout(() => {
                 state.suppressNextRowClick = false;
             }, 0);
@@ -6263,7 +6681,9 @@ document.addEventListener('DOMContentLoaded', async () => {
             e.stopPropagation();
             const action = actionBtn.getAttribute('data-context-action');
             hideRowContextMenu();
-            await executeRowContextMenuAction(action);
+            await executeRowContextMenuAction(action, {
+                targetGroupId: actionBtn.getAttribute('data-context-group-id'),
+            });
         });
         rowContextMenu.addEventListener('contextmenu', (e) => {
             e.preventDefault();
@@ -6351,7 +6771,12 @@ document.addEventListener('DOMContentLoaded', async () => {
             closeImagePreview();
         }
         const target = e.target;
+        if (e.key === 'Enter' && !e.shiftKey && handleEnterShortcutSubmit(target)) {
+            e.preventDefault();
+            return;
+        }
         const typingTarget = Boolean(target?.closest?.('input, textarea, select, [contenteditable="true"]'));
+        const hotkey = e.key.toLowerCase();
         const isCtrlA = (e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'a';
         if (isCtrlA && state.currentView === 'linkchecker' && !typingTarget) {
             e.preventDefault();
@@ -6388,6 +6813,23 @@ document.addEventListener('DOMContentLoaded', async () => {
             if (!typingTarget && deletableGroupIds.length > 0) {
                 e.preventDefault();
                 handleDeleteGroups(deletableGroupIds);
+                return;
+            }
+        }
+        if ((e.ctrlKey || e.metaKey) && state.currentView === 'linkchecker' && !typingTarget) {
+            if (hotkey === 'c') {
+                e.preventDefault();
+                copySelectedLinksToClipboard();
+                return;
+            }
+            if (hotkey === 'x') {
+                e.preventDefault();
+                stageSelectedItemsForClipboard('cut');
+                return;
+            }
+            if (hotkey === 'v') {
+                e.preventDefault();
+                pasteClipboardItems();
                 return;
             }
         }
