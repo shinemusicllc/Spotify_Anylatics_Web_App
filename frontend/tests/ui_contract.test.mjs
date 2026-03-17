@@ -89,3 +89,16 @@ test("all-links search highlights rows and group cards by group accent", () => {
   assert.match(styleCss, /\.group-item-search-match/);
   assert.match(styleCss, /\.row-group-search-match/);
 });
+
+test("checked column exposes filter controls for error cleanup", () => {
+  assert.match(appJs, /const CHECKED_SORT_MODES = Object\.freeze/);
+  assert.match(appJs, /function ensureCheckedSortControls/);
+  assert.match(appJs, /data-checked-sort-option="\$\{CHECKED_SORT_MODES\.ERROR_FIRST\}"/);
+  assert.match(appJs, /state\.checkedSortMode = mode/);
+});
+
+test("pending job polling uses batch status endpoint", () => {
+  assert.match(appJs, /getJobsBatch\(jobIds = \[\]\)/);
+  assert.match(appJs, /this\._fetch\('\/jobs\/batch'/);
+  assert.match(appJs, /const jobsById = await fetchPendingJobs\(pendingJobIds\)/);
+});

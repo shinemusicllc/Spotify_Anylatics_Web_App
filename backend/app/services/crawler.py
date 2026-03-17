@@ -28,6 +28,7 @@ FETCHERS = {
     "playlist": spotify_client.fetch_playlist,
     "album": spotify_client.fetch_album,
 }
+CRAWL_TASK_SEMAPHORE = asyncio.Semaphore(max(1, settings.CRAWL_TASK_MAX_CONCURRENCY))
 
 def _has_meaningful_data(data: dict) -> bool:
     """Return True when payload contains any usable field from API/Playwright."""
@@ -230,161 +231,160 @@ async def crawl_item_task(job_id: str, spotify_id: str, item_type: str):
     4. Save raw response
     5. Update job status to 'completed' or 'error'
     """
-    async with async_session() as db:
-        try:
-            # 1. Mark job as crawling
-            job_result = await db.execute(select(CrawlJob).where(CrawlJob.id == job_id))
-            job = job_result.scalar_one_or_none()
-            if not job:
-                logger.error(f"Job {job_id} not found")
-                return
+    async with CRAWL_TASK_SEMAPHORE:
+        async with async_session() as db:
+            try:
+                # 1. Mark job as crawling
+                job_result = await db.execute(select(CrawlJob).where(CrawlJob.id == job_id))
+                job = job_result.scalar_one_or_none()
+                if not job:
+                    logger.error(f"Job {job_id} not found")
+                    return
 
-            job.status = "crawling"
-            job.started_at = datetime.utcnow()
-            await db.commit()
+                job.status = "crawling"
+                job.started_at = datetime.utcnow()
+                await db.commit()
 
-            existing_item = await _load_job_item(db, job, spotify_id, item_type)
-            existing_data = {}
-            if existing_item is not None:
-                existing_data = {
-                    "name": existing_item.name,
-                    "owner_name": existing_item.owner_name,
-                    "playcount": existing_item.playcount,
-                    "monthly_listeners": existing_item.monthly_listeners,
-                    "followers": existing_item.followers,
-                    "duration_ms": existing_item.duration_ms,
-                    "track_count": existing_item.track_count,
-                }
+                existing_item = await _load_job_item(db, job, spotify_id, item_type)
+                existing_data = {}
+                if existing_item is not None:
+                    existing_data = {
+                        "name": existing_item.name,
+                        "owner_name": existing_item.owner_name,
+                        "playcount": existing_item.playcount,
+                        "monthly_listeners": existing_item.monthly_listeners,
+                        "followers": existing_item.followers,
+                        "duration_ms": existing_item.duration_ms,
+                        "track_count": existing_item.track_count,
+                    }
 
-            # 2. Fetch data from Spotify
-            fetcher = FETCHERS.get(item_type)
-            if not fetcher:
-                raise ValueError(f"Unknown item type: {item_type}")
+                # 2. Fetch data from Spotify
+                fetcher = FETCHERS.get(item_type)
+                if not fetcher:
+                    raise ValueError(f"Unknown item type: {item_type}")
 
-            # Retry logic with exponential backoff
-            data = None
-            for attempt in range(settings.MAX_RETRIES):
-                try:
-                    data = await fetcher(spotify_id)
-                    if data is not None:
-                        break
-                except Exception as e:
-                    logger.warning(
-                        f"Attempt {attempt + 1} failed for {spotify_id}: {e}"
-                    )
-                    if attempt < settings.MAX_RETRIES - 1:
-                        wait = (2**attempt) + (asyncio.get_event_loop().time() % 1)
-                        await asyncio.sleep(wait)
+                data = None
+                for attempt in range(settings.MAX_RETRIES):
+                    try:
+                        data = await fetcher(spotify_id)
+                        if data is not None:
+                            break
+                    except Exception as e:
+                        logger.warning(
+                            f"Attempt {attempt + 1} failed for {spotify_id}: {e}"
+                        )
+                        if attempt < settings.MAX_RETRIES - 1:
+                            wait = (2**attempt) + (asyncio.get_event_loop().time() % 1)
+                            await asyncio.sleep(wait)
 
-            if data is None:
-                raise Exception("All retry attempts failed - no data returned")
+                if data is None:
+                    raise Exception("All retry attempts failed - no data returned")
 
-            data = await _finalize_payload(item_type, data)
+                data = await _finalize_payload(item_type, data)
 
-            # 3. Check if response indicates an error
-            if data.get("error"):
+                # 3. Check if response indicates an error
+                if data.get("error"):
+                    item = await _load_job_item(db, job, spotify_id, item_type)
+                    if item:
+                        item.status = "error"
+                        item.error_code = data.get("error_code")
+                        item.error_message = data.get("error_message")
+                        item.last_checked = datetime.utcnow()
+
+                    job.status = "error"
+                    job.error = data.get("error_message", "Unknown error")
+                    job.completed_at = datetime.utcnow()
+                    await db.commit()
+                    return
+
+                if not _has_meaningful_data(data):
+                    raise Exception("No usable data from API")
+
+                # 4. Update Item with real data
                 item = await _load_job_item(db, job, spotify_id, item_type)
                 if item:
-                    item.status = "error"
-                    item.error_code = data.get("error_code")
-                    item.error_message = data.get("error_message")
-                    item.last_checked = datetime.utcnow()
+                    item.name = _prefer_existing_on_none(item.name, data.get("name"))
+                    item.image = _prefer_existing_on_none(item.image, data.get("image"))
+                    item.owner_name = _prefer_existing_on_none(item.owner_name, data.get("owner_name"))
+                    item.owner_image = _prefer_existing_on_none(item.owner_image, data.get("owner_image"))
+                    item.followers = _prefer_existing_on_none(item.followers, data.get("followers"))
 
-                job.status = "error"
-                job.error = data.get("error_message", "Unknown error")
-                job.completed_at = datetime.utcnow()
-                await db.commit()
-                return
-
-            if not _has_meaningful_data(data):
-                raise Exception("No usable data from API")
-
-            # 4. Update Item with real data
-            item = await _load_job_item(db, job, spotify_id, item_type)
-            if item:
-                item.name = _prefer_existing_on_none(item.name, data.get("name"))
-                item.image = _prefer_existing_on_none(item.image, data.get("image"))
-                item.owner_name = _prefer_existing_on_none(item.owner_name, data.get("owner_name"))
-                item.owner_image = _prefer_existing_on_none(item.owner_image, data.get("owner_image"))
-                item.followers = _prefer_existing_on_none(item.followers, data.get("followers"))
-
-                monthly_value = data.get("monthly_listeners")
-                if monthly_value is None:
-                    monthly_value = data.get("monthly_plays")
-                item.monthly_listeners = _prefer_existing_on_none(
-                    item.monthly_listeners,
-                    monthly_value,
-                )
-
-                item.playcount = _prefer_existing_on_none(item.playcount, data.get("playcount"))
-                item.track_count = _prefer_existing_on_none(item.track_count, data.get("track_count"))
-                item.album_count = _prefer_existing_on_none(item.album_count, data.get("album_count"))
-                item.duration_ms = _prefer_existing_on_none(item.duration_ms, data.get("duration_ms"))
-                item.release_date = _prefer_existing_on_none(item.release_date, data.get("release_date"))
-                item.status = "active"
-                item.error_code = None
-                item.error_message = None
-                item.last_checked = datetime.utcnow()
-
-                snapshot = MetricsSnapshot(
-                    item_id=item.id,
-                    spotify_id=spotify_id,
-                    followers=item.followers,
-                    monthly_listeners=item.monthly_listeners,
-                    playcount=item.playcount,
-                    track_count=item.track_count,
-                )
-                db.add(snapshot)
-
-            # 5. Save raw response for debugging
-            raw = RawResponse(
-                spotify_id=spotify_id,
-                operation=f"fetch_{item_type}",
-                response_data=data,
-            )
-            db.add(raw)
-
-            # 6. Mark job completed
-            job.status = "completed"
-            job.result = data
-            job.completed_at = datetime.utcnow()
-
-            await db.commit()
-            logger.info(
-                f"Crawl completed: {item_type}:{spotify_id} - {data.get('name', '?')}"
-            )
-
-        except Exception as e:
-            logger.error(f"Crawl failed for {spotify_id}: {e}")
-            # Update job as error
-            try:
-                job_result = await db.execute(
-                    select(CrawlJob).where(CrawlJob.id == job_id)
-                )
-                job = job_result.scalar_one_or_none()
-                if job:
-                    job.status = "error"
-                    job.error = str(e)
-                    job.completed_at = datetime.utcnow()
-                    job.retry_count += 1
-
-                if job is not None:
-                    item = await _load_job_item(db, job, spotify_id, item_type)
-                else:
-                    item_result = await db.execute(
-                        select(Item)
-                        .where(
-                            Item.spotify_id == spotify_id,
-                            Item.item_type == item_type,
-                        )
-                        .order_by(Item.updated_at.desc())
+                    monthly_value = data.get("monthly_listeners")
+                    if monthly_value is None:
+                        monthly_value = data.get("monthly_plays")
+                    item.monthly_listeners = _prefer_existing_on_none(
+                        item.monthly_listeners,
+                        monthly_value,
                     )
-                    item = item_result.scalars().first()
-                if item:
-                    item.status = "error"
-                    item.error_message = str(e)
+
+                    item.playcount = _prefer_existing_on_none(item.playcount, data.get("playcount"))
+                    item.track_count = _prefer_existing_on_none(item.track_count, data.get("track_count"))
+                    item.album_count = _prefer_existing_on_none(item.album_count, data.get("album_count"))
+                    item.duration_ms = _prefer_existing_on_none(item.duration_ms, data.get("duration_ms"))
+                    item.release_date = _prefer_existing_on_none(item.release_date, data.get("release_date"))
+                    item.status = "active"
+                    item.error_code = None
+                    item.error_message = None
                     item.last_checked = datetime.utcnow()
 
+                    snapshot = MetricsSnapshot(
+                        item_id=item.id,
+                        spotify_id=spotify_id,
+                        followers=item.followers,
+                        monthly_listeners=item.monthly_listeners,
+                        playcount=item.playcount,
+                        track_count=item.track_count,
+                    )
+                    db.add(snapshot)
+
+                # 5. Save raw response for debugging
+                raw = RawResponse(
+                    spotify_id=spotify_id,
+                    operation=f"fetch_{item_type}",
+                    response_data=data,
+                )
+                db.add(raw)
+
+                # 6. Mark job completed
+                job.status = "completed"
+                job.result = data
+                job.completed_at = datetime.utcnow()
+
                 await db.commit()
-            except Exception:
-                await db.rollback()
+                logger.info(
+                    f"Crawl completed: {item_type}:{spotify_id} - {data.get('name', '?')}"
+                )
+
+            except Exception as e:
+                logger.error(f"Crawl failed for {spotify_id}: {e}")
+                try:
+                    job_result = await db.execute(
+                        select(CrawlJob).where(CrawlJob.id == job_id)
+                    )
+                    job = job_result.scalar_one_or_none()
+                    if job:
+                        job.status = "error"
+                        job.error = str(e)
+                        job.completed_at = datetime.utcnow()
+                        job.retry_count += 1
+
+                    if job is not None:
+                        item = await _load_job_item(db, job, spotify_id, item_type)
+                    else:
+                        item_result = await db.execute(
+                            select(Item)
+                            .where(
+                                Item.spotify_id == spotify_id,
+                                Item.item_type == item_type,
+                            )
+                            .order_by(Item.updated_at.desc())
+                        )
+                        item = item_result.scalars().first()
+                    if item:
+                        item.status = "error"
+                        item.error_message = str(e)
+                        item.last_checked = datetime.utcnow()
+
+                    await db.commit()
+                except Exception:
+                    await db.rollback()

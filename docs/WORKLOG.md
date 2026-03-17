@@ -195,3 +195,34 @@
   - Bumped frontend assets to `v=20260317-79`, re-ran the frontend contract tests, and smoke-checked the local UI search state at `http://127.0.0.1:8010`.
 - Notes:
   - The refinement is visual only; search/group matching logic is unchanged.
+
+### Task: Stabilize large batch add flow and add Checked sort controls
+
+- Status: done
+- Actions:
+  - Confirmed from local `uvicorn-8010.err.log` that large add batches were triggering `sqlalchemy.exc.TimeoutError: QueuePool limit of size 5 overflow 10 reached` during authenticated API requests and crawl job work.
+  - Added backend crawl throttling via `CRAWL_TASK_MAX_CONCURRENCY` and a new `POST /api/jobs/batch` endpoint so the frontend can poll many jobs in one request instead of one request per job.
+  - Updated the frontend polling flow to batch-fetch pending job states and added a `Checked` sort menu with `Error First`, `Crawling First`, `Active First`, `Newest Check`, and `Oldest Check`.
+  - Restarted the local app on port `8010`, re-ran frontend/backend targeted tests, and smoke-checked the new `Checked` sort in the browser.
+- Notes:
+  - The previous red/offline recovery behavior came from DB pool starvation under combined crawl + poll pressure; the links still appeared later because the backlog eventually drained.
+
+### Task: Reposition Checked sort control inline with header label
+
+- Status: done
+- Actions:
+  - Moved the `Checked` sort controls to sit immediately after the `Checked` label instead of floating at the far edge of the header cell.
+  - Updated the checked-header dropdown menu anchor so the menu opens from the inline control without affecting the rest of the column layout.
+  - Bumped frontend assets to `v=20260317-81`, re-ran the frontend contract tests, and verified the served HTML references the new bundle.
+- Notes:
+  - This change is layout-only; the available `Checked` sort modes and backend behavior are unchanged.
+
+### Task: Clamp Checked sort dropdown inside viewport
+
+- Status: done
+- Actions:
+  - Tightened the spacing between the `Checked` label and its sort trigger so the control now reads as a single inline header cluster.
+  - Added runtime positioning for the `Checked` dropdown so it flips inward near the right viewport edge instead of overflowing out of frame.
+  - Bumped frontend assets to `v=20260317-82`, re-ran the frontend contract tests, and verified in the browser that the open menu stays within the viewport bounds.
+- Notes:
+  - This is a presentational fix only; the Checked filter options and sorting behavior are unchanged.

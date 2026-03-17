@@ -97,6 +97,14 @@ const METRIC_SORT_CONFIG = Object.freeze({
     artistListeners: { valueKey: 'artistListeners', deltaKey: 'artistListenersDelta', shortLabel: 'SL' },
     trackViews: { valueKey: 'trackViews', deltaKey: 'trackViewsDelta', shortLabel: 'SL' },
 });
+const CHECKED_SORT_MODES = Object.freeze({
+    NONE: 'none',
+    ERROR_FIRST: 'error-first',
+    CRAWLING_FIRST: 'crawling-first',
+    ACTIVE_FIRST: 'active-first',
+    RECENT_FIRST: 'recent-first',
+    OLDEST_FIRST: 'oldest-first',
+});
 const UI_PREF_SAVE_DEBOUNCE_MS = 700;
 
 function getUserGroupStorageKey() {
@@ -250,6 +258,8 @@ const state = {
     textSortColumn: null,
     textSortDirection: 'asc',
     textSortMenuOpenKey: null,
+    checkedSortMode: CHECKED_SORT_MODES.NONE,
+    checkedSortMenuOpen: false,
     lastGroupRenderSignature: '',
     lastListRenderSignature: '',
 };
@@ -319,6 +329,14 @@ class SpotiCheckAPI {
         if (userId) qs.set('user_id', String(userId));
         const suffix = qs.toString() ? `?${qs.toString()}` : '';
         return this._fetch(`/items/${type}/${id}${suffix}`);
+    }
+    getJobsBatch(jobIds = []) {
+        return this._fetch('/jobs/batch', {
+            method: 'POST',
+            body: JSON.stringify({
+                job_ids: Array.isArray(jobIds) ? jobIds : [],
+            }),
+        });
     }
     getJob(jobId)         { return this._fetch(`/jobs/${jobId}`); }
     deleteItemById(itemId) {
@@ -1110,6 +1128,73 @@ function getTextSortValue(item, colKey) {
     return null;
 }
 
+function getCheckedSortModeLabel(mode) {
+    switch (mode) {
+    case CHECKED_SORT_MODES.ERROR_FIRST:
+        return 'Error First';
+    case CHECKED_SORT_MODES.CRAWLING_FIRST:
+        return 'Crawling First';
+    case CHECKED_SORT_MODES.ACTIVE_FIRST:
+        return 'Active First';
+    case CHECKED_SORT_MODES.RECENT_FIRST:
+        return 'Newest Check';
+    case CHECKED_SORT_MODES.OLDEST_FIRST:
+        return 'Oldest Check';
+    default:
+        return 'None';
+    }
+}
+
+function getCheckedStatusPriority(item, mode) {
+    const status = String(item?.status || 'pending');
+    const priorityMap = {
+        [CHECKED_SORT_MODES.ERROR_FIRST]: { error: 0, crawling: 1, pending: 2, active: 3 },
+        [CHECKED_SORT_MODES.CRAWLING_FIRST]: { crawling: 0, pending: 1, error: 2, active: 3 },
+        [CHECKED_SORT_MODES.ACTIVE_FIRST]: { active: 0, crawling: 1, pending: 2, error: 3 },
+    };
+    return priorityMap[mode]?.[status] ?? 9;
+}
+
+function getCheckedTimestamp(item) {
+    const raw = item?.last_checked || item?.created_at || '';
+    const time = Date.parse(raw);
+    return Number.isFinite(time) ? time : null;
+}
+
+function sortItemsByChecked(items, mode) {
+    const sortedItems = [...items];
+    sortedItems.sort((a, b) => {
+        if (
+            mode === CHECKED_SORT_MODES.ERROR_FIRST
+            || mode === CHECKED_SORT_MODES.CRAWLING_FIRST
+            || mode === CHECKED_SORT_MODES.ACTIVE_FIRST
+        ) {
+            const leftPriority = getCheckedStatusPriority(a, mode);
+            const rightPriority = getCheckedStatusPriority(b, mode);
+            if (leftPriority !== rightPriority) {
+                return leftPriority - rightPriority;
+            }
+            const leftTime = getCheckedTimestamp(a);
+            const rightTime = getCheckedTimestamp(b);
+            if (leftTime == null && rightTime == null) return 0;
+            if (leftTime == null) return 1;
+            if (rightTime == null) return -1;
+            return rightTime - leftTime;
+        }
+
+        const leftTime = getCheckedTimestamp(a);
+        const rightTime = getCheckedTimestamp(b);
+        if (leftTime == null && rightTime == null) return 0;
+        if (leftTime == null) return 1;
+        if (rightTime == null) return -1;
+        if (mode === CHECKED_SORT_MODES.OLDEST_FIRST) {
+            return leftTime - rightTime;
+        }
+        return rightTime - leftTime;
+    });
+    return sortedItems;
+}
+
 function renderPlaylistOwnerCell(item) {
     const owner = getPlaylistOwnerLabel(item);
     if (!item || item.type !== 'playlist' || owner === '-') {
@@ -1859,6 +1944,10 @@ function getVisibleItems() {
             return left > right ? sortFactor : -sortFactor;
         });
         return sortedItems;
+    }
+
+    if (state.checkedSortMode && state.checkedSortMode !== CHECKED_SORT_MODES.NONE) {
+        return sortItemsByChecked(items, state.checkedSortMode);
     }
 
     return items;
@@ -3310,6 +3399,145 @@ function closeTextSortMenu() {
     updateTextSortControlsUI();
 }
 
+function closeCheckedSortMenu() {
+    if (!state.checkedSortMenuOpen) return;
+    state.checkedSortMenuOpen = false;
+    updateCheckedSortControlsUI();
+}
+
+function positionCheckedSortMenu(control) {
+    if (!control) return;
+    const menu = control.querySelector('[data-checked-sort-menu]');
+    if (!menu) return;
+
+    control.classList.remove('menu-align-right');
+    if (!state.checkedSortMenuOpen) return;
+
+    const viewportPadding = 12;
+    const menuRect = menu.getBoundingClientRect();
+    if (menuRect.right > (window.innerWidth - viewportPadding)) {
+        control.classList.add('menu-align-right');
+    }
+
+    const alignedRect = menu.getBoundingClientRect();
+    if (alignedRect.left < viewportPadding && control.classList.contains('menu-align-right')) {
+        control.classList.remove('menu-align-right');
+    }
+}
+
+function updateCheckedSortControlsUI() {
+    const control = document.querySelector('.checked-sort-controls[data-checked-sort-col="checked"]');
+    if (!control) return;
+    const toggle = control.querySelector('[data-checked-sort-menu-toggle]');
+    const menu = control.querySelector('[data-checked-sort-menu]');
+    const active = state.checkedSortMode !== CHECKED_SORT_MODES.NONE;
+    if (toggle) {
+        toggle.classList.toggle('is-active', active);
+        toggle.setAttribute(
+            'title',
+            active
+                ? `Đang lọc: ${getCheckedSortModeLabel(state.checkedSortMode)}`
+                : 'Chọn kiểu lọc Checked'
+        );
+    }
+    if (menu) {
+        menu.classList.toggle('open', state.checkedSortMenuOpen);
+        menu.querySelectorAll('[data-checked-sort-option]').forEach((btn) => {
+            const option = btn.getAttribute('data-checked-sort-option') || CHECKED_SORT_MODES.NONE;
+            const isActive = option === state.checkedSortMode;
+            btn.classList.toggle('is-active', isActive);
+        });
+    }
+    positionCheckedSortMenu(control);
+}
+
+function ensureCheckedSortControls() {
+    const cell = document.querySelector('.list-head .head-cell[data-col-key="checked"]');
+    if (cell && !cell.querySelector('.checked-sort-controls')) {
+        const controls = document.createElement('div');
+        controls.className = 'metric-sort-controls checked-sort-controls';
+        controls.dataset.checkedSortCol = 'checked';
+        controls.innerHTML = `
+            <button type="button" class="metric-sort-mode-toggle" data-checked-sort-menu-toggle aria-label="Chọn kiểu lọc Checked">
+                <span class="metric-sort-triangle">▼</span>
+            </button>
+            <div class="metric-sort-menu" data-checked-sort-menu>
+                <button type="button" class="metric-sort-menu-item" data-checked-sort-option="${CHECKED_SORT_MODES.NONE}">
+                    <span class="metric-sort-menu-title">None (Mặc định)</span>
+                </button>
+                <button type="button" class="metric-sort-menu-item" data-checked-sort-option="${CHECKED_SORT_MODES.ERROR_FIRST}">
+                    <span class="metric-sort-menu-title">Error First</span>
+                </button>
+                <button type="button" class="metric-sort-menu-item" data-checked-sort-option="${CHECKED_SORT_MODES.CRAWLING_FIRST}">
+                    <span class="metric-sort-menu-title">Crawling First</span>
+                </button>
+                <button type="button" class="metric-sort-menu-item" data-checked-sort-option="${CHECKED_SORT_MODES.ACTIVE_FIRST}">
+                    <span class="metric-sort-menu-title">Active First</span>
+                </button>
+                <button type="button" class="metric-sort-menu-item" data-checked-sort-option="${CHECKED_SORT_MODES.RECENT_FIRST}">
+                    <span class="metric-sort-menu-title">Newest Check</span>
+                </button>
+                <button type="button" class="metric-sort-menu-item" data-checked-sort-option="${CHECKED_SORT_MODES.OLDEST_FIRST}">
+                    <span class="metric-sort-menu-title">Oldest Check</span>
+                </button>
+            </div>
+        `;
+        cell.appendChild(controls);
+    }
+
+    const head = document.querySelector('.list-head');
+    if (head && head.dataset.checkedSortBound !== 'true') {
+        head.dataset.checkedSortBound = 'true';
+        head.addEventListener('click', (event) => {
+            const control = event.target.closest('.checked-sort-controls[data-checked-sort-col="checked"]');
+            if (!control) return;
+            const menuToggle = event.target.closest('[data-checked-sort-menu-toggle]');
+            const option = event.target.closest('[data-checked-sort-option]');
+
+            if (menuToggle) {
+                event.preventDefault();
+                event.stopPropagation();
+                closeMetricSortMenu();
+                closeTextSortMenu();
+                state.checkedSortMenuOpen = !state.checkedSortMenuOpen;
+                updateCheckedSortControlsUI();
+                return;
+            }
+
+            if (option) {
+                event.preventDefault();
+                event.stopPropagation();
+                const mode = option.getAttribute('data-checked-sort-option') || CHECKED_SORT_MODES.NONE;
+                state.checkedSortMode = mode;
+                state.checkedSortMenuOpen = false;
+                state.metricSortColumn = null;
+                state.metricSortMenuOpenKey = null;
+                state.textSortColumn = null;
+                state.textSortMenuOpenKey = null;
+                renderList({ preserveScroll: true });
+                updateMetricSortControlsUI();
+                updateTextSortControlsUI();
+                updateCheckedSortControlsUI();
+            }
+        });
+    }
+
+    if (!document.body.dataset.checkedSortBodyBound) {
+        document.body.dataset.checkedSortBodyBound = 'true';
+        document.addEventListener('mousedown', (event) => {
+            const target = event.target;
+            if (target?.closest?.('.checked-sort-controls')) return;
+            closeCheckedSortMenu();
+        }, true);
+        window.addEventListener('resize', () => {
+            const control = document.querySelector('.checked-sort-controls[data-checked-sort-col="checked"]');
+            positionCheckedSortMenu(control);
+        });
+    }
+
+    updateCheckedSortControlsUI();
+}
+
 function ensureMetricSortControls() {
     Object.keys(METRIC_SORT_CONFIG).forEach((colKey) => {
         const cell = document.querySelector(`.list-head .head-cell[data-col-key="${colKey}"]`);
@@ -3357,6 +3585,7 @@ function ensureMetricSortControls() {
                 event.preventDefault();
                 event.stopPropagation();
                 closeTextSortMenu();
+                closeCheckedSortMenu();
                 state.metricSortMenuOpenKey = state.metricSortMenuOpenKey === colKey ? null : colKey;
                 updateMetricSortControlsUI();
                 return;
@@ -3370,8 +3599,11 @@ function ensureMetricSortControls() {
                     state.metricSortColumn = null;
                     state.metricSortMenuOpenKey = null;
                     closeTextSortMenu();
+                    state.checkedSortMode = CHECKED_SORT_MODES.NONE;
+                    closeCheckedSortMenu();
                     renderList({ preserveScroll: true });
                     updateMetricSortControlsUI();
+                    updateCheckedSortControlsUI();
                     return;
                 }
 
@@ -3380,30 +3612,37 @@ function ensureMetricSortControls() {
                 state.metricSortMode = mode;
                 state.textSortColumn = null;
                 state.textSortMenuOpenKey = null;
+                state.checkedSortMode = CHECKED_SORT_MODES.NONE;
+                state.checkedSortMenuOpen = false;
                 if (!['asc', 'desc'].includes(state.metricSortDirection)) {
                     state.metricSortDirection = 'desc';
                 }
                 state.metricSortMenuOpenKey = null;
                 renderList({ preserveScroll: true });
                 updateMetricSortControlsUI();
+                updateCheckedSortControlsUI();
                 return;
             }
 
             if (directionToggle) {
                 event.preventDefault();
                 event.stopPropagation();
+                closeCheckedSortMenu();
                 if (state.metricSortColumn !== colKey) {
                     state.metricSortColumn = colKey;
                     state.metricSortDirection = 'desc';
                     state.metricSortMode = state.metricSortMode === 'delta' ? 'delta' : 'value';
                     state.textSortColumn = null;
                     state.textSortMenuOpenKey = null;
+                    state.checkedSortMode = CHECKED_SORT_MODES.NONE;
+                    state.checkedSortMenuOpen = false;
                 } else {
                     state.metricSortDirection = state.metricSortDirection === 'asc' ? 'desc' : 'asc';
                 }
                 state.metricSortMenuOpenKey = null;
                 renderList({ preserveScroll: true });
                 updateMetricSortControlsUI();
+                updateCheckedSortControlsUI();
             }
         });
     }
@@ -3863,6 +4102,7 @@ function ensureTextSortControls() {
                 event.preventDefault();
                 event.stopPropagation();
                 closeMetricSortMenu();
+                closeCheckedSortMenu();
                 state.textSortMenuOpenKey = state.textSortMenuOpenKey === colKey ? null : colKey;
                 updateTextSortControlsUI();
                 return;
@@ -3881,9 +4121,12 @@ function ensureTextSortControls() {
                 state.metricSortColumn = null;
                 state.metricSortMenuOpenKey = null;
                 state.textSortMenuOpenKey = null;
+                state.checkedSortMode = CHECKED_SORT_MODES.NONE;
+                state.checkedSortMenuOpen = false;
                 renderList({ preserveScroll: true });
                 updateMetricSortControlsUI();
                 updateTextSortControlsUI();
+                updateCheckedSortControlsUI();
                 return;
             }
 
@@ -3900,9 +4143,12 @@ function ensureTextSortControls() {
                 state.metricSortColumn = null;
                 state.metricSortMenuOpenKey = null;
                 state.textSortMenuOpenKey = null;
+                state.checkedSortMode = CHECKED_SORT_MODES.NONE;
+                state.checkedSortMenuOpen = false;
                 renderList({ preserveScroll: true });
                 updateMetricSortControlsUI();
                 updateTextSortControlsUI();
+                updateCheckedSortControlsUI();
             }
         });
     }
@@ -4990,6 +5236,53 @@ function stopPolling() {
     }
 }
 
+async function fetchPendingJobs(jobIds) {
+    const jobsById = new Map();
+    const normalizedJobIds = Array.isArray(jobIds) ? jobIds.filter(Boolean) : [];
+    if (!normalizedJobIds.length) {
+        return jobsById;
+    }
+
+    if (normalizedJobIds.length === 1) {
+        const onlyJobId = normalizedJobIds[0];
+        try {
+            const job = await api.getJob(onlyJobId);
+            if (job?.id) {
+                jobsById.set(String(job.id), job);
+            }
+        } catch {
+            // Ignore transient poll failures; next cycle will retry.
+        }
+        return jobsById;
+    }
+
+    try {
+        const batch = await api.getJobsBatch(normalizedJobIds);
+        (batch?.jobs || []).forEach((job) => {
+            if (job?.id) {
+                jobsById.set(String(job.id), job);
+            }
+        });
+        return jobsById;
+    } catch {
+        const fallbackResults = await Promise.all(
+            normalizedJobIds.map(async (jobId) => {
+                try {
+                    return { jobId, job: await api.getJob(jobId) };
+                } catch {
+                    return { jobId, job: null };
+                }
+            })
+        );
+        fallbackResults.forEach(({ jobId, job }) => {
+            if (job?.id) {
+                jobsById.set(String(job.id || jobId), job);
+            }
+        });
+        return jobsById;
+    }
+}
+
 async function pollJobs() {
     if (state.pendingJobs.size === 0) {
         stopPolling();
@@ -5005,17 +5298,10 @@ async function pollJobs() {
     let shouldReload = false;
     let hasTerminalUpdate = false;
     let shouldNotifyBatchDone = false;
-    const jobResults = await Promise.all(
-        pendingJobIds.map(async (jobId) => {
-            try {
-                return { jobId, job: await api.getJob(jobId) };
-            } catch {
-                return { jobId, job: null };
-            }
-        })
-    );
+    const jobsById = await fetchPendingJobs(pendingJobIds);
 
-    for (const { jobId, job } of jobResults) {
+    for (const jobId of pendingJobIds) {
+        const job = jobsById.get(String(jobId)) || null;
         if (!job) continue;
 
         const mappedItemId = state.pendingJobToItem.get(jobId) || jobId;
@@ -6241,6 +6527,7 @@ document.addEventListener('DOMContentLoaded', async () => {
     setupColumnResizers();
     ensureMetricSortControls();
     ensureTextSortControls();
+    ensureCheckedSortControls();
     syncColumnWidthsToViewport();
     window.addEventListener('resize', () => syncColumnWidthsToViewport());
 

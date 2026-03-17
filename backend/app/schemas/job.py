@@ -19,3 +19,15 @@ class JobResponse(BaseModel):
     completed_at: datetime | None = None
 
     model_config = {"from_attributes": True}
+
+
+class JobBatchRequest(BaseModel):
+    """Batch job status lookup request."""
+
+    job_ids: list[str]
+
+
+class JobBatchResponse(BaseModel):
+    """Batch job status lookup response."""
+
+    jobs: list[JobResponse]

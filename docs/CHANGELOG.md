@@ -88,3 +88,21 @@
 - Fixed: The previous full-height straight stripe looked too rigid inside rounded cards and the header lacked the vertical separator after `STT`.
 - Affected files: `frontend/style.css`, `frontend/index.html`, `docs/WORKLOG.md`, `docs/CHANGELOG.md`
 - Impact/Risk: Low; presentational refinement only.
+### 2026-03-17 18:21 - Stabilize large batch adds and add Checked sorting
+- Added: `POST /api/jobs/batch` for batch crawl-status polling, `CRAWL_TASK_MAX_CONCURRENCY` for bounded worker fan-out, and a `Checked` header menu with `Error First`, `Crawling First`, `Active First`, `Newest Check`, and `Oldest Check`.
+- Changed: Frontend pending-job polling now requests statuses in bulk instead of one HTTP call per job; frontend bundle version bumped to `v=20260317-80`.
+- Fixed: Large add batches no longer overwhelm the DB pool through combined crawl-task fan-out and per-job polling, and error rows can now be surfaced quickly for cleanup.
+- Affected files: `backend/app/api/jobs.py`, `backend/app/config.py`, `backend/app/schemas/job.py`, `backend/app/services/crawler.py`, `backend/tests/test_jobs_batch.py`, `frontend/app.js`, `frontend/index.html`, `frontend/tests/ui_contract.test.mjs`, `docs/DECISIONS.md`, `docs/WORKLOG.md`, `docs/CHANGELOG.md`
+- Impact/Risk: Medium; job status polling contract changed from single-job bursts to an additional batch endpoint, and crawl throughput is now intentionally capped to protect DB stability during large imports.
+### 2026-03-17 18:31 - Reposition Checked sort control
+- Added: Inline positioning rules so the `Checked` sort control now sits directly after the `Checked` label and its dropdown anchors from that inline trigger.
+- Changed: Frontend bundle version bumped to `v=20260317-81`.
+- Fixed: The `Checked` sort UI no longer feels detached at the edge of the column and now reads as part of the header text.
+- Affected files: `frontend/style.css`, `frontend/index.html`, `docs/WORKLOG.md`, `docs/CHANGELOG.md`
+- Impact/Risk: Low; presentational layout adjustment only.
+### 2026-03-17 18:33 - Keep Checked sort dropdown inside viewport
+- Added: Dynamic dropdown alignment for the `Checked` sort menu so it flips inward when opened near the right edge of the table header.
+- Changed: Tightened the inline spacing between the `Checked` label and sort trigger; frontend bundle version bumped to `v=20260317-82`.
+- Fixed: The `Checked` dropdown no longer overflows outside the visible table area, and the trigger now sits immediately after the header text instead of leaving a wide gap.
+- Affected files: `frontend/style.css`, `frontend/app.js`, `frontend/index.html`, `docs/WORKLOG.md`, `docs/CHANGELOG.md`
+- Impact/Risk: Low; UI positioning change only.

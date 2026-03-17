@@ -30,6 +30,7 @@ class Settings(BaseSettings):
     # Crawl Settings
     CRAWL_DELAY_SECONDS: float = 0.2
     MAX_RETRIES: int = 2
+    CRAWL_TASK_MAX_CONCURRENCY: int = 8
     RATE_LIMIT_PER_MINUTE: int = 60
     PLAYLIST_PAGE_SIZE: int = 100
     PLAYLIST_MAX_TRACKS: int = 2000
