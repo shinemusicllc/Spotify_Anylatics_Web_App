@@ -226,3 +226,23 @@
   - Bumped frontend assets to `v=20260317-82`, re-ran the frontend contract tests, and verified in the browser that the open menu stays within the viewport bounds.
 - Notes:
   - This is a presentational fix only; the Checked filter options and sorting behavior are unchanged.
+
+### Task: Diagnose duplicate highlight colors across groups
+
+- Status: done
+- Actions:
+  - Verified the local `origin/main` code still uses a fixed `GROUP_ACCENT_PALETTE` with only eight colors to derive search highlight accents.
+  - Recomputed the current hash slots for `Follow > 5` and `312` and confirmed both names land on palette slot `4`, which resolves to the same purple RGB value `168,85,247`.
+  - Confirmed the row/card highlight styles in `frontend/style.css` consume the same `--group-accent-rgb` CSS variable for both sidebar cards and list rows, so a palette collision makes both groups and their rows look identical.
+- Notes:
+  - This is expected behavior of the current implementation, not a separate row-mapping bug.
+
+### Task: Remove group highlight color collisions
+
+- Status: done
+- Actions:
+  - Replaced the fixed eight-color `GROUP_ACCENT_PALETTE` logic in `frontend/app.js` with hash-derived HSL accent generation so each group gets a stable color from its full name rather than a small shared palette.
+  - Updated the frontend contract test to assert the new accent-generation helpers exist and that the old palette constant is gone.
+  - Bumped frontend assets to `v=20260318-84`, re-ran `node --check` and `node --test`, and confirmed the local app is serving the new bundle.
+- Notes:
+  - The previously colliding groups `Follow > 5` and `312` now resolve to different RGB accents, so matching rows/cards no longer look like they belong to the same group during `All Links` search.

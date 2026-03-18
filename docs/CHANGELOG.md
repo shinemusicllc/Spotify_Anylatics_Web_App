@@ -106,3 +106,15 @@
 - Fixed: The `Checked` dropdown no longer overflows outside the visible table area, and the trigger now sits immediately after the header text instead of leaving a wide gap.
 - Affected files: `frontend/style.css`, `frontend/app.js`, `frontend/index.html`, `docs/WORKLOG.md`, `docs/CHANGELOG.md`
 - Impact/Risk: Low; UI positioning change only.
+### 2026-03-18 11:18 - Diagnose group highlight color collision
+- Added: Root-cause analysis confirming the current search highlight accents come from an eight-color fixed palette.
+- Changed: No runtime code changes; diagnosis only.
+- Fixed: N/A.
+- Affected files: `docs/WORKLOG.md`, `docs/CHANGELOG.md`
+- Impact/Risk: Low; informational only.
+### 2026-03-18 11:34 - Remove highlight color collisions across groups
+- Added: Hash-based HSL accent generation helpers so each group highlight color is derived from the full group name instead of a small shared palette.
+- Changed: Frontend asset bundle version bumped to `v=20260318-84`, and the UI contract test now checks for the new color-generation helpers.
+- Fixed: `All Links` search highlights no longer make different groups such as `Follow > 5` and `312` appear to share the same group color.
+- Affected files: `frontend/app.js`, `frontend/index.html`, `frontend/tests/ui_contract.test.mjs`, `docs/DECISIONS.md`, `docs/WORKLOG.md`, `docs/CHANGELOG.md`
+- Impact/Risk: Low; highlight colors will shift for existing groups, but each group now gets a more reliable distinct accent.

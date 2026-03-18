@@ -83,6 +83,10 @@ test("frontend uses backend move endpoint for group moves", () => {
 test("all-links search highlights rows and group cards by group accent", () => {
   assert.match(appJs, /function isSearchGroupAccentMode/);
   assert.match(appJs, /function getSearchMatchGroupCounts/);
+  assert.match(appJs, /function getGroupAccentHash/);
+  assert.match(appJs, /function hslToRgbString/);
+  assert.match(appJs, /const hue = hash % 360/);
+  assert.doesNotMatch(appJs, /GROUP_ACCENT_PALETTE/);
   assert.match(appJs, /group-item-search-match/);
   assert.match(appJs, /row-group-search-match/);
   assert.match(appJs, /renderGroups\(\{ force: true \}\)/);

@@ -1333,25 +1333,63 @@ function normalizeStoredGroupName(name) {
     return splitLegacyGroupName(name).name;
 }
 
-const GROUP_ACCENT_PALETTE = [
-    '39,214,107',
-    '239,68,68',
-    '56,189,248',
-    '250,204,21',
-    '168,85,247',
-    '249,115,22',
-    '20,184,166',
-    '244,114,182',
-];
+function clampAccentValue(value, min, max) {
+    return Math.min(Math.max(Number(value), min), max);
+}
 
-function getGroupAccentRgb(groupName) {
+function getGroupAccentHash(groupName) {
     const normalized = normalizeStoredGroupName(groupName);
-    if (!normalized) return '148,163,184';
+    if (!normalized) return null;
     let hash = 0;
     for (let index = 0; index < normalized.length; index += 1) {
         hash = ((hash * 31) + normalized.charCodeAt(index)) >>> 0;
     }
-    return GROUP_ACCENT_PALETTE[hash % GROUP_ACCENT_PALETTE.length];
+    return hash >>> 0;
+}
+
+function hslToRgbString(hue, saturation, lightness) {
+    const normalizedHue = ((Number(hue) % 360) + 360) % 360;
+    const s = clampAccentValue(saturation / 100, 0, 1);
+    const l = clampAccentValue(lightness / 100, 0, 1);
+    const chroma = (1 - Math.abs((2 * l) - 1)) * s;
+    const segment = normalizedHue / 60;
+    const x = chroma * (1 - Math.abs((segment % 2) - 1));
+    let red = 0;
+    let green = 0;
+    let blue = 0;
+
+    if (segment >= 0 && segment < 1) {
+        red = chroma;
+        green = x;
+    } else if (segment >= 1 && segment < 2) {
+        red = x;
+        green = chroma;
+    } else if (segment >= 2 && segment < 3) {
+        green = chroma;
+        blue = x;
+    } else if (segment >= 3 && segment < 4) {
+        green = x;
+        blue = chroma;
+    } else if (segment >= 4 && segment < 5) {
+        red = x;
+        blue = chroma;
+    } else {
+        red = chroma;
+        blue = x;
+    }
+
+    const match = l - (chroma / 2);
+    const toRgbChannel = (value) => Math.round((value + match) * 255);
+    return `${toRgbChannel(red)},${toRgbChannel(green)},${toRgbChannel(blue)}`;
+}
+
+function getGroupAccentRgb(groupName) {
+    const hash = getGroupAccentHash(groupName);
+    if (hash == null) return '148,163,184';
+    const hue = hash % 360;
+    const saturation = 74 + ((hash >>> 9) % 8);
+    const lightness = 52 + ((hash >>> 17) % 7);
+    return hslToRgbString(hue, saturation, lightness);
 }
 
 function buildGroupAccentStyle(groupName) {
