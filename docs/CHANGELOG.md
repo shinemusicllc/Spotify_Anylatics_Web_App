@@ -106,3 +106,9 @@
 - Fixed: The `Checked` dropdown no longer overflows outside the visible table area, and the trigger now sits immediately after the header text instead of leaving a wide gap.
 - Affected files: `frontend/style.css`, `frontend/app.js`, `frontend/index.html`, `docs/WORKLOG.md`, `docs/CHANGELOG.md`
 - Impact/Risk: Low; UI positioning change only.
+### 2026-03-18 10:58 - Remove group accent collisions in All Links search
+- Added: Hash-derived HSL accent generation for group search highlights, plus regression checks that assert the new group-accent helpers are present.
+- Changed: Frontend bundle version bumped to `v=20260318-83`.
+- Fixed: Different group names such as `Follow > 5` and `312` no longer collapse into the same search highlight color in `All Links`.
+- Affected files: `frontend/app.js`, `frontend/index.html`, `frontend/tests/ui_contract.test.mjs`, `docs/DECISIONS.md`, `docs/WORKLOG.md`, `docs/CHANGELOG.md`
+- Impact/Risk: Low; visual differentiation only, no API contract changes.
