@@ -7,6 +7,9 @@
 - Frontend syntax check: `node --check D:\Spotify_AnylaticsWeb_App\frontend\app.js`
 - Frontend contract tests: `node --test D:\Spotify_AnylaticsWeb_App\frontend\tests\ui_contract.test.mjs`
 - Docker build reference: `docker build -t spoticheck D:\Spotify_AnylaticsWeb_App`
+- VPS stack build/run: `cd D:\Spotify_AnylaticsWeb_App\deploy && docker compose -f docker-compose.vps.yml --env-file .env up -d --build`
+- VPS helper install: `sudo /opt/spoticheck/app/deploy/scripts/install_helpers.sh`
+- VPS helper usage: `spoticheck status|logs|backup|redeploy|update|migrate-from-url|set-admin`
 
 ## Coding Conventions
 
@@ -22,6 +25,7 @@
 - `backend/app/api/` coordinates HTTP contracts and export formatting.
 - `backend/app/services/` owns Spotify/network/data-fetch logic.
 - `backend/app/models/` and `backend/app/schemas/` define persistence and typed payload structures.
+- `deploy/` owns VPS/runtime orchestration only; it must not change API contracts or frontend behavior.
 - `final3.html` is design reference only; do not use it as a runtime source of truth.
 
 ## Debug Workflow
@@ -37,6 +41,7 @@
 - Copy/export titles match UI display titles for track and album items.
 - Spreadsheet rows keep the expected column layout for the deployed branch.
 - Local app still serves from FastAPI without adding a frontend build step.
+- VPS deploy config still routes `GET /api/health` through the public domain to the same FastAPI app.
 
 ## Refactor Safety
 

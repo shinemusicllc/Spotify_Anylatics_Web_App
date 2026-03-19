@@ -1,0 +1,10 @@
+[Unit]
+Description=SpotiCheck PostgreSQL backup
+After=docker.service network-online.target
+Requires=docker.service
+
+[Service]
+Type=oneshot
+User=deploy
+WorkingDirectory=/opt/spoticheck/app/deploy
+ExecStart=/opt/spoticheck/app/deploy/scripts/backup_postgres.sh

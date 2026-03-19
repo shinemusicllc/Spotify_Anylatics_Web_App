@@ -246,3 +246,56 @@
   - Bumped frontend assets to `v=20260318-84`, re-ran `node --check` and `node --test`, and confirmed the local app is serving the new bundle.
 - Notes:
   - The previously colliding groups `Follow > 5` and `312` now resolve to different RGB accents, so matching rows/cards no longer look like they belong to the same group during `All Links` search.
+
+## 2026-03-19
+
+### Task: Migrate deployment target from Railway to VPS
+
+- Status: done
+- Actions:
+  - Re-read project memory and existing root/subfolder rules, then extended the root `AGENTS.md` with VPS deployment commands/module boundaries and created `deploy/AGENTS.md` for the new deployment area.
+  - Added tracked VPS runtime files under `deploy/`: `.env.example`, `docker-compose.vps.yml`, `Caddyfile`, and `README.md`.
+  - Connected to the Ubuntu 24.04 VPS `82.197.71.6`, installed `docker.io` and `docker-compose-v2`, created a non-root `deploy` user with `sudo` + `docker` access, and cloned the GitHub repo to `/opt/spoticheck/app`.
+  - Uploaded the new deployment files, generated production secrets directly on the VPS in `/opt/spoticheck/app/deploy/.env`, and started the stack with `docker compose -f docker-compose.vps.yml --env-file .env up -d --build`.
+  - Verified the new containers `deploy-db-1`, `deploy-app-1`, and `deploy-caddy-1` are healthy, and confirmed the VPS answers on `http://82.197.71.6` with `Host: spotify.jazzrelaxation.com` before DNS cutover.
+  - Re-ran `backend` pytest and the frontend contract checks locally after the deployment config changes.
+- Notes:
+  - Public DNS for `spotify.jazzrelaxation.com` still points to Railway as of `2026-03-19`, so Caddy cannot complete Let's Encrypt issuance until the Cloudflare record is switched to the VPS.
+  - No Railway PostgreSQL credentials were available in the workspace, so this rollout provisions a fresh PostgreSQL volume on the VPS; production data migration remains pending until the source DB can be exported.
+
+### Task: Migrate Railway PostgreSQL data and automate VPS operations
+
+- Status: done
+- Actions:
+  - Confirmed the local workspace still did not contain real Railway PostgreSQL credentials, then used the Railway `Settings` + `Variables` values provided by the user to reconstruct the public source DB URL with `sslmode=require`.
+  - Added tracked helper scripts under `deploy/scripts/` for `backup_postgres`, `migrate_from_database_url`, `redeploy`, `update_app`, and the `spoticheck` wrapper, plus `deploy/systemd/` units for an automated backup timer.
+  - Installed the helper wrapper on the VPS as `/usr/local/bin/spoticheck`, created quick shell aliases for the `deploy` user, and enabled `spoticheck-backup.timer`.
+  - Ran manual PostgreSQL backups on the VPS, then migrated Railway data into the VPS PostgreSQL by dumping from Railway public TCP access and restoring into the local containerized DB.
+  - Adjusted the migration flow for PostgreSQL 17 -> 16 compatibility by using a PostgreSQL 17 dump client and stripping the unsupported `SET transaction_timeout = 0;` line before restore.
+  - Verified the post-migration row counts on the VPS: `users=3`, `items=230`, `crawl_jobs=430`, `metrics_snapshots=430`, `raw_responses=1017`, and confirmed `https://spotify.jazzrelaxation.com/api/health` still returns `ok`.
+- Notes:
+  - Root password SSH was intentionally left enabled per user request; easier access is provided through the additional `deploy` user, SFTP/WinSCP compatibility, aliases, and the `spoticheck` wrapper command.
+  - The automated backup timer is scheduled daily at `03:17` server time and writes compressed dumps to `/opt/spoticheck/backups/postgres`.
+
+### Task: Extend shared Caddy for the video app and recover from compose-name collision
+
+- Status: done
+- Actions:
+  - Updated `deploy/Caddyfile` so the existing Caddy instance can also reverse proxy `video.jazzrelaxation.com` to `host.docker.internal:8011`.
+  - Updated `deploy/docker-compose.vps.yml` to add `host.docker.internal:host-gateway` for the Caddy container.
+  - During the first video-app rollout, detected that the second repo reused Docker Compose's default project name `deploy`, which temporarily replaced the Spotify `app` service because both repos deploy from a `deploy/` directory.
+  - Restored the Spotify stack on the VPS and verified `deploy-app-1`, `deploy-caddy-1`, and `deploy-db-1` were healthy again.
+  - Recorded the rule that all additional VPS apps must use a unique compose project name, then redeployed the video app under its own `lushvideo` project.
+- Notes:
+  - Spotify public traffic was restored after the stack recovery and `https://spotify.jazzrelaxation.com/api/health` returned `200` again on `2026-03-19`.
+  - `video.jazzrelaxation.com` still points to Railway, so Caddy cannot complete certificate issuance for that hostname until Cloudflare DNS is switched to the VPS.
+
+### Task: Add admin credential rotation helper for VPS operations
+
+- Status: done
+- Actions:
+  - Confirmed the migrated runtime now stores auth in PostgreSQL `users` and no longer rotates admin login through env-only config.
+  - Added `deploy/scripts/set_admin_credentials.sh` to update `username`, internal email, and `password_hash` with the same bcrypt helper used by the app.
+  - Extended the `spoticheck` wrapper and deploy docs so the VPS can rotate admin credentials with one command.
+- Notes:
+  - Existing JWT sessions are not revoked by this helper; the change affects the next login attempt.

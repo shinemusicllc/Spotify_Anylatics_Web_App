@@ -1,0 +1,99 @@
+services:
+  db:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB}
+      POSTGRES_USER: ${POSTGRES_USER}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $$POSTGRES_USER -d $$POSTGRES_DB"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 10s
+
+  app:
+    build:
+      context: ..
+      dockerfile: Dockerfile
+    restart: unless-stopped
+    depends_on:
+      db:
+        condition: service_healthy
+    environment:
+      DATABASE_URL: postgresql://${POSTGRES_USER}:${POSTGRES_PASSWORD}@db:5432/${POSTGRES_DB}
+      FRONTEND_URL: https://${APP_DOMAIN}
+      DEBUG: "false"
+      AUTO_INIT_DB: "true"
+      SERVE_FRONTEND: "true"
+      FRONTEND_DIR: ../frontend
+      JWT_SECRET_KEY: ${JWT_SECRET_KEY}
+      SECRET_KEY: ${SECRET_KEY}
+      SPOTIFY_CLIENT_ID: ${SPOTIFY_CLIENT_ID}
+      SPOTIFY_CLIENT_SECRET: ${SPOTIFY_CLIENT_SECRET}
+      SPOTIFY_CLIENT_TOKEN: ${SPOTIFY_CLIENT_TOKEN}
+      SPOTIFY_HTTP_TIMEOUT_SECONDS: ${SPOTIFY_HTTP_TIMEOUT_SECONDS}
+      CRAWL_DELAY_SECONDS: ${CRAWL_DELAY_SECONDS}
+      MAX_RETRIES: ${MAX_RETRIES}
+      CRAWL_TASK_MAX_CONCURRENCY: ${CRAWL_TASK_MAX_CONCURRENCY}
+      RATE_LIMIT_PER_MINUTE: ${RATE_LIMIT_PER_MINUTE}
+      PLAYLIST_PAGE_SIZE: ${PLAYLIST_PAGE_SIZE}
+      PLAYLIST_MAX_TRACKS: ${PLAYLIST_MAX_TRACKS}
+      PLAYWRIGHT_ENABLE_FALLBACK: ${PLAYWRIGHT_ENABLE_FALLBACK}
+      PLAYWRIGHT_INLINE_FALLBACK: ${PLAYWRIGHT_INLINE_FALLBACK}
+      PLAYWRIGHT_FAST_FAIL_ERRORS: ${PLAYWRIGHT_FAST_FAIL_ERRORS}
+      PLAYWRIGHT_COMPARE_VISIBLE_PLAYCOUNT: ${PLAYWRIGHT_COMPARE_VISIBLE_PLAYCOUNT}
+      PLAYWRIGHT_TIMEOUT_MS: ${PLAYWRIGHT_TIMEOUT_MS}
+      PLAYWRIGHT_WAIT_MS: ${PLAYWRIGHT_WAIT_MS}
+      PLAYWRIGHT_MAX_CONCURRENCY: ${PLAYWRIGHT_MAX_CONCURRENCY}
+      PLAYWRIGHT_RETRIES: ${PLAYWRIGHT_RETRIES}
+      PLAYWRIGHT_HYDRATE_TIMEOUT_MS: ${PLAYWRIGHT_HYDRATE_TIMEOUT_MS}
+      PLAYWRIGHT_ALBUM_MAX_TRACKS: ${PLAYWRIGHT_ALBUM_MAX_TRACKS}
+      JWT_ALGORITHM: ${JWT_ALGORITHM}
+      JWT_EXPIRY_HOURS: ${JWT_EXPIRY_HOURS}
+    expose:
+      - "8000"
+    healthcheck:
+      test:
+        [
+          "CMD",
+          "python",
+          "-c",
+          "import sys, urllib.request; sys.exit(0 if urllib.request.urlopen('http://127.0.0.1:8000/api/health').getcode() == 200 else 1)",
+        ]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 40s
+
+  caddy:
+    image: caddy:2.10-alpine
+    restart: unless-stopped
+    depends_on:
+      app:
+        condition: service_healthy
+    ports:
+      - "80:80"
+      - "443:443"
+    environment:
+      APP_DOMAIN: ${APP_DOMAIN}
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data
+      - caddy_config:/config
+    networks:
+      default:
+      shared_proxy:
+
+volumes:
+  postgres_data:
+  caddy_data:
+  caddy_config:
+
+networks:
+  shared_proxy:
+    external: true
+    name: shared_proxy

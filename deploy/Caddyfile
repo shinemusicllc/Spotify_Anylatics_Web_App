@@ -1,0 +1,11 @@
+{$APP_DOMAIN} {
+    encode zstd gzip
+
+    reverse_proxy app:8000
+}
+
+video.jazzrelaxation.com {
+    encode zstd gzip
+
+    reverse_proxy lushvideo-app:8000
+}

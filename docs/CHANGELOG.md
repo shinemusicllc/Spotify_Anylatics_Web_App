@@ -1,5 +1,12 @@
 # Changelog
 
+### 2026-03-19 15:21 - Add Spotify admin credential helper
+- Added: `deploy/scripts/set_admin_credentials.sh` for rotating persisted admin username/password inside PostgreSQL.
+- Changed: `spoticheck` wrapper and deploy docs now expose the `set-admin` operation and explain the single-admin auto-detect behavior.
+- Fixed: clarified that admin login is no longer driven by env vars after the VPS migration; the helper now updates the live `users` row directly.
+- Affected files: `deploy/scripts/spoticheck.sh`, `deploy/scripts/set_admin_credentials.sh`, `deploy/README.md`, `docs/PROJECT_CONTEXT.md`, `docs/DECISIONS.md`, `docs/WORKLOG.md`, `docs/CHANGELOG.md`
+- Impact/Risk: Low; updates operational tooling only, and existing JWT sessions remain valid until they expire or the user logs out.
+
 ### 2026-03-16 11:20 - Sync to Shine baseline and restore multi-artist titles
 - Added: root `AGENTS.md`, `backend/AGENTS.md`, `frontend/AGENTS.md`, `backend/tests/test_multi_artist_titles.py`, `frontend/tests/ui_contract.test.mjs`.
 - Changed: local workspace moved to `shinemusic/main` baseline commit `de59c2a`; track/album title formatting now uses the full artist list in UI and export helpers.
@@ -118,3 +125,27 @@
 - Fixed: `All Links` search highlights no longer make different groups such as `Follow > 5` and `312` appear to share the same group color.
 - Affected files: `frontend/app.js`, `frontend/index.html`, `frontend/tests/ui_contract.test.mjs`, `docs/DECISIONS.md`, `docs/WORKLOG.md`, `docs/CHANGELOG.md`
 - Impact/Risk: Low; highlight colors will shift for existing groups, but each group now gets a more reliable distinct accent.
+### 2026-03-19 11:17 - Migrate deployment target from Railway to VPS
+- Added: A tracked `deploy/` stack with `docker-compose.vps.yml`, `Caddyfile`, `.env.example`, `README.md`, and `deploy/AGENTS.md` for repeatable VPS deployment.
+- Changed: Root `AGENTS.md` now includes the VPS build/run command and deploy module boundary; the VPS itself was provisioned with Docker/Compose, a `deploy` operator user, and the repo cloned to `/opt/spoticheck/app`.
+- Fixed: The project no longer depends on Railway runtime setup for app hosting; the new VPS stack already serves the app and healthcheck on `82.197.71.6` pending DNS cutover.
+- Affected files: `AGENTS.md`, `deploy/AGENTS.md`, `deploy/.env.example`, `deploy/Caddyfile`, `deploy/docker-compose.vps.yml`, `deploy/README.md`, `docs/DECISIONS.md`, `docs/WORKLOG.md`, `docs/CHANGELOG.md`
+- Impact/Risk: Medium; public cutover is still blocked on updating the Cloudflare DNS record to the VPS, and existing Railway PostgreSQL data has not been migrated because source DB credentials were not available.
+### 2026-03-19 11:57 - Migrate Railway data and add automated VPS ops
+- Added: `deploy/scripts/backup_postgres.sh`, `deploy/scripts/migrate_from_database_url.sh`, `deploy/scripts/redeploy.sh`, `deploy/scripts/update_app.sh`, `deploy/scripts/spoticheck.sh`, `deploy/scripts/install_helpers.sh`, and `deploy/systemd/spoticheck-backup.{service,timer}`.
+- Changed: `docs/PROJECT_CONTEXT.md` now reflects VPS deployment as the current runtime, and the VPS now exposes a one-command `spoticheck` wrapper plus daily PostgreSQL backups to `/opt/spoticheck/backups/postgres`.
+- Fixed: Railway PostgreSQL data was migrated into the VPS database, and the migration flow now handles PostgreSQL 17 source dumps restoring into the PostgreSQL 16 target stack.
+- Affected files: `AGENTS.md`, `deploy/AGENTS.md`, `deploy/README.md`, `deploy/scripts/backup_postgres.sh`, `deploy/scripts/migrate_from_database_url.sh`, `deploy/scripts/redeploy.sh`, `deploy/scripts/update_app.sh`, `deploy/scripts/spoticheck.sh`, `deploy/scripts/install_helpers.sh`, `deploy/systemd/spoticheck-backup.service`, `deploy/systemd/spoticheck-backup.timer`, `docs/PROJECT_CONTEXT.md`, `docs/DECISIONS.md`, `docs/WORKLOG.md`, `docs/CHANGELOG.md`
+- Impact/Risk: Medium; automated backups now exist and data is present on the VPS, but future `spoticheck update` runs still depend on the upstream Git repo state and should be watched if remote changes touch locally modified tracked files.
+### 2026-03-19 14:08 - Add shared reverse-proxy route for video app and recover stack isolation
+- Added: A second site block in `deploy/Caddyfile` for `video.jazzrelaxation.com`.
+- Changed: `deploy/docker-compose.vps.yml` now gives the Caddy container `host.docker.internal:host-gateway` access so it can proxy to other internal app ports on the same VPS, and project memory now records the requirement for unique Docker Compose project names across repos.
+- Fixed: Restored the Spotify stack after a temporary service collision caused by two repos deploying from directories named `deploy`; public health for `https://spotify.jazzrelaxation.com/api/health` returned to `200`.
+- Affected files: `deploy/Caddyfile`, `deploy/docker-compose.vps.yml`, `docs/PROJECT_CONTEXT.md`, `docs/DECISIONS.md`, `docs/WORKLOG.md`, `docs/CHANGELOG.md`
+- Impact/Risk: Medium; Spotify is healthy again, but any future multi-app VPS rollout must keep unique compose project names and `video.jazzrelaxation.com` still needs Cloudflare DNS cutover before the shared Caddy can issue its certificate.
+### 2026-03-19 15:20 - Add SpotiCheck admin credential helper
+- Added: `deploy/scripts/set_admin_credentials.sh` for rotating persisted admin username/password inside PostgreSQL.
+- Changed: `spoticheck` wrapper and deploy docs now expose the `set-admin` operation.
+- Fixed: clarified that changing `.env` alone does not update migrated user credentials.
+- Affected files: `deploy/scripts/set_admin_credentials.sh`, `deploy/scripts/spoticheck.sh`, `deploy/README.md`, `AGENTS.md`, `docs/PROJECT_CONTEXT.md`, `docs/DECISIONS.md`, `docs/WORKLOG.md`.
+- Impact/Risk: low; updates runtime operations only, and existing JWT sessions remain valid until expiry.
