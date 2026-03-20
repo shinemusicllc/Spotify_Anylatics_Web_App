@@ -10,6 +10,8 @@
 - VPS stack build/run: `cd D:\Spotify_AnylaticsWeb_App\deploy && docker compose -f docker-compose.vps.yml --env-file .env up -d --build`
 - VPS helper install: `sudo /opt/spoticheck/app/deploy/scripts/install_helpers.sh`
 - VPS helper usage: `spoticheck status|logs|backup|redeploy|update|migrate-from-url|set-admin`
+- Mail stack build/run: `cd D:\Spotify_AnylaticsWeb_App\deploy\mail && docker compose --env-file .env up -d`
+- Mail helper usage: `mailops status|logs|up|restart|dns-records|add-account|update-account|delete-account|add-alias|delete-alias|list-accounts|list-aliases|dkim-generate|dkim-show|use-caddy-cert`
 
 ## Coding Conventions
 
@@ -26,6 +28,7 @@
 - `backend/app/services/` owns Spotify/network/data-fetch logic.
 - `backend/app/models/` and `backend/app/schemas/` define persistence and typed payload structures.
 - `deploy/` owns VPS/runtime orchestration only; it must not change API contracts or frontend behavior.
+- `deploy/mail/` owns the self-hosted mail stack only; it must not reuse `80/443` directly because the shared Caddy stack already owns those ports.
 - `final3.html` is design reference only; do not use it as a runtime source of truth.
 
 ## Debug Workflow
@@ -42,6 +45,7 @@
 - Spreadsheet rows keep the expected column layout for the deployed branch.
 - Local app still serves from FastAPI without adding a frontend build step.
 - VPS deploy config still routes `GET /api/health` through the public domain to the same FastAPI app.
+- Mail DNS and TLS changes must preserve the existing web routes while keeping mail records `DNS only` in Cloudflare.
 
 ## Refactor Safety
 

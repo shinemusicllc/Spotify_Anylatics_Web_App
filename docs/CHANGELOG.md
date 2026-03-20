@@ -1,5 +1,12 @@
 # Changelog
 
+### 2026-03-20 10:55 - Bootstrap shared-VPS mail stack
+- Added: `deploy/mail/` with `docker-compose.yml`, `.env.example`, `README.md`, `AGENTS.md`, and helper scripts for `mailops`, self-signed bootstrap TLS, and switching to Caddy-issued certificates.
+- Changed: root `AGENTS.md`, `docs/PROJECT_CONTEXT.md`, `docs/DECISIONS.md`, and `docs/WORKLOG.md` now document the new mail stack and the requirement to keep mail DNS records `DNS only`.
+- Fixed: prepared a mail deployment path that coexists with the current Caddy-owned `80/443` stack instead of conflicting with the existing web apps.
+- Affected files: `AGENTS.md`, `deploy/Caddyfile`, `deploy/mail/**`, `docs/PROJECT_CONTEXT.md`, `docs/DECISIONS.md`, `docs/WORKLOG.md`, `docs/CHANGELOG.md`
+- Impact/Risk: Medium; the mail stack is ready to deploy on the VPS, but full mail cutover still depends on `A mail`, `MX`, and `PTR/rDNS` changes outside the repo.
+
 ### 2026-03-19 15:21 - Add Spotify admin credential helper
 - Added: `deploy/scripts/set_admin_credentials.sh` for rotating persisted admin username/password inside PostgreSQL.
 - Changed: `spoticheck` wrapper and deploy docs now expose the `set-admin` operation and explain the single-admin auto-detect behavior.
@@ -149,3 +156,33 @@
 - Fixed: clarified that changing `.env` alone does not update migrated user credentials.
 - Affected files: `deploy/scripts/set_admin_credentials.sh`, `deploy/scripts/spoticheck.sh`, `deploy/README.md`, `AGENTS.md`, `docs/PROJECT_CONTEXT.md`, `docs/DECISIONS.md`, `docs/WORKLOG.md`.
 - Impact/Risk: low; updates runtime operations only, and existing JWT sessions remain valid until expiry.
+### 2026-03-20 14:35 - Add live DNS cutover helper for mail stack
+- Added: `mailops dns-records` to print the exact `A/MX/SPF/DKIM/DMARC/PTR` values needed for Cloudflare and the VPS provider.
+- Changed: Mail docs and project memory now record the bootstrapped mailboxes plus the current live blocker state (`A mail` + `PTR/rDNS`).
+- Fixed: Manual copy/paste of the DKIM TXT payload is no longer required from the raw opendkim file path.
+- Affected files: `AGENTS.md`, `deploy/mail/AGENTS.md`, `deploy/mail/.env.example`, `deploy/mail/README.md`, `deploy/mail/scripts/mailops.sh`, `docs/PROJECT_CONTEXT.md`, `docs/WORKLOG.md`, `docs/CHANGELOG.md`
+- Impact/Risk: Low; helper output reduces operator error, but mail cutover still cannot finish until public DNS and reverse DNS are updated.
+### 2026-03-20 15:15 - Retarget mail stack to congmail.top
+- Added: documentation and runtime guidance for `congmail.top` as the active self-hosted mail domain.
+- Changed: mail stack config, Caddy hostname, cert paths, and project memory now target `mail.congmail.top` instead of `mail.jazzrelaxation.com`.
+- Fixed: removed the mismatch between the user's chosen mail domain and the repo/runtime instructions that still referenced the old domain.
+- Affected files: `deploy/Caddyfile`, `deploy/mail/.env.example`, `deploy/mail/README.md`, `deploy/mail/AGENTS.md`, `docs/PROJECT_CONTEXT.md`, `docs/DECISIONS.md`, `docs/WORKLOG.md`, `docs/CHANGELOG.md`
+- Impact/Risk: Medium; the new domain still will not serve mail from this VPS until public `A mail.congmail.top` is changed from `206.189.91.58` to `82.197.71.6`.
+### 2026-03-20 15:35 - Switch live VPS mail runtime to congmail.top
+- Added: bootstrap `@congmail.top` mailboxes/aliases plus a fresh DKIM key for `congmail.top` on the live VPS.
+- Changed: the VPS hostname and live mail `.env` now target `mail.congmail.top`, and Caddy has been force-recreated to manage TLS for that hostname.
+- Fixed: the live mail runtime no longer points at the old `jazzrelaxation.com` domain internally.
+- Affected files: `deploy/Caddyfile`, `deploy/mail/.env.example`, `deploy/mail/README.md`, `deploy/mail/scripts/mailops.sh`, `docs/WORKLOG.md`, `docs/CHANGELOG.md`
+- Impact/Risk: Medium; SMTP/IMAP on the VPS is ready, but Let's Encrypt still fails until public DNS for `mail.congmail.top` stops resolving to `206.189.91.58`.
+### 2026-03-20 16:00 - Finalize congmail.top mail TLS with Caddy fullchain import
+- Added: `docker-data/dms/custom-certs` mount path plus helper logic to copy Caddy-issued fullchain/key into the documented `docker-mailserver` manual-cert location.
+- Changed: `mailops use-caddy-cert` now forces `MAIL_SSL_TYPE=manual`, rewrites the internal cert paths to `/tmp/dms/custom-certs/*`, and recreates the mail container with the copied cert material.
+- Fixed: `mail.congmail.top` now serves a valid Let's Encrypt certificate not only on HTTPS, but also on SMTPS `465` and SMTP `STARTTLS` `587`.
+- Affected files: `deploy/mail/docker-compose.yml`, `deploy/mail/.env.example`, `deploy/mail/README.md`, `deploy/mail/scripts/use_caddy_cert.sh`, `docs/PROJECT_CONTEXT.md`, `docs/DECISIONS.md`, `docs/WORKLOG.md`, `docs/CHANGELOG.md`
+- Impact/Risk: Low; live mail TLS is now valid externally, and future helper runs follow the documented DMS custom-certs flow instead of relying on the shared Caddy volume path inside the container.
+### 2026-03-20 16:10 - Remove legacy jazzrelaxation mailboxes and add client setup note
+- Added: `deploy/mail/CLIENT_SETUP.md` plus `mailops delete-account` / `mailops delete-alias` helper commands for routine cleanup.
+- Changed: root mail helper documentation now covers the full create/update/delete account lifecycle.
+- Fixed: removed the stale `@jazzrelaxation.com` mailbox and alias bootstrap state from the live VPS, leaving only `@congmail.top` accounts.
+- Affected files: `AGENTS.md`, `deploy/mail/README.md`, `deploy/mail/CLIENT_SETUP.md`, `deploy/mail/scripts/mailops.sh`, `docs/PROJECT_CONTEXT.md`, `docs/WORKLOG.md`, `docs/CHANGELOG.md`
+- Impact/Risk: Low; runtime state is cleaner and the operator now has one-line helper commands for future mailbox cleanup.

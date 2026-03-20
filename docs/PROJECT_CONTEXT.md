@@ -34,6 +34,17 @@ Web app crawl du lieu tu Spotify (internal API) de theo doi metrics: `monthly_li
 - Tai runtime hien tai, user/password dang duoc luu trong PostgreSQL `users`, khong con xoay qua env.
 - Wrapper `spoticheck set-admin` duoc dung de doi `admin username/password` truc tiep trong DB bang chinh hash flow cua app.
 
+## Mail Stack Tren VPS
+
+- VPS nay dang duoc chuan bi them stack mail tu host phu `mail.congmail.top`.
+- Stack mail chon `docker-mailserver` de tranh tranh chap `80/443` voi Caddy hien co.
+- Caddy se giu site `mail.congmail.top` de cap va renew cert Let's Encrypt; mail stack se dung cert do sau khi DNS `mail` da tro dung.
+- Helper `mailops use-caddy-cert` copy fullchain cua Caddy vao `docker-data/dms/custom-certs/` de `docker-mailserver` nap cert on dinh cho SMTP/IMAP.
+- Truoc khi cutover MX, can doi `PTR/rDNS` cua `82.197.71.6` sang `mail.congmail.top`.
+- Mailbox runtime hien tai chi con `contact@congmail.top`, `postmaster@congmail.top`, alias `admin@congmail.top`, va alias `dmarc@congmail.top`.
+- Helper `mailops dns-records` duoc dung de in bo DNS cutover live, tranh chep tay DKIM/SPF/DMARC.
+- Helper `mailops delete-account` va `mailops delete-alias` duoc dung de don bootstrap cu ma khong can goi truc tiep `setup` trong container.
+
 ## Data Types
 
 | Type     | Key Metrics                                 |

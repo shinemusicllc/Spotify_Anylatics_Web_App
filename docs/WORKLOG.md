@@ -299,3 +299,61 @@
   - Extended the `spoticheck` wrapper and deploy docs so the VPS can rotate admin credentials with one command.
 - Notes:
   - Existing JWT sessions are not revoked by this helper; the change affects the next login attempt.
+
+## 2026-03-20
+
+### Task: Bootstrap self-hosted mail stack on the shared VPS
+
+- Status: in_progress
+- Actions:
+  - Verified the VPS has enough headroom (`11 GiB RAM`, `88 GiB free disk`) and confirmed outbound + inbound port `25` are usable when a listener is present.
+  - Confirmed the current blocker for deliverability is `PTR/rDNS`: the IP still resolves to `vmi3164434.contaboserver.net`, not `mail.jazzrelaxation.com`.
+  - Added tracked mail infrastructure under `deploy/mail/` with `docker-mailserver`, helper commands, self-signed bootstrap TLS generation, and a switch path to reuse Caddy-issued certificates later.
+  - Extended the shared `deploy/Caddyfile` with a dedicated `mail.jazzrelaxation.com` site block so Caddy can provision a certificate for the future mail host without taking over SMTP/IMAP ports.
+- Notes:
+  - Public DNS still has no `A mail.jazzrelaxation.com`, so Caddy cannot request the real certificate yet.
+  - The helper `mailops dns-records` now prints the exact `A/MX/SPF/DKIM/DMARC/PTR` values needed for Cloudflare and the VPS provider.
+
+### Task: Verify live mail stack status and prepare DNS cutover helper
+
+- Status: done
+- Actions:
+  - Re-checked the live VPS and confirmed `mail.jazzrelaxation.com` is already the system hostname, the shared Caddy stack is healthy, and the mail container is listening on `25/143/465/587/993`.
+  - Confirmed the Caddy certificate volume still only contains `spotify.jazzrelaxation.com` and `video.jazzrelaxation.com`, which matches the missing public `A mail` DNS record.
+  - Added `mailops dns-records`, updated mail stack docs/rules, and recorded the existing mailbox bootstrap state for future cutover steps.
+- Notes:
+  - MX is still pointing to Google as of `2026-03-20`; mail cutover must wait until `mail.jazzrelaxation.com` exists in DNS and `PTR/rDNS` is updated at the VPS provider.
+
+### Task: Retarget mail stack from jazzrelaxation.com to congmail.top
+
+- Status: in_progress
+- Actions:
+  - Confirmed the new public mail target should be `mail.congmail.top`, while `PTR/rDNS` for `82.197.71.6` has already been changed to that hostname at the provider.
+  - Re-checked public DNS and found `mail.congmail.top` still resolves to `206.189.91.58` via public resolvers even though local resolver output briefly showed the VPS IP, so live cutover on Cloudflare is not complete yet.
+  - Updated tracked mail config and docs from `mail.jazzrelaxation.com` / `jazzrelaxation.com` to `mail.congmail.top` / `congmail.top`.
+  - Switched the live VPS hostname to `mail.congmail.top`, updated `/opt/spoticheck/app/deploy/mail/.env`, regenerated self-signed bootstrap TLS, generated DKIM for `congmail.top`, and created bootstrap mailboxes/aliases for `contact@congmail.top`, `postmaster@congmail.top`, `admin@congmail.top`, and `dmarc@congmail.top`.
+  - Force-recreated the shared Caddy container and confirmed it now includes `mail.congmail.top` in automatic TLS management, but Let's Encrypt validation still fails because public DNS still points `mail.congmail.top` to `206.189.91.58`.
+- Notes:
+  - Runtime switching on the VPS must follow the new domain and should not request a certificate until `mail.congmail.top` publicly resolves to `82.197.71.6`.
+
+### Task: Finalize live TLS for congmail.top mail stack
+
+- Status: done
+- Actions:
+  - Confirmed public DNS for `mail.congmail.top`, `MX`, `SPF`, `DMARC`, and `mail._domainkey` now resolve as expected on public resolvers.
+  - Force-recreated Caddy after DNS propagation and verified it issued a Let's Encrypt certificate for `mail.congmail.top`.
+  - Found that the first `mailops use-caddy-cert` flow still left SMTP/IMAP on self-signed certs because `docker-mailserver` was not reliably consuming the shared Caddy volume path directly.
+  - Changed the mail stack to mount `docker-data/dms/custom-certs/`, updated the helper to copy Caddy fullchain/key into that directory, and re-ran the TLS switch on the VPS.
+  - Verified externally that `https://mail.congmail.top`, SMTPS `465`, and SMTP `STARTTLS` on `587` now all present the Let's Encrypt certificate for `mail.congmail.top`.
+- Notes:
+  - `postfix` still shows a generic snakeoil default in `postconf`, but external TLS validation on the live ports confirms the served certificate is now the Caddy-issued Let's Encrypt chain.
+
+### Task: Clean legacy mail bootstrap state and document client setup
+
+- Status: done
+- Actions:
+  - Added `mailops delete-account` and `mailops delete-alias` so the operator can remove stale mailboxes and aliases without invoking `docker-mailserver setup` directly.
+  - Added a short `deploy/mail/CLIENT_SETUP.md` note with the exact IMAP/SMTP settings for `congmail.top`.
+  - Uploaded the new helper/doc files to the VPS and removed the old `@jazzrelaxation.com` aliases and mailboxes, leaving only the `@congmail.top` runtime accounts.
+- Notes:
+  - `mailops delete-account` now uses `setup email del -y` to avoid interactive prompts during cleanup.

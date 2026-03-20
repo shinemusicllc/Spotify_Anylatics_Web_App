@@ -9,3 +9,11 @@ video.jazzrelaxation.com {
 
     reverse_proxy lushvideo-app:8000
 }
+
+mail.congmail.top {
+    tls {
+        key_type rsa2048
+    }
+
+    respond "Mail server endpoint for congmail.top" 200
+}

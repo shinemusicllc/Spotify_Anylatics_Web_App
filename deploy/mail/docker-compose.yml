@@ -1,0 +1,35 @@
+name: mailstack
+
+services:
+  mailserver:
+    image: ghcr.io/docker-mailserver/docker-mailserver:latest
+    restart: unless-stopped
+    hostname: ${MAIL_HOSTNAME}
+    env_file:
+      - .env
+    environment:
+      OVERRIDE_HOSTNAME: ${MAIL_HOSTNAME}
+      POSTMASTER_ADDRESS: ${POSTMASTER_ADDRESS}
+      SSL_TYPE: ${MAIL_SSL_TYPE}
+      SSL_CERT_PATH: ${MAIL_CERT_PATH}
+      SSL_KEY_PATH: ${MAIL_KEY_PATH}
+      TZ: ${TZ}
+    ports:
+      - "25:25"
+      - "143:143"
+      - "465:465"
+      - "587:587"
+      - "993:993"
+    stop_grace_period: 1m
+    volumes:
+      - ./docker-data/dms/mail-data:/var/mail
+      - ./docker-data/dms/mail-state:/var/mail-state
+      - ./docker-data/dms/mail-logs:/var/log/mail
+      - ./docker-data/dms/config:/tmp/docker-mailserver
+      - ./docker-data/dms/custom-certs:/tmp/dms/custom-certs:ro
+      - deploy_caddy_data:/srv/caddy:ro
+      - /etc/localtime:/etc/localtime:ro
+
+volumes:
+  deploy_caddy_data:
+    external: true
