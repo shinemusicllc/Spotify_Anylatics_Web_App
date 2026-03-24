@@ -94,6 +94,16 @@ test("all-links search highlights rows and group cards by group accent", () => {
   assert.match(styleCss, /\.row-group-search-match/);
 });
 
+test("search matches spotify links and URIs", () => {
+  assert.match(appJs, /function getItemSpotifyUrl\(item\)/);
+  assert.match(appJs, /function getSpotifyUri\(type, id\)/);
+  assert.match(appJs, /function getItemSearchHaystacks\(item\)/);
+  assert.match(appJs, /function doesItemMatchSearchQuery\(item, rawQuery\)/);
+  assert.match(appJs, /const parsedQuery = parseSpotifyUrl\(rawQuery\)/);
+  assert.match(appJs, /itemSpotifyId === String\(parsedQuery\.id \|\| ''\)\.toLowerCase\(\)/);
+  assert.match(appJs, /items = items\.filter\(\(i\) => doesItemMatchSearchQuery\(i, state\.searchQuery\)\)/);
+});
+
 test("checked column exposes filter controls for error cleanup", () => {
   assert.match(appJs, /const CHECKED_SORT_MODES = Object\.freeze/);
   assert.match(appJs, /function ensureCheckedSortControls/);

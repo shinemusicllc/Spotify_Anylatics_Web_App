@@ -192,3 +192,9 @@
 - Fixed: the repo can be synchronized with the live VPS without treating mail data as code, which keeps future VPS edits and Git operations cleaner.
 - Affected files: `.gitignore`, `deploy/Caddyfile`, `docs/DECISIONS.md`, `docs/WORKLOG.md`, `docs/CHANGELOG.md`
 - Impact/Risk: Low; this aligns GitHub with the live shared reverse proxy while avoiding accidental versioning of mail runtime state.
+### 2026-03-24 15:10 - Add Spotify link-aware search in Link Checker
+- Added: `docs/UI_SYSTEM.md` was recreated to document the current dashboard visual system after the reset.
+- Changed: frontend search now matches Spotify URLs, Spotify URIs, display titles, subtitles, and parsed `type + spotify_id` values instead of only plain text fields.
+- Fixed: pasting a link like `https://open.spotify.com/playlist/...` into the top search box now returns the tracked row as expected.
+- Affected files: `docs/UI_SYSTEM.md`, `frontend/app.js`, `frontend/index.html`, `frontend/tests/ui_contract.test.mjs`, `docs/WORKLOG.md`, `docs/CHANGELOG.md`
+- Impact/Risk: Low; this is a frontend-only search behavior change and keeps the existing layout/UI intact.

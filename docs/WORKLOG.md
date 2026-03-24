@@ -369,3 +369,13 @@
   - Updated the repo to track the live `lush.congmail.top` Caddy route and added `deploy/mail/docker-data/` to `.gitignore` so mail runtime state no longer pollutes git status during VPS-side edits.
 - Notes:
   - The remaining VPS-only data to preserve during sync is runtime state such as `deploy/.env`, `deploy/mail/.env`, and `deploy/mail/docker-data/`; these should not be pushed to GitHub.
+
+### Task: Add Spotify link-aware search matching in Link Checker
+
+- Status: done
+- Actions:
+  - Recreated `docs/UI_SYSTEM.md` from the current deployed UI so the dashboard's palette, spacing, typography, and layout conventions are documented again after the reset.
+  - Extended frontend search matching in `frontend/app.js` to search against canonical Spotify URLs, Spotify URIs, display titles, subtitles, and exact parsed `type + spotify_id` from pasted Spotify links.
+  - Bumped the frontend asset query string in `frontend/index.html` and added contract coverage for link/URI-aware search in `frontend/tests/ui_contract.test.mjs`.
+- Notes:
+  - Search now matches pasted links such as `https://open.spotify.com/playlist/...` even when the shared URL includes extra query params like `?si=...`.

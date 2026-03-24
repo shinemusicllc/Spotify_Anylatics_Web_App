@@ -610,6 +610,60 @@ function getSpotifyUrl(type, id) {
     return `https://open.spotify.com/${type}/${id}`;
 }
 
+function getSpotifyUri(type, id) {
+    const normalizedType = String(type || '').trim();
+    const normalizedId = String(id || '').trim();
+    if (!normalizedType || !normalizedId) return '';
+    return `spotify:${normalizedType}:${normalizedId}`;
+}
+
+function getItemSpotifyUrl(item) {
+    if (!item) return '';
+    const directUrl = String(item.spotify_url || '').trim();
+    if (directUrl) return directUrl;
+    return getSpotifyUrl(item.type, item.spotify_id);
+}
+
+function getItemSearchHaystacks(item) {
+    if (!item) return [];
+    const spotifyUrl = getItemSpotifyUrl(item);
+    const spotifyUri = getSpotifyUri(item.type, item.spotify_id);
+    const haystacks = [
+        item.name,
+        getDisplayTitle(item),
+        getItemSubtitle(item),
+        item.owner_name,
+        item.playlist_owner,
+        item.playlist_owner_name,
+        item.spotify_id,
+        item.type,
+        spotifyUrl,
+        spotifyUri,
+    ];
+    return haystacks
+        .map((value) => String(value || '').trim().toLowerCase())
+        .filter(Boolean);
+}
+
+function doesItemMatchSearchQuery(item, rawQuery) {
+    const query = String(rawQuery || '').trim().toLowerCase();
+    if (!query) return true;
+
+    const parsedQuery = parseSpotifyUrl(rawQuery);
+    if (parsedQuery) {
+        const itemType = String(item?.type || '').trim().toLowerCase();
+        const itemSpotifyId = String(item?.spotify_id || '').trim().toLowerCase();
+        if (
+            itemType === String(parsedQuery.type || '').toLowerCase() &&
+            itemSpotifyId === String(parsedQuery.id || '').toLowerCase()
+        ) {
+            return true;
+        }
+    }
+
+    return getItemSearchHaystacks(item).some((value) => value.includes(query));
+}
+
 /** Debounce function */
 function debounce(fn, ms) {
     let t;
@@ -1939,13 +1993,7 @@ function getVisibleItems() {
     }
 
     if (state.searchQuery) {
-        const q = state.searchQuery.toLowerCase();
-        items = items.filter((i) =>
-            (i.name || '').toLowerCase().includes(q) ||
-            (i.owner_name || '').toLowerCase().includes(q) ||
-            (i.spotify_id || '').toLowerCase().includes(q) ||
-            (i.type || '').toLowerCase().includes(q)
-        );
+        items = items.filter((i) => doesItemMatchSearchQuery(i, state.searchQuery));
     }
 
     if (state.metricSortColumn && METRIC_SORT_CONFIG[state.metricSortColumn]) {
