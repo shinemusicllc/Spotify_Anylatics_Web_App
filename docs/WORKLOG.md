@@ -379,3 +379,14 @@
   - Bumped the frontend asset query string in `frontend/index.html` and added contract coverage for link/URI-aware search in `frontend/tests/ui_contract.test.mjs`.
 - Notes:
   - Search now matches pasted links such as `https://open.spotify.com/playlist/...` even when the shared URL includes extra query params like `?si=...`.
+
+### Task: Deploy Spotify link-aware search update to VPS
+
+- Status: done
+- Actions:
+  - Verified the local change set with `node --check frontend\\app.js`, `node --test frontend\\tests\\ui_contract.test.mjs`, and `cd backend && .\\venv\\Scripts\\python.exe -m pytest -q`.
+  - Committed the search update as `8effc04 fix: support Spotify link search` and pushed it to `origin/main`.
+  - Updated `/opt/spoticheck/app` on the VPS to commit `8effc04` and rebuilt the Docker Compose stack with `bash deploy/scripts/redeploy.sh`.
+  - Confirmed the live stack status via `docker compose ... ps` and verified `https://spotify.jazzrelaxation.com/api/health` returned `status=ok` after the rollout.
+- Notes:
+  - `deploy/scripts/update_app.sh` and `deploy/scripts/redeploy.sh` are still missing execute bits on the VPS, so this rollout invoked both scripts through `bash` directly.

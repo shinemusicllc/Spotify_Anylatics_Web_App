@@ -198,3 +198,9 @@
 - Fixed: pasting a link like `https://open.spotify.com/playlist/...` into the top search box now returns the tracked row as expected.
 - Affected files: `docs/UI_SYSTEM.md`, `frontend/app.js`, `frontend/index.html`, `frontend/tests/ui_contract.test.mjs`, `docs/WORKLOG.md`, `docs/CHANGELOG.md`
 - Impact/Risk: Low; this is a frontend-only search behavior change and keeps the existing layout/UI intact.
+### 2026-03-24 16:30 - Deploy Spotify link-aware search update to VPS
+- Added: no new runtime features beyond the already-tracked search update; this entry records the production rollout.
+- Changed: VPS repo `/opt/spoticheck/app` and the running Docker stack were updated to commit `8effc04`.
+- Fixed: live app on `spotify.jazzrelaxation.com` now includes the Spotify link-aware search behavior from the local patch.
+- Affected files: `docs/WORKLOG.md`, `docs/CHANGELOG.md`
+- Impact/Risk: Low; rollout completed cleanly and `https://spotify.jazzrelaxation.com/api/health` returned `ok` after rebuild.
