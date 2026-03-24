@@ -17,3 +17,9 @@ mail.congmail.top {
 
     respond "Mail server endpoint for congmail.top" 200
 }
+
+lush.congmail.top {
+    encode zstd gzip
+
+    reverse_proxy lushtempmail-app:8010
+}

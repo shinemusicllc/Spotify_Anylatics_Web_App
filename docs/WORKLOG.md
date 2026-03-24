@@ -357,3 +357,15 @@
   - Uploaded the new helper/doc files to the VPS and removed the old `@jazzrelaxation.com` aliases and mailboxes, leaving only the `@congmail.top` runtime accounts.
 - Notes:
   - `mailops delete-account` now uses `setup email del -y` to avoid interactive prompts during cleanup.
+
+## 2026-03-24
+
+### Task: Sync shared VPS repo state back into GitHub and clean VPS git status
+
+- Status: in_progress
+- Actions:
+  - Compared `origin/main` with `/opt/spoticheck/app` on the VPS and confirmed the live repo was still on `c6e8913`, behind GitHub, with only `AGENTS.md` and `deploy/Caddyfile` differing from the tracked code plus runtime mail data showing as untracked.
+  - Verified the extra live-only code delta was the `lush.congmail.top` reverse-proxy block in `deploy/Caddyfile`, while the rest of `deploy/` already matched the tracked files on GitHub.
+  - Updated the repo to track the live `lush.congmail.top` Caddy route and added `deploy/mail/docker-data/` to `.gitignore` so mail runtime state no longer pollutes git status during VPS-side edits.
+- Notes:
+  - The remaining VPS-only data to preserve during sync is runtime state such as `deploy/.env`, `deploy/mail/.env`, and `deploy/mail/docker-data/`; these should not be pushed to GitHub.

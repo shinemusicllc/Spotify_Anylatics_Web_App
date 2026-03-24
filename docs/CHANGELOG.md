@@ -186,3 +186,9 @@
 - Fixed: removed the stale `@jazzrelaxation.com` mailbox and alias bootstrap state from the live VPS, leaving only `@congmail.top` accounts.
 - Affected files: `AGENTS.md`, `deploy/mail/README.md`, `deploy/mail/CLIENT_SETUP.md`, `deploy/mail/scripts/mailops.sh`, `docs/PROJECT_CONTEXT.md`, `docs/WORKLOG.md`, `docs/CHANGELOG.md`
 - Impact/Risk: Low; runtime state is cleaner and the operator now has one-line helper commands for future mailbox cleanup.
+### 2026-03-24 15:10 - Sync shared VPS Caddy route into GitHub and ignore mail runtime state
+- Added: `.gitignore` now excludes `deploy/mail/docker-data/` so VPS-side mail runtime files no longer appear as repo changes.
+- Changed: `deploy/Caddyfile` now tracks the live `lush.congmail.top` reverse-proxy block that existed only on the VPS.
+- Fixed: the repo can be synchronized with the live VPS without treating mail data as code, which keeps future VPS edits and Git operations cleaner.
+- Affected files: `.gitignore`, `deploy/Caddyfile`, `docs/DECISIONS.md`, `docs/WORKLOG.md`, `docs/CHANGELOG.md`
+- Impact/Risk: Low; this aligns GitHub with the live shared reverse proxy while avoiding accidental versioning of mail runtime state.

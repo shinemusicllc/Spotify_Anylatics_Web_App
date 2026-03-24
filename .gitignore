@@ -29,3 +29,4 @@ node_modules/
 *.log
 *.pid
 backend/refresh_all_compare_report.txt
+deploy/mail/docker-data/
