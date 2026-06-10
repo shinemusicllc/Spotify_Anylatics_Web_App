@@ -48,11 +48,18 @@ def _spotify_uri_to_id(uri: str | None) -> str | None:
     return None
 
 
+def _image_area(source: dict[str, Any]) -> int:
+    try:
+        return int(source.get("width") or 0) * int(source.get("height") or 0)
+    except (TypeError, ValueError):
+        return 0
+
+
 def _first_image_from_sources(sources: list[dict[str, Any]] | None) -> str | None:
     if not sources:
         return None
-    first = sources[0] or {}
-    return first.get("url")
+    best = max((source or {} for source in sources), key=_image_area)
+    return best.get("url") or (sources[0] or {}).get("url")
 
 async def _get_json(path: str, params: dict[str, Any] | None = None) -> tuple[int, dict[str, Any] | None]:
     try:

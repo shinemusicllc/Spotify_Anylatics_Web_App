@@ -648,9 +648,8 @@ h3 {
   );
   background-size: cover;
   background-position: center center;
-  filter: grayscale(26%) saturate(50%) brightness(94%) sepia(14%)
-    hue-rotate(-8deg);
-  transform: scale(1.03);
+  filter: saturate(88%) brightness(96%);
+  transform: none;
 }
 
 .playlist-hero::after {
