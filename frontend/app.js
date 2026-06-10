@@ -5781,7 +5781,7 @@ function updateHeroImage() {
     };
 
     const heroImage = upscaleCover(src) || 'https://picsum.photos/seed/spotify-warm-cover/1800/900';
-    hero.style.setProperty('--hero-image', `url("${heroImage.replace(/\\/g, '\\\\').replace(/"/g, '\\"')}")`);
+    hero.style.setProperty('--hero-image', `url('${heroImage}')`);
 }
 
 // â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
