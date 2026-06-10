@@ -106,6 +106,10 @@ const CHECKED_SORT_MODES = Object.freeze({
     OLDEST_FIRST: 'oldest-first',
 });
 const UI_PREF_SAVE_DEBOUNCE_MS = 700;
+const DEFAULT_HERO_IMAGE = 'https://picsum.photos/seed/spotify-warm-cover/1800/900';
+const HERO_MIN_WIDTH_RATIO = 0.75;
+const HERO_MIN_HEIGHT_RATIO = 0.9;
+const HERO_MIN_ASPECT_RATIO = 1.65;
 
 function getUserGroupStorageKey() {
     const user = getAuthUser();
@@ -260,6 +264,7 @@ const state = {
     textSortMenuOpenKey: null,
     checkedSortMode: CHECKED_SORT_MODES.NONE,
     checkedSortMenuOpen: false,
+    heroImageToken: 0,
     lastGroupRenderSignature: '',
     lastListRenderSignature: '',
 };
@@ -3835,6 +3840,7 @@ function renderList(opts = {}) {
         refreshCheckedLabels();
         updateMetricSortControlsUI();
         updateTextSortControlsUI();
+        updateHeroImage();
         restoreScroll();
         return;
     }
@@ -3860,6 +3866,7 @@ function renderList(opts = {}) {
             emptyState.style.display = '';
             updateMetricSortControlsUI();
             updateTextSortControlsUI();
+            updateHeroImage();
             restoreScroll();
             return;
         }
@@ -3872,6 +3879,7 @@ function renderList(opts = {}) {
         container.appendChild(noResult);
         updateMetricSortControlsUI();
         updateTextSortControlsUI();
+        updateHeroImage();
         restoreScroll();
         return;
     }
@@ -3890,6 +3898,7 @@ function renderList(opts = {}) {
     refreshCheckedLabels();
     updateMetricSortControlsUI();
     updateTextSortControlsUI();
+    updateHeroImage();
     restoreScroll();
 }
 function refreshCheckedLabels() {
@@ -5769,19 +5778,77 @@ function startBackgroundSync() {
 function updateHeroImage() {
     const hero = document.querySelector('.playlist-hero');
     if (!hero) return;
-    const firstCover = document.querySelector('.list-grid .custom-grid-row img');
-    const src = firstCover && firstCover.getAttribute('src');
 
-    const upscaleCover = (url) => {
-        if (!url) return '';
-        if (url.includes('picsum.photos/seed/')) {
-            return url.replace(/\/\d+\/\d+(\?.*)?$/, '/1800/900');
+    const items = Array.isArray(state.filteredItems) ? state.filteredItems : [];
+    const images = items
+        .map((item) => item && item.image)
+        .filter(Boolean)
+        .filter((url, index, arr) => arr.indexOf(url) === index);
+
+    renderHeroCollage(hero, images);
+
+    const candidate = items.find((item) => {
+        const type = String(item?.type || '').toLowerCase();
+        return (type === 'playlist' || type === 'album') && item?.image;
+    });
+    const candidateUrl = candidate ? candidate.image : '';
+    const token = ++state.heroImageToken;
+
+    setHeroBackground(hero, DEFAULT_HERO_IMAGE);
+    hero.classList.remove('hero-uses-cover');
+
+    if (!candidateUrl || candidateUrl.includes('picsum.photos/seed/')) return;
+
+    const probe = new Image();
+    probe.onload = () => {
+        if (token !== state.heroImageToken) return;
+
+        const heroWidth = Math.max(hero.clientWidth || 0, 1200);
+        const heroHeight = Math.max(hero.clientHeight || 0, 230);
+        const aspectRatio = probe.naturalWidth / Math.max(probe.naturalHeight, 1);
+        const wideEnough = probe.naturalWidth >= heroWidth * HERO_MIN_WIDTH_RATIO;
+        const tallEnough = probe.naturalHeight >= heroHeight * HERO_MIN_HEIGHT_RATIO;
+        const isBannerLike = aspectRatio >= HERO_MIN_ASPECT_RATIO;
+
+        if (wideEnough && tallEnough && isBannerLike) {
+            setHeroBackground(hero, candidateUrl);
+            hero.classList.add('hero-uses-cover');
         }
-        return url;
     };
+    probe.onerror = () => {
+        if (token === state.heroImageToken) {
+            setHeroBackground(hero, DEFAULT_HERO_IMAGE);
+            hero.classList.remove('hero-uses-cover');
+        }
+    };
+    probe.src = candidateUrl;
+}
 
-    const heroImage = upscaleCover(src) || 'https://picsum.photos/seed/spotify-warm-cover/1800/900';
-    hero.style.setProperty('--hero-image', `url("${heroImage.replace(/\\/g, '\\\\').replace(/"/g, '\\"')}")`);
+function escapeCssUrl(url) {
+    return String(url || '').replace(/\\/g, '\\\\').replace(/"/g, '\\"');
+}
+
+function setHeroBackground(hero, url) {
+    hero.style.setProperty('--hero-image', `url("${escapeCssUrl(url || DEFAULT_HERO_IMAGE)}")`);
+}
+
+function renderHeroCollage(hero, images) {
+    let collage = hero.querySelector('.hero-cover-collage');
+    if (!collage) {
+        collage = document.createElement('div');
+        collage.className = 'hero-cover-collage';
+        collage.setAttribute('aria-hidden', 'true');
+        hero.insertBefore(collage, hero.firstChild);
+    }
+
+    const collageImages = images
+        .filter((url) => url && !url.includes('picsum.photos/seed/'))
+        .slice(0, 6);
+
+    hero.classList.toggle('hero-has-collage', collageImages.length > 0);
+    collage.innerHTML = collageImages.map((url) => (
+        `<span class="hero-cover-tile" style="background-image: url(&quot;${escapeHtml(escapeCssUrl(url))}&quot;)"></span>`
+    )).join('');
 }
 
 // â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
