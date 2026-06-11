@@ -19,7 +19,9 @@ const CONFIG = {
     BACKGROUND_SYNC_INTERVAL: 12000,
     LIST_INITIAL_RENDER_COUNT: 80,
     LIST_RENDER_BATCH_SIZE: 80,
-    LIST_FAST_PAGE_SIZE: 80,
+    LIST_PAGE_SIZE: 120,
+    VIRTUAL_ROW_HEIGHT: 104,
+    VIRTUAL_OVERSCAN_ROWS: 8,
 };
 const GROUP_STORAGE_KEY = 'spoticheck_custom_groups_v1';
 const ROW_ORDER_STORAGE_KEY = 'spoticheck_row_order_v1';
@@ -227,6 +229,13 @@ const state = {
     adminUserList: [],
     adminUsersCacheTs: 0,
     adminUsersPromise: null,
+    itemSummary: null,
+    listTotal: 0,
+    virtualItems: [],
+    loadedPageOffsets: new Set(),
+    loadingPageOffsets: new Set(),
+    listScopeKey: '',
+    currentListParams: {},
     selectedItemKeys: new Set(),
     selectionAnchorKey: null,
     selectedGroupIds: new Set(),
@@ -323,11 +332,26 @@ class SpotiCheckAPI {
     getItems(params = {}) {
         const qs = new URLSearchParams();
         if (params.type) qs.set('type', params.type);
+        if (params.group) qs.set('group', params.group);
+        if (params.status) qs.set('status', params.status);
+        if (params.search) qs.set('search', params.search);
+        if (params.sort) qs.set('sort', params.sort);
+        if (params.sort_direction) qs.set('sort_direction', params.sort_direction);
+        if (params.checked_sort) qs.set('checked_sort', params.checked_sort);
         if (params.user_id) qs.set('user_id', params.user_id);
         if (params.limit != null) qs.set('limit', String(params.limit));
         if (params.offset != null) qs.set('offset', String(params.offset));
         const suffix = qs.toString() ? `?${qs.toString()}` : '';
         return this._fetch(`/items${suffix}`);
+    }
+    getItemsSummary(params = {}) {
+        const qs = new URLSearchParams();
+        if (params.type) qs.set('type', params.type);
+        if (params.group) qs.set('group', params.group);
+        if (params.search) qs.set('search', params.search);
+        if (params.user_id) qs.set('user_id', params.user_id);
+        const suffix = qs.toString() ? `?${qs.toString()}` : '';
+        return this._fetch(`/items/summary${suffix}`);
     }
     getItem(type, id, userId = null) {
         const qs = new URLSearchParams();
@@ -2377,26 +2401,45 @@ function rebuildGroups() {
         || parseGroupEntryId(previousActiveId);
     const counts = new Map();
     const encountered = [];
-    for (const item of state.items) {
-        const parsedItemGroup = splitLegacyGroupName(item.group);
-        const group = normalizeStoredGroupName(parsedItemGroup.name);
-        if (!group) continue;
-        if (group.toLowerCase() === ALL_GROUP_ID) continue;
-        const ownerUserId = item.user_id
-            ? String(item.user_id)
-            : (parsedItemGroup.ownerUserId || legacyFallbackOwnerId || null);
-        const entryId = buildGroupEntryId(group, ownerUserId);
-        if (!counts.has(entryId)) {
-            encountered.push({
-                id: entryId,
-                name: group,
-                ownerUserId: ownerUserId,
-            });
+    const summaryGroups = Array.isArray(state.itemSummary?.groups) ? state.itemSummary.groups : [];
+    const scopedOwnerUserId = getScopedGroupOwnerUserId();
+    if (summaryGroups.length) {
+        summaryGroups.forEach((groupSummary) => {
+            const group = normalizeStoredGroupName(groupSummary?.name);
+            if (!group || group.toLowerCase() === ALL_GROUP_ID) return;
+            const entryId = buildGroupEntryId(group, scopedOwnerUserId);
+            if (!counts.has(entryId)) {
+                encountered.push({
+                    id: entryId,
+                    name: group,
+                    ownerUserId: scopedOwnerUserId,
+                });
+            }
+            counts.set(entryId, Number(groupSummary?.count || 0));
+        });
+    } else {
+        for (const item of state.items) {
+            const parsedItemGroup = splitLegacyGroupName(item.group);
+            const group = normalizeStoredGroupName(parsedItemGroup.name);
+            if (!group) continue;
+            if (group.toLowerCase() === ALL_GROUP_ID) continue;
+            const ownerUserId = item.user_id
+                ? String(item.user_id)
+                : (parsedItemGroup.ownerUserId || legacyFallbackOwnerId || null);
+            const entryId = buildGroupEntryId(group, ownerUserId);
+            if (!counts.has(entryId)) {
+                encountered.push({
+                    id: entryId,
+                    name: group,
+                    ownerUserId: ownerUserId,
+                });
+            }
+            counts.set(entryId, (counts.get(entryId) || 0) + 1);
         }
-        counts.set(entryId, (counts.get(entryId) || 0) + 1);
     }
 
-    const groups = [{ id: ALL_GROUP_ID, name: ALL_GROUP_LABEL, count: state.items.length }];
+    const allCount = Number(state.itemSummary?.all_total ?? state.items.length);
+    const groups = [{ id: ALL_GROUP_ID, name: ALL_GROUP_LABEL, count: allCount }];
     const namedGroups = [];
     const seen = new Set();
     const pushUnique = (rawEntry) => {
@@ -2431,7 +2474,6 @@ function rebuildGroups() {
             });
         });
     } else {
-        const scopedOwnerUserId = getScopedGroupOwnerUserId();
         (state.customGroups || []).forEach((rawName) => {
             const normalized = normalizeStoredGroupName(rawName);
             pushUnique({
@@ -2714,6 +2756,45 @@ function getCurrentListScope() {
             ? (activeEntry.displayName || activeEntry.name)
             : ALL_GROUP_LABEL,
     };
+}
+
+function getBackendListParams() {
+    const params = {};
+    const currentUser = getAuthUser();
+    if (currentUser?.role === 'admin') {
+        const targetUserId = getAdminTargetUserId();
+        if (targetUserId) params.user_id = targetUserId;
+    }
+    const activeEntry = getGroupEntryById(state.activeGroup);
+    if (activeEntry && activeEntry.id !== ALL_GROUP_ID) {
+        const groupName = normalizeStoredGroupName(activeEntry.name);
+        if (groupName) params.group = groupName;
+    }
+    const search = String(state.searchQuery || '').trim();
+    if (search) params.search = search;
+    if (state.checkedSortMode && state.checkedSortMode !== CHECKED_SORT_MODES.NONE) {
+        params.checked_sort = state.checkedSortMode;
+    } else if (state.metricSortColumn && METRIC_SORT_CONFIG[state.metricSortColumn]) {
+        params.sort = state.metricSortColumn;
+        params.sort_direction = state.metricSortDirection === 'asc' ? 'asc' : 'desc';
+    } else if (state.textSortColumn && isTextSortColumn(state.textSortColumn)) {
+        params.sort = state.textSortColumn;
+        params.sort_direction = state.textSortDirection === 'desc' ? 'desc' : 'asc';
+    }
+    return params;
+}
+
+function getBackendListScopeKey(params = getBackendListParams()) {
+    return JSON.stringify({
+        user_id: params.user_id || '',
+        group: params.group || '',
+        search: params.search || '',
+        type: params.type || '',
+        status: params.status || '',
+        sort: params.sort || '',
+        sort_direction: params.sort_direction || '',
+        checked_sort: params.checked_sort || '',
+    });
 }
 
 function handleGroupSelection(groupId, event) {
@@ -3614,7 +3695,7 @@ function ensureCheckedSortControls() {
                 state.metricSortMenuOpenKey = null;
                 state.textSortColumn = null;
                 state.textSortMenuOpenKey = null;
-                renderList({ preserveScroll: true });
+                reloadListAfterQueryStateChange();
                 updateMetricSortControlsUI();
                 updateTextSortControlsUI();
                 updateCheckedSortControlsUI();
@@ -3701,7 +3782,7 @@ function ensureMetricSortControls() {
                     closeTextSortMenu();
                     state.checkedSortMode = CHECKED_SORT_MODES.NONE;
                     closeCheckedSortMenu();
-                    renderList({ preserveScroll: true });
+                    reloadListAfterQueryStateChange();
                     updateMetricSortControlsUI();
                     updateCheckedSortControlsUI();
                     return;
@@ -3718,7 +3799,7 @@ function ensureMetricSortControls() {
                     state.metricSortDirection = 'desc';
                 }
                 state.metricSortMenuOpenKey = null;
-                renderList({ preserveScroll: true });
+                reloadListAfterQueryStateChange();
                 updateMetricSortControlsUI();
                 updateCheckedSortControlsUI();
                 return;
@@ -3740,7 +3821,7 @@ function ensureMetricSortControls() {
                     state.metricSortDirection = state.metricSortDirection === 'asc' ? 'desc' : 'asc';
                 }
                 state.metricSortMenuOpenKey = null;
-                renderList({ preserveScroll: true });
+                reloadListAfterQueryStateChange();
                 updateMetricSortControlsUI();
                 updateCheckedSortControlsUI();
             }
@@ -3767,7 +3848,7 @@ function escapeHtml(str) {
 
 function clearRenderedRows(container = document.getElementById('link-list')) {
     if (!container) return;
-    container.querySelectorAll('.custom-grid-row').forEach(el => el.remove());
+    container.querySelectorAll('.custom-grid-row, .virtual-row-placeholder, .virtual-spacer').forEach(el => el.remove());
 }
 
 function showListLoadingState() {
@@ -3846,6 +3927,96 @@ function renderRowsInBatches(container, items, renderToken, afterFirstBatch) {
     appendBatch(CONFIG.LIST_INITIAL_RENDER_COUNT);
 }
 
+function getLoadedVirtualItems() {
+    return (state.virtualItems || []).filter(Boolean);
+}
+
+function resetVirtualList(total = 0, params = {}) {
+    state.listTotal = Number(total || 0);
+    state.virtualItems = new Array(state.listTotal);
+    state.items = [];
+    state.filteredItems = [];
+    state.loadedPageOffsets = new Set();
+    state.loadingPageOffsets = new Set();
+    state.currentListParams = { ...params };
+    state.listScopeKey = getBackendListScopeKey(params);
+    state.lastListRenderSignature = '';
+    state.listRenderToken += 1;
+}
+
+function commitPageItems(incoming = [], offset = 0, total = null) {
+    const nextTotal = Number(total ?? state.listTotal ?? incoming.length);
+    if (nextTotal !== state.listTotal || !Array.isArray(state.virtualItems) || state.virtualItems.length !== nextTotal) {
+        const nextItems = new Array(nextTotal);
+        (state.virtualItems || []).forEach((item, idx) => {
+            if (idx < nextItems.length && item) nextItems[idx] = item;
+        });
+        state.virtualItems = nextItems;
+        state.listTotal = nextTotal;
+    }
+
+    incoming.forEach((item, idx) => {
+        const absoluteIndex = offset + idx;
+        if (absoluteIndex >= 0 && absoluteIndex < state.virtualItems.length) {
+            state.virtualItems[absoluteIndex] = item;
+        }
+    });
+    state.loadedPageOffsets.add(offset);
+    state.items = getLoadedVirtualItems();
+    syncSelectedItemsWithState();
+    syncGroupUI(true);
+}
+
+function createVirtualSpacer(height) {
+    const spacer = document.createElement('div');
+    spacer.className = 'virtual-spacer';
+    spacer.style.height = `${Math.max(0, Math.round(height))}px`;
+    return spacer;
+}
+
+function renderVirtualPlaceholder(rowIndex) {
+    const row = document.createElement('div');
+    row.className = 'virtual-row-placeholder px-4 py-3 rounded-lg border border-white/5 bg-white/[0.025]';
+    row.style.minHeight = `${CONFIG.VIRTUAL_ROW_HEIGHT}px`;
+    row.innerHTML = `
+        <div class="flex items-center gap-4 h-full opacity-70">
+            <div class="meta-cell stt-cell text-secondary-text">${rowIndex + 1}</div>
+            <div class="skeleton" style="width:70px;height:70px;border-radius:8px"></div>
+            <div class="flex flex-col gap-2 flex-1">
+                <div class="skeleton" style="width:60px;height:13px"></div>
+                <div class="skeleton" style="width:260px;height:16px"></div>
+                <div class="skeleton" style="width:170px;height:12px"></div>
+            </div>
+        </div>
+    `;
+    return row;
+}
+
+function getVirtualRange(container) {
+    const total = Number(state.listTotal || 0);
+    if (!total) return { start: 0, end: 0, total: 0 };
+    const listWrap = document.querySelector('.list-wrap');
+    const viewportHeight = listWrap?.clientHeight || window.innerHeight || 800;
+    const scrollTop = listWrap?.scrollTop || 0;
+    const listTop = container?.offsetTop || 0;
+    const relativeTop = Math.max(0, scrollTop - listTop);
+    const firstVisible = Math.floor(relativeTop / CONFIG.VIRTUAL_ROW_HEIGHT);
+    const visibleCount = Math.ceil(viewportHeight / CONFIG.VIRTUAL_ROW_HEIGHT);
+    const start = Math.max(0, firstVisible - CONFIG.VIRTUAL_OVERSCAN_ROWS);
+    const end = Math.min(total, firstVisible + visibleCount + CONFIG.VIRTUAL_OVERSCAN_ROWS);
+    return { start, end, total };
+}
+
+function queueVirtualPagesForRange(start, end) {
+    if (!state.listScopeKey || !state.currentListParams) return;
+    const firstPage = Math.floor(Math.max(0, start) / CONFIG.LIST_PAGE_SIZE);
+    const lastPage = Math.floor(Math.max(0, end - 1) / CONFIG.LIST_PAGE_SIZE);
+    for (let page = firstPage; page <= lastPage; page += 1) {
+        const offset = page * CONFIG.LIST_PAGE_SIZE;
+        loadVirtualPage(offset);
+    }
+}
+
 // â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
 // RENDER ENGINE
 // â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
@@ -3870,6 +4041,44 @@ function renderList(opts = {}) {
     };
     syncGroupUI();
     syncSelectedItemsWithState();
+
+    if (state.listTotal > 0 || (Array.isArray(state.virtualItems) && state.virtualItems.length > 0)) {
+        const total = Number(state.listTotal || 0);
+        const loadedItems = getLoadedVirtualItems();
+        state.filteredItems = loadedItems;
+        state.listRenderToken += 1;
+        const renderToken = state.listRenderToken;
+        clearRenderedRows(container);
+        if (skeleton) skeleton.style.display = 'none';
+        if (emptyState) emptyState.style.display = total > 0 ? 'none' : '';
+
+        if (total === 0) {
+            updateKPIs();
+            return;
+        }
+
+        const range = getVirtualRange(container);
+        queueVirtualPagesForRange(range.start, range.end);
+        const frag = document.createDocumentFragment();
+        if (range.start > 0) {
+            frag.appendChild(createVirtualSpacer(range.start * CONFIG.VIRTUAL_ROW_HEIGHT));
+        }
+        for (let idx = range.start; idx < range.end; idx += 1) {
+            if (renderToken !== state.listRenderToken) return;
+            const item = state.virtualItems[idx];
+            frag.appendChild(item ? renderRow(item, idx) : renderVirtualPlaceholder(idx));
+        }
+        if (range.end < total) {
+            frag.appendChild(createVirtualSpacer((total - range.end) * CONFIG.VIRTUAL_ROW_HEIGHT));
+        }
+        container.appendChild(frag);
+        updateKPIs();
+        refreshCheckedLabels();
+        updateMetricSortControlsUI();
+        updateTextSortControlsUI();
+        restoreScroll();
+        return;
+    }
 
     const items = getVisibleItems();
     state.filteredItems = items;
@@ -3950,11 +4159,12 @@ function updateKPIs() {
     const scoped = state.activeGroup === ALL_GROUP_ID
         ? state.items
         : state.items.filter((i) => doesItemMatchGroupEntry(i, activeEntry));
-    const scopedTotal = scoped.length;
-    const active = scoped.filter(i => i.status === 'active').length;
-    const errors = scoped.filter(i => i.status === 'error').length;
-    const crawling = scoped.filter(i => i.status === 'crawling' || i.status === 'pending').length;
+    const scopedTotal = Number(state.itemSummary?.total ?? state.listTotal ?? scoped.length);
+    const active = Number(state.itemSummary?.active ?? scoped.filter(i => i.status === 'active').length);
+    const errors = Number(state.itemSummary?.errors ?? scoped.filter(i => i.status === 'error').length);
+    const crawling = Number(state.itemSummary?.crawling ?? scoped.filter(i => i.status === 'crawling' || i.status === 'pending').length);
     const selected = getSelectedVisibleItems().length;
+    const allTotal = Number(state.itemSummary?.all_total ?? state.items.length);
 
     setText('kpi-total', scopedTotal);
     setText('kpi-active', active);
@@ -3966,7 +4176,7 @@ function updateKPIs() {
     setText('footer-errors', errors);
     setText('footer-crawling', crawling);
     setText('footer-selected', selected);
-    setText('group-count-all', state.items.length);
+    setText('group-count-all', allTotal);
 }
 
 function setText(id, val) {
@@ -4254,7 +4464,7 @@ function ensureTextSortControls() {
                 state.textSortMenuOpenKey = null;
                 state.checkedSortMode = CHECKED_SORT_MODES.NONE;
                 state.checkedSortMenuOpen = false;
-                renderList({ preserveScroll: true });
+                reloadListAfterQueryStateChange();
                 updateMetricSortControlsUI();
                 updateTextSortControlsUI();
                 updateCheckedSortControlsUI();
@@ -4276,7 +4486,7 @@ function ensureTextSortControls() {
                 state.textSortMenuOpenKey = null;
                 state.checkedSortMode = CHECKED_SORT_MODES.NONE;
                 state.checkedSortMenuOpen = false;
-                renderList({ preserveScroll: true });
+                reloadListAfterQueryStateChange();
                 updateMetricSortControlsUI();
                 updateTextSortControlsUI();
                 updateCheckedSortControlsUI();
@@ -5520,9 +5730,13 @@ async function pollJobs() {
 
 const handleSearch = debounce((query) => {
     state.searchQuery = query;
-    renderList();
-    renderGroups({ force: true });
+    reloadListAfterQueryStateChange();
 }, CONFIG.SEARCH_DEBOUNCE);
+
+function reloadListAfterQueryStateChange() {
+    showListLoadingState();
+    loadData({ preserveScroll: false, force: true });
+}
 
 // â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
 // DATA LOADING (with demo fallback)
@@ -5718,6 +5932,8 @@ function handleAdminFilterChange(val) {
     state.contextMenuAnchorSelectionKey = null;
     state.itemClipboard = { keys: [], mode: null };
     state.customGroups = selectedUserId ? getOwnerCustomGroups(selectedUserId) : [];
+    state.itemSummary = null;
+    resetVirtualList(0, {});
     state.groups = [{ id: ALL_GROUP_ID, name: ALL_GROUP_LABEL, count: 0 }];
     state.lastGroupRenderSignature = '';
     syncGroupUI(true);
@@ -5731,41 +5947,41 @@ function handleAdminFilterChange(val) {
     if (breadcrumb) breadcrumb.textContent = ALL_GROUP_LABEL + ' (' + username + ')';
 
     syncGroupsFromServer(selectedUserId || null);
-    loadData({ preserveScroll: false, force: true, fastFirstPage: true });
+    loadData({ preserveScroll: false, force: true });
 }
 
-function commitIncomingItems(incoming) {
-    state.items = applyPersistedItemOrder(mergeItemsKeepOrder(state.items, incoming));
-    persistCurrentItemOrder();
-    syncSelectedItemsWithState();
-    syncGroupUI(true);
-}
-
-async function loadRemainingItems(requestId, baseParams, offset, opts = {}) {
+async function loadVirtualPage(offset, opts = {}) {
+    const normalizedOffset = Math.max(0, Math.floor(Number(offset || 0) / CONFIG.LIST_PAGE_SIZE) * CONFIG.LIST_PAGE_SIZE);
+    if (!state.listScopeKey) return;
+    if (state.loadedPageOffsets.has(normalizedOffset) || state.loadingPageOffsets.has(normalizedOffset)) return;
+    const requestId = opts.requestId || state.dataLoadRequestId;
+    const scopeKey = state.listScopeKey;
+    state.loadingPageOffsets.add(normalizedOffset);
     try {
         const data = await api.getItems({
-            ...baseParams,
-            offset,
+            ...state.currentListParams,
+            limit: CONFIG.LIST_PAGE_SIZE,
+            offset: normalizedOffset,
         });
-        if (requestId !== state.dataLoadRequestId) return;
+        if (requestId !== state.dataLoadRequestId || scopeKey !== state.listScopeKey) return;
         if (!data) return;
         const incoming = data.items || data || [];
-        if (!incoming.length) return;
-        commitIncomingItems(incoming);
+        commitPageItems(incoming, normalizedOffset, data.total);
         renderList({
             preserveScroll: opts.preserveScroll !== false,
             force: Boolean(opts.force),
         });
     } catch (err) {
         if (requestId !== state.dataLoadRequestId) return;
-        console.warn('loadRemainingItems error:', err);
+        console.warn('loadVirtualPage error:', err);
+    } finally {
+        state.loadingPageOffsets.delete(normalizedOffset);
     }
 }
 
 async function loadData(opts = {}) {
     const preserveScroll = Boolean(opts?.preserveScroll);
     const force = Boolean(opts?.force);
-    const fastFirstPage = Boolean(opts?.fastFirstPage);
     const requestId = ++state.dataLoadRequestId;
     const skeleton = document.getElementById('skeleton-container');
 
@@ -5782,43 +5998,47 @@ async function loadData(opts = {}) {
 
     // Fetch items
     try {
-        const params = {};
         const currentUser = getAuthUser();
+        let params = {};
         if (currentUser?.role === 'admin') {
             await _fetchAdminUsers({ preferCache: Boolean(state.adminFilterUserId) });
             if (requestId !== state.dataLoadRequestId) return;
-            params.user_id = getAdminTargetUserId();
         }
-        if (fastFirstPage) {
-            params.limit = CONFIG.LIST_FAST_PAGE_SIZE;
-            params.offset = 0;
-        }
-        const data = await api.getItems(params);
+        params = getBackendListParams();
+        state.currentListParams = { ...params };
+        state.listScopeKey = getBackendListScopeKey(params);
+        const pageParams = {
+            ...params,
+            limit: CONFIG.LIST_PAGE_SIZE,
+            offset: 0,
+        };
+        const [summary, data] = await Promise.all([
+            api.getItemsSummary(params),
+            api.getItems(pageParams),
+        ]);
         if (requestId !== state.dataLoadRequestId) return;
         if (!data) return;
         const incoming = data.items || data || [];
-        commitIncomingItems(incoming);
+        state.itemSummary = summary || null;
+        const total = Number(summary?.total ?? data.total ?? incoming.length);
+        resetVirtualList(total, params);
+        state.itemSummary = summary || null;
+        commitPageItems(incoming, 0, total);
         if (skeleton) skeleton.style.display = 'none';
         renderList({ preserveScroll, force });
-        const total = Number(data.total || 0);
-        if (fastFirstPage && total > incoming.length) {
-            loadRemainingItems(
-                requestId,
-                { ...params, limit: undefined },
-                incoming.length,
-                { preserveScroll: true, force: true },
-            );
-        }
     } catch (err) {
         if (requestId !== state.dataLoadRequestId) return;
         console.error('loadData error:', err);
         if (skeleton) skeleton.style.display = 'none';
         if (getAuthToken()) {
             state.items = [];
+            resetVirtualList(0, getBackendListParams());
+            state.itemSummary = null;
         } else {
             state.items = applyPersistedItemOrder(getDemoData());
         }
-        commitIncomingItems(state.items);
+        syncSelectedItemsWithState();
+        syncGroupUI(true);
         renderList({ preserveScroll, force });
     }
 }
@@ -5896,6 +6116,24 @@ function initStickyHeader() {
     updateStickyState();
     listWrap.addEventListener('scroll', updateStickyState, { passive: true });
     window.addEventListener('resize', updateStickyState);
+}
+
+function initVirtualListScroll() {
+    const listWrap = document.querySelector('.list-wrap');
+    if (!listWrap || listWrap.dataset.virtualScrollBound === 'true') return;
+    listWrap.dataset.virtualScrollBound = 'true';
+    let raf = null;
+    const scheduleRender = () => {
+        if (raf) return;
+        raf = requestAnimationFrame(() => {
+            raf = null;
+            if (state.currentView === 'linkchecker' && state.listTotal > 0) {
+                renderList({ preserveScroll: true, force: true });
+            }
+        });
+    };
+    listWrap.addEventListener('scroll', scheduleRender, { passive: true });
+    window.addEventListener('resize', scheduleRender);
 }
 
 
@@ -6829,7 +7067,8 @@ document.addEventListener('DOMContentLoaded', async () => {
             } else {
                 updateGroupHeader();
                 renderGroups();
-                renderList();
+                showListLoadingState();
+                loadData({ preserveScroll: false, force: true });
             }
         });
         groupList.addEventListener('dblclick', (e) => {
@@ -7370,6 +7609,7 @@ document.addEventListener('DOMContentLoaded', async () => {
 
     // Sticky header
     initStickyHeader();
+    initVirtualListScroll();
 
     // Initial data load
     loadData().then(() => {

@@ -7,9 +7,10 @@ import io
 import uuid
 
 from fastapi import APIRouter, Body, Depends, HTTPException, Query
+from fastapi.params import Query as QueryParam
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, Field
-from sqlalchemy import delete, func, or_, select
+from sqlalchemy import case, delete, func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.database import get_db
@@ -18,7 +19,7 @@ from app.models.item import Item
 from app.models.metrics_snapshot import MetricsSnapshot
 from app.models.raw_response import RawResponse
 from app.models.user import User
-from app.schemas.item import ItemListResponse, ItemMoveRequest, ItemResponse
+from app.schemas.item import ItemGroupSummary, ItemListResponse, ItemMoveRequest, ItemResponse, ItemSummaryResponse
 from app.services.auth import get_current_user
 from app.services import spotify_client
 
@@ -40,6 +41,103 @@ class ItemExportRequest(BaseModel):
     format: str = "json"
     item_ids: list[str] = Field(default_factory=list)
     deep_fetch: bool = False
+
+
+def _query_param_value(value):
+    return None if isinstance(value, QueryParam) else value
+
+
+def _apply_item_scope(
+    query,
+    current_user: User,
+    user_id: str | None = None,
+    type: str | None = None,
+    status: str | None = None,
+    group: str | None = None,
+    search: str | None = None,
+):
+    """Apply list-scope filters shared by item and summary endpoints."""
+    user_id = _query_param_value(user_id)
+    type = _query_param_value(type)
+    status = _query_param_value(status)
+    group = _query_param_value(group)
+    search = _query_param_value(search)
+
+    if current_user.role != "admin":
+        query = query.where(Item.user_id == current_user.id)
+    elif user_id:
+        query = query.where(Item.user_id == user_id)
+
+    if type:
+        query = query.where(Item.item_type == type)
+    if status:
+        query = query.where(Item.status == status)
+    if group:
+        query = query.where(Item.group == group)
+    if search and search.strip():
+        pattern = f"%{search.strip()}%"
+        query = query.where(
+            or_(
+                Item.name.ilike(pattern),
+                Item.spotify_id.ilike(pattern),
+                Item.owner_name.ilike(pattern),
+                Item.group.ilike(pattern),
+            )
+        )
+    return query
+
+
+def _sort_expr_for_key(sort: str | None):
+    metric_exprs = {
+        "playlistSaves": case((Item.item_type == "playlist", Item.followers), else_=None),
+        "playlistCount": case((Item.item_type == "playlist", Item.track_count), else_=None),
+        "albumCount": case((Item.item_type == "album", Item.track_count), else_=None),
+        "artistFollowers": case((Item.item_type.in_(["artist", "track", "album"]), Item.followers), else_=None),
+        "artistListeners": case((Item.item_type.in_(["artist", "track", "album"]), Item.monthly_listeners), else_=None),
+        "trackViews": case((Item.item_type == "track", Item.playcount), else_=None),
+        "playlistOwner": case((Item.item_type == "playlist", func.lower(Item.owner_name)), else_=None),
+        "name": func.lower(Item.name),
+        "owner": func.lower(Item.owner_name),
+        "updated": Item.updated_at,
+        "checked": Item.last_checked,
+    }
+    return metric_exprs.get(sort or "")
+
+
+def _apply_item_sort(
+    query,
+    sort: str | None = None,
+    sort_direction: str | None = None,
+    checked_sort: str | None = None,
+):
+    sort = _query_param_value(sort)
+    sort_direction = _query_param_value(sort_direction)
+    checked_sort = _query_param_value(checked_sort)
+    direction = "asc" if sort_direction == "asc" else "desc"
+
+    if checked_sort and checked_sort != "none":
+        status_priority = {
+            "error-first": {"error": 0, "crawling": 1, "pending": 2, "active": 3},
+            "crawling-first": {"crawling": 0, "pending": 1, "error": 2, "active": 3},
+            "active-first": {"active": 0, "crawling": 1, "pending": 2, "error": 3},
+        }.get(checked_sort)
+        if status_priority:
+            priority_expr = case(
+                *[(Item.status == status_name, priority) for status_name, priority in status_priority.items()],
+                else_=9,
+            )
+            return query.order_by(priority_expr.asc(), Item.last_checked.desc().nullslast(), Item.updated_at.desc())
+        if checked_sort == "oldest-first":
+            return query.order_by(Item.last_checked.asc().nullslast(), Item.updated_at.asc())
+        if checked_sort == "recent-first":
+            return query.order_by(Item.last_checked.desc().nullslast(), Item.updated_at.desc())
+
+    expr = _sort_expr_for_key(sort)
+    if expr is not None:
+        ordered_expr = expr.asc().nullslast() if direction == "asc" else expr.desc().nullslast()
+        return query.order_by(ordered_expr, Item.updated_at.desc())
+
+    return query.order_by(Item.updated_at.desc())
 
 
 def _spotify_url(item_type: str, spotify_id: str) -> str:
@@ -883,25 +981,19 @@ async def list_items(
     group: str | None = Query(None, description="Filter by group"),
     status: str | None = Query(None, description="Filter by status"),
     user_id: str | None = Query(None, description="Filter by user (admin only)"),
+    search: str | None = Query(None, description="Search by title, owner, group, or Spotify ID"),
+    sort: str | None = Query(None, description="Sort key"),
+    sort_direction: str | None = Query(None, description="Sort direction"),
+    checked_sort: str | None = Query(None, description="Checked/status sort mode"),
     limit: int | None = Query(None, ge=1),
     offset: int = Query(0, ge=0),
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
     """List all items with optional filters."""
-    query = select(Item).order_by(Item.updated_at.desc())
-
-    if current_user.role != "admin":
-        query = query.where(Item.user_id == current_user.id)
-    elif user_id:
-        query = query.where(Item.user_id == user_id)
-
-    if type:
-        query = query.where(Item.item_type == type)
-    if group:
-        query = query.where(Item.group == group)
-    if status:
-        query = query.where(Item.status == status)
+    query = select(Item)
+    query = _apply_item_scope(query, current_user, user_id, type, status, group, search)
+    query = _apply_item_sort(query, sort, sort_direction, checked_sort)
 
     count_query = select(func.count()).select_from(query.subquery())
     total_result = await db.execute(count_query)
@@ -929,6 +1021,53 @@ async def list_items(
             for item in items
         ],
         total=total,
+    )
+
+
+@router.get("/items/summary", response_model=ItemSummaryResponse)
+async def item_summary(
+    type: str | None = Query(None, description="Filter by item type"),
+    group: str | None = Query(None, description="Active group filter"),
+    user_id: str | None = Query(None, description="Filter by user (admin only)"),
+    search: str | None = Query(None, description="Search by title, owner, group, or Spotify ID"),
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """Return fast counts for large paged list views."""
+    base_query = _apply_item_scope(select(Item), current_user, user_id, type, search=search)
+    scoped_query = _apply_item_scope(select(Item), current_user, user_id, type, group=group, search=search)
+
+    scoped_subquery = scoped_query.subquery()
+    base_subquery = base_query.subquery()
+    total_result = await db.execute(select(func.count()).select_from(scoped_subquery))
+    all_total_result = await db.execute(select(func.count()).select_from(base_subquery))
+
+    status_rows = await db.execute(
+        select(scoped_subquery.c.status, func.count())
+        .select_from(scoped_subquery)
+        .group_by(scoped_subquery.c.status)
+    )
+    status_counts = {status_name or "": int(count or 0) for status_name, count in status_rows.all()}
+
+    group_rows = await db.execute(
+        select(base_subquery.c.group, func.count())
+        .select_from(base_subquery)
+        .where(base_subquery.c.group.is_not(None), base_subquery.c.group != "")
+        .group_by(base_subquery.c.group)
+        .order_by(base_subquery.c.group.asc())
+    )
+
+    return ItemSummaryResponse(
+        total=int(total_result.scalar() or 0),
+        all_total=int(all_total_result.scalar() or 0),
+        active=status_counts.get("active", 0),
+        errors=status_counts.get("error", 0),
+        crawling=status_counts.get("crawling", 0) + status_counts.get("pending", 0),
+        groups=[
+            ItemGroupSummary(name=str(group_name), count=int(count or 0))
+            for group_name, count in group_rows.all()
+            if group_name
+        ],
     )
 
 

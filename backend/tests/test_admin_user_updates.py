@@ -24,10 +24,11 @@ class _ScalarResult:
 
 
 class _ExecuteResult:
-    def __init__(self, *, scalar_one_or_none=None, scalar=None, scalars_all=None):
+    def __init__(self, *, scalar_one_or_none=None, scalar=None, scalars_all=None, rows=None):
         self._scalar_one_or_none = scalar_one_or_none
         self._scalar = scalar
         self._scalars_all = scalars_all or []
+        self._rows = rows or []
 
     def scalar_one_or_none(self):
         return self._scalar_one_or_none
@@ -37,6 +38,9 @@ class _ExecuteResult:
 
     def scalars(self):
         return _ScalarResult(self._scalars_all)
+
+    def all(self):
+        return list(self._rows)
 
 
 def test_admin_update_user_can_rename_username_and_refresh_internal_email():
@@ -127,5 +131,44 @@ def test_list_items_without_limit_avoids_limit_clause(monkeypatch):
         assert response.items == []
         assert len(executed_queries) == 2
         assert " limit " not in executed_queries[1].lower()
+
+    asyncio.run(run())
+
+
+def test_item_summary_returns_counts_and_group_totals():
+    async def run():
+        current_user = SimpleNamespace(id=uuid.uuid4(), role="admin")
+
+        class FakeDB:
+            def __init__(self):
+                self.calls = 0
+
+            async def execute(self, query):
+                self.calls += 1
+                if self.calls == 1:
+                    return _ExecuteResult(scalar=7)
+                if self.calls == 2:
+                    return _ExecuteResult(scalar=12)
+                if self.calls == 3:
+                    return _ExecuteResult(rows=[("active", 5), ("error", 1), ("pending", 1)])
+                if self.calls == 4:
+                    return _ExecuteResult(rows=[("Jazz", 6), ("Lofi", 1)])
+                raise AssertionError(f"Unexpected execute call #{self.calls}: {query}")
+
+        response = await items_api.item_summary(
+            db=FakeDB(),
+            current_user=current_user,
+            user_id=str(uuid.uuid4()),
+            group="Jazz",
+            search="focus",
+        )
+
+        assert response.total == 7
+        assert response.all_total == 12
+        assert response.active == 5
+        assert response.errors == 1
+        assert response.crawling == 1
+        assert [group.name for group in response.groups] == ["Jazz", "Lofi"]
+        assert [group.count for group in response.groups] == [6, 1]
 
     asyncio.run(run())

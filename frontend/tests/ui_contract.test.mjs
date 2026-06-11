@@ -25,7 +25,6 @@ test("add-link flow handles per-user duplicate skips from backend", () => {
 
 test("admin default scope uses own links instead of all users", () => {
   assert.match(appJs, /function getAdminTargetUserId/);
-  assert.match(appJs, /params\.user_id = getAdminTargetUserId\(\)/);
   assert.doesNotMatch(appJs, /label: 'My Links'/);
   assert.doesNotMatch(appJs, /label: 'All Users'/);
   assert.match(appJs, /state\.adminFilterUserId = currentUserId \|\| null/);
@@ -33,9 +32,14 @@ test("admin default scope uses own links instead of all users", () => {
   assert.match(appJs, /state\.items = \[\]/);
   assert.match(appJs, /state\.customGroups = selectedUserId \? getOwnerCustomGroups\(selectedUserId\) : \[\]/);
   assert.match(appJs, /const requestId = \+\+state\.dataLoadRequestId/);
-  assert.match(appJs, /loadData\(\{ preserveScroll: false, force: true, fastFirstPage: true \}\)/);
-  assert.match(appJs, /LIST_FAST_PAGE_SIZE: 80/);
-  assert.match(appJs, /function loadRemainingItems/);
+  assert.match(appJs, /const targetUserId = getAdminTargetUserId\(\)/);
+  assert.match(appJs, /if \(targetUserId\) params\.user_id = targetUserId/);
+  assert.match(appJs, /loadData\(\{ preserveScroll: false, force: true \}\)/);
+  assert.match(appJs, /function resetVirtualList/);
+  assert.match(appJs, /function loadVirtualPage/);
+  assert.match(appJs, /getItemsSummary\(params = \{\}\)/);
+  assert.doesNotMatch(appJs, /fastFirstPage/);
+  assert.doesNotMatch(appJs, /loadRemainingItems/);
 });
 
 test("add-link modal no longer renders the duplicate checkbox", () => {
@@ -53,6 +57,27 @@ test("rendered rows expose STT column target", () => {
 
 test("loadData does not pin the dashboard to a frontend item cap", () => {
   assert.doesNotMatch(appJs, /params\.limit = 500/);
+});
+
+test("large lists use backend summary and virtual page loading", () => {
+  assert.match(appJs, /LIST_PAGE_SIZE: 120/);
+  assert.match(appJs, /VIRTUAL_ROW_HEIGHT: 104/);
+  assert.match(appJs, /function renderVirtualPlaceholder/);
+  assert.match(appJs, /queueVirtualPagesForRange\(range\.start, range\.end\)/);
+  assert.match(appJs, /api\.getItemsSummary\(params\)/);
+  assert.match(appJs, /limit: CONFIG\.LIST_PAGE_SIZE/);
+  assert.match(appJs, /state\.virtualItems = new Array\(state\.listTotal\)/);
+});
+
+test("paged list sorting is sent to the backend", () => {
+  assert.match(appJs, /if \(params\.sort\) qs\.set\('sort', params\.sort\)/);
+  assert.match(appJs, /if \(params\.sort_direction\) qs\.set\('sort_direction', params\.sort_direction\)/);
+  assert.match(appJs, /if \(params\.checked_sort\) qs\.set\('checked_sort', params\.checked_sort\)/);
+  assert.match(appJs, /params\.checked_sort = state\.checkedSortMode/);
+  assert.match(appJs, /params\.sort = state\.metricSortColumn/);
+  assert.match(appJs, /params\.sort = state\.textSortColumn/);
+  assert.match(appJs, /sort: params\.sort \|\| ''/);
+  assert.match(appJs, /function reloadListAfterQueryStateChange/);
 });
 
 test("admin edit payload includes username", () => {
@@ -97,9 +122,9 @@ test("all-links search highlights rows and group cards by group accent", () => {
   assert.doesNotMatch(appJs, /GROUP_ACCENT_PALETTE/);
   assert.match(appJs, /group-item-search-match/);
   assert.match(appJs, /row-group-search-match/);
-  assert.match(appJs, /renderGroups\(\{ force: true \}\)/);
   assert.match(styleCss, /\.group-item-search-match/);
   assert.match(styleCss, /\.row-group-search-match/);
+  assert.match(appJs, /loadData\(\{ preserveScroll: false, force: true \}\)/);
 });
 
 test("search matches spotify links and URIs", () => {

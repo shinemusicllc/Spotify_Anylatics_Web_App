@@ -221,3 +221,9 @@
 - Fixed: users with hundreds of links no longer have to wait for the full payload before the first rows appear.
 - Affected files: `frontend/app.js`, `frontend/index.html`, `frontend/tests/ui_contract.test.mjs`, `docs/CHANGELOG.md`
 - Impact/Risk: Medium; group counts can update once after the background page completes, but API contracts stay unchanged.
+### 2026-06-11 11:20 - Virtualize large Spotify list loading
+- Added: `/api/items/summary` for fast counts and group totals without returning every row.
+- Changed: the frontend now loads list rows by backend pages, sends sort/search scope to the API, and renders only the visible viewport instead of merging the full user list in the background.
+- Fixed: switching to users with hundreds of links no longer blocks scrolling while the remaining rows are appended to the DOM.
+- Affected files: `backend/app/api/items.py`, `backend/app/schemas/item.py`, `backend/tests/test_admin_user_updates.py`, `frontend/app.js`, `frontend/index.html`, `frontend/tests/ui_contract.test.mjs`, `docs/CHANGELOG.md`
+- Impact/Risk: Medium; this changes the list loading contract while preserving existing `/api/items` payload keys.

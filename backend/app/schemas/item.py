@@ -74,6 +74,24 @@ class ItemListResponse(BaseModel):
     total: int
 
 
+class ItemGroupSummary(BaseModel):
+    """Group count for the current list owner scope."""
+
+    name: str
+    count: int
+
+
+class ItemSummaryResponse(BaseModel):
+    """Fast aggregate counts for paged list views."""
+
+    total: int
+    all_total: int
+    active: int
+    errors: int
+    crawling: int
+    groups: list[ItemGroupSummary]
+
+
 class ItemMoveRequest(BaseModel):
     item_ids: list[uuid.UUID]
     group: str | None = None
