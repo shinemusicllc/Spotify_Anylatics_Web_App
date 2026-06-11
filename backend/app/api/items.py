@@ -4,6 +4,7 @@ import asyncio
 from collections import defaultdict
 from datetime import datetime
 import io
+import json
 import uuid
 
 from fastapi import APIRouter, Body, Depends, HTTPException, Query
@@ -104,8 +105,40 @@ def _sort_expr_for_key(sort: str | None):
     return metric_exprs.get(sort or "")
 
 
+def _load_row_order_keys(user: User) -> list[str]:
+    try:
+        ui_preferences = getattr(user, "ui_preferences", None)
+        parsed = json.loads(ui_preferences) if ui_preferences else {}
+    except (json.JSONDecodeError, TypeError):
+        return []
+    row_order = parsed.get("row_order") if isinstance(parsed, dict) else None
+    if not isinstance(row_order, list):
+        return []
+    keys: list[str] = []
+    for value in row_order:
+        cleaned = str(value or "").strip()
+        if cleaned:
+            keys.append(cleaned)
+    return keys
+
+
+def _row_order_uuid_indexes(keys: list[str]) -> dict[uuid.UUID, int]:
+    indexes: dict[uuid.UUID, int] = {}
+    for idx, key in enumerate(keys):
+        candidate = key[3:] if key.startswith("id:") else key
+        try:
+            item_id = uuid.UUID(candidate)
+        except (ValueError, TypeError):
+            continue
+        if item_id not in indexes:
+            indexes[item_id] = idx
+    return indexes
+
+
 def _apply_item_sort(
     query,
+    current_user: User,
+    total: int = 0,
     sort: str | None = None,
     sort_direction: str | None = None,
     checked_sort: str | None = None,
@@ -136,6 +169,11 @@ def _apply_item_sort(
     if expr is not None:
         ordered_expr = expr.asc().nullslast() if direction == "asc" else expr.desc().nullslast()
         return query.order_by(ordered_expr, Item.updated_at.desc())
+
+    row_order_indexes = _row_order_uuid_indexes(_load_row_order_keys(current_user))
+    if total and len(row_order_indexes) >= total:
+        custom_order_expr = case(row_order_indexes, value=Item.id, else_=len(row_order_indexes))
+        return query.order_by(custom_order_expr.asc(), Item.updated_at.desc())
 
     return query.order_by(Item.updated_at.desc())
 
@@ -993,11 +1031,12 @@ async def list_items(
     """List all items with optional filters."""
     query = select(Item)
     query = _apply_item_scope(query, current_user, user_id, type, status, group, search)
-    query = _apply_item_sort(query, sort, sort_direction, checked_sort)
 
     count_query = select(func.count()).select_from(query.subquery())
     total_result = await db.execute(count_query)
     total = total_result.scalar() or 0
+
+    query = _apply_item_sort(query, current_user, total, sort, sort_direction, checked_sort)
 
     if offset:
         query = query.offset(offset)

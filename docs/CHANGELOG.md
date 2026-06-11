@@ -245,3 +245,8 @@
 - Fixed: batch refresh polling no longer reloads the full list after every completed job; it updates loaded rows and performs one canonical reload when the batch finishes.
 - Affected files: `frontend/app.js`, `frontend/index.html`, `frontend/tests/ui_contract.test.mjs`, `docs/CHANGELOG.md`
 - Impact/Risk: Medium; this changes large-list cache and refresh behavior while keeping API contracts unchanged.
+### 2026-06-11 14:45 - Restore drag reorder for virtual Spotify rows
+- Fixed: row drag/drop now updates the virtual item cache immediately instead of only reordering the loaded `state.items` copy.
+- Changed: `/api/items` applies saved row order from `ui_preferences` for unsorted paged lists when the stored order covers the current scope.
+- Affected files: `backend/app/api/items.py`, `backend/tests/test_items_move.py`, `frontend/app.js`, `frontend/index.html`, `frontend/tests/ui_contract.test.mjs`, `docs/CHANGELOG.md`
+- Impact/Risk: Medium; this restores custom row order after virtual paging without changing response payload keys.

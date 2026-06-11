@@ -1336,7 +1336,33 @@ function applyPersistedItemOrder(items) {
 }
 
 function persistCurrentItemOrder() {
+    const loadedVirtualItems = getLoadedVirtualItems();
+    if (state.listTotal > 0 && loadedVirtualItems.length >= state.listTotal) {
+        savePersistedRowOrder(loadedVirtualItems.map((item) => selectionKey(item)));
+        return;
+    }
     savePersistedRowOrder(state.items.map((item) => selectionKey(item)));
+}
+
+function persistMovedItemOrder(draggedKeys, targetKey, placement = 'before') {
+    const movedKeys = Array.from(new Set((draggedKeys || []).filter(Boolean)));
+    const movedSet = new Set(movedKeys);
+    const existingOrder = loadPersistedRowOrder();
+    if (
+        existingOrder.length
+        && targetKey
+        && existingOrder.includes(targetKey)
+        && movedKeys.every((key) => existingOrder.includes(key))
+    ) {
+        const remaining = existingOrder.filter((key) => !movedSet.has(key));
+        const targetIndex = remaining.indexOf(targetKey);
+        if (targetIndex !== -1) {
+            remaining.splice(placement === 'after' ? targetIndex + 1 : targetIndex, 0, ...movedKeys);
+            savePersistedRowOrder(remaining);
+            return;
+        }
+    }
+    persistCurrentItemOrder();
 }
 
 function syncSelectedItemsWithState() {
@@ -2119,17 +2145,32 @@ function moveItemsByKeys(draggedKeys, targetKey, placement = 'before') {
     const draggedSet = new Set((draggedKeys || []).filter(Boolean));
     if (!draggedSet.size || !targetKey || draggedSet.has(targetKey)) return false;
 
-    const draggedItems = state.items.filter((item) => draggedSet.has(selectionKey(item)));
+    const usingVirtualList = state.listTotal > 0 && Array.isArray(state.virtualItems) && state.virtualItems.length;
+    const sourceItems = usingVirtualList ? getLoadedVirtualItems() : state.items;
+    const draggedItems = sourceItems.filter((item) => draggedSet.has(selectionKey(item)));
     if (!draggedItems.length) return false;
 
-    const remaining = state.items.filter((item) => !draggedSet.has(selectionKey(item)));
+    const remaining = sourceItems.filter((item) => !draggedSet.has(selectionKey(item)));
     const targetIndex = remaining.findIndex((item) => selectionKey(item) === targetKey);
     if (targetIndex === -1) return false;
 
     const insertIndex = placement === 'after' ? targetIndex + 1 : targetIndex;
     remaining.splice(insertIndex, 0, ...draggedItems);
-    state.items = remaining;
-    persistCurrentItemOrder();
+    if (usingVirtualList) {
+        const loadedIndexes = [];
+        state.virtualItems.forEach((item, idx) => {
+            if (item) loadedIndexes.push(idx);
+        });
+        const nextVirtualItems = state.virtualItems.slice();
+        loadedIndexes.forEach((idx, orderIdx) => {
+            nextVirtualItems[idx] = remaining[orderIdx];
+        });
+        state.virtualItems = nextVirtualItems;
+        state.items = getLoadedVirtualItems();
+    } else {
+        state.items = remaining;
+    }
+    persistMovedItemOrder(Array.from(draggedSet), targetKey, placement);
     return true;
 }
 

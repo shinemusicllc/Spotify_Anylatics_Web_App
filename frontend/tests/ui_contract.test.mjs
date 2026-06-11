@@ -77,6 +77,15 @@ test("large lists use backend summary and virtual page loading", () => {
   assert.match(appJs, /preserveLoaded: previousScopeKey === getBackendListScopeKey\(params\) && previousTotal === total/);
 });
 
+test("virtual row drag updates cached rows and persists full order only when available", () => {
+  assert.match(appJs, /function persistMovedItemOrder\(draggedKeys, targetKey, placement = 'before'\)/);
+  assert.match(appJs, /const usingVirtualList = state\.listTotal > 0 && Array\.isArray\(state\.virtualItems\) && state\.virtualItems\.length/);
+  assert.match(appJs, /const sourceItems = usingVirtualList \? getLoadedVirtualItems\(\) : state\.items/);
+  assert.match(appJs, /const nextVirtualItems = state\.virtualItems\.slice\(\)/);
+  assert.match(appJs, /nextVirtualItems\[idx\] = remaining\[orderIdx\]/);
+  assert.match(appJs, /persistMovedItemOrder\(Array\.from\(draggedSet\), targetKey, placement\)/);
+});
+
 test("paged list sorting is sent to the backend", () => {
   assert.match(appJs, /if \(params\.sort\) qs\.set\('sort', params\.sort\)/);
   assert.match(appJs, /if \(params\.sort_direction\) qs\.set\('sort_direction', params\.sort_direction\)/);

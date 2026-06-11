@@ -1,4 +1,5 @@
 import asyncio
+import json
 import uuid
 
 import pytest
@@ -88,3 +89,26 @@ def test_admin_can_move_any_user_items():
         assert item.group is None
 
     asyncio.run(run())
+
+
+def test_row_order_keys_parse_uuid_id_prefixes():
+    first = uuid.uuid4()
+    second = uuid.uuid4()
+    user = SimpleNamespace(
+        ui_preferences=json.dumps(
+            {
+                "row_order": [
+                    f"id:{first}",
+                    "not-a-uuid",
+                    str(second),
+                    f"id:{first}",
+                ]
+            }
+        )
+    )
+
+    indexes = items_api._row_order_uuid_indexes(items_api._load_row_order_keys(user))
+
+    assert indexes[first] == 0
+    assert indexes[second] == 2
+    assert len(indexes) == 2
