@@ -33,6 +33,9 @@ test("admin default scope uses own links instead of all users", () => {
   assert.match(appJs, /state\.items = \[\]/);
   assert.match(appJs, /state\.customGroups = selectedUserId \? getOwnerCustomGroups\(selectedUserId\) : \[\]/);
   assert.match(appJs, /const requestId = \+\+state\.dataLoadRequestId/);
+  assert.match(appJs, /loadData\(\{ preserveScroll: false, force: true, fastFirstPage: true \}\)/);
+  assert.match(appJs, /LIST_FAST_PAGE_SIZE: 80/);
+  assert.match(appJs, /function loadRemainingItems/);
 });
 
 test("add-link modal no longer renders the duplicate checkbox", () => {

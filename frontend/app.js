@@ -19,6 +19,7 @@ const CONFIG = {
     BACKGROUND_SYNC_INTERVAL: 12000,
     LIST_INITIAL_RENDER_COUNT: 80,
     LIST_RENDER_BATCH_SIZE: 80,
+    LIST_FAST_PAGE_SIZE: 80,
 };
 const GROUP_STORAGE_KEY = 'spoticheck_custom_groups_v1';
 const ROW_ORDER_STORAGE_KEY = 'spoticheck_row_order_v1';
@@ -5730,12 +5731,41 @@ function handleAdminFilterChange(val) {
     if (breadcrumb) breadcrumb.textContent = ALL_GROUP_LABEL + ' (' + username + ')';
 
     syncGroupsFromServer(selectedUserId || null);
-    loadData({ preserveScroll: false, force: true });
+    loadData({ preserveScroll: false, force: true, fastFirstPage: true });
+}
+
+function commitIncomingItems(incoming) {
+    state.items = applyPersistedItemOrder(mergeItemsKeepOrder(state.items, incoming));
+    persistCurrentItemOrder();
+    syncSelectedItemsWithState();
+    syncGroupUI(true);
+}
+
+async function loadRemainingItems(requestId, baseParams, offset, opts = {}) {
+    try {
+        const data = await api.getItems({
+            ...baseParams,
+            offset,
+        });
+        if (requestId !== state.dataLoadRequestId) return;
+        if (!data) return;
+        const incoming = data.items || data || [];
+        if (!incoming.length) return;
+        commitIncomingItems(incoming);
+        renderList({
+            preserveScroll: opts.preserveScroll !== false,
+            force: Boolean(opts.force),
+        });
+    } catch (err) {
+        if (requestId !== state.dataLoadRequestId) return;
+        console.warn('loadRemainingItems error:', err);
+    }
 }
 
 async function loadData(opts = {}) {
     const preserveScroll = Boolean(opts?.preserveScroll);
     const force = Boolean(opts?.force);
+    const fastFirstPage = Boolean(opts?.fastFirstPage);
     const requestId = ++state.dataLoadRequestId;
     const skeleton = document.getElementById('skeleton-container');
 
@@ -5759,16 +5789,26 @@ async function loadData(opts = {}) {
             if (requestId !== state.dataLoadRequestId) return;
             params.user_id = getAdminTargetUserId();
         }
+        if (fastFirstPage) {
+            params.limit = CONFIG.LIST_FAST_PAGE_SIZE;
+            params.offset = 0;
+        }
         const data = await api.getItems(params);
         if (requestId !== state.dataLoadRequestId) return;
         if (!data) return;
         const incoming = data.items || data || [];
-        state.items = applyPersistedItemOrder(mergeItemsKeepOrder(state.items, incoming));
-        persistCurrentItemOrder();
-        syncSelectedItemsWithState();
-        syncGroupUI(true);
+        commitIncomingItems(incoming);
         if (skeleton) skeleton.style.display = 'none';
         renderList({ preserveScroll, force });
+        const total = Number(data.total || 0);
+        if (fastFirstPage && total > incoming.length) {
+            loadRemainingItems(
+                requestId,
+                { ...params, limit: undefined },
+                incoming.length,
+                { preserveScroll: true, force: true },
+            );
+        }
     } catch (err) {
         if (requestId !== state.dataLoadRequestId) return;
         console.error('loadData error:', err);
@@ -5778,9 +5818,7 @@ async function loadData(opts = {}) {
         } else {
             state.items = applyPersistedItemOrder(getDemoData());
         }
-        persistCurrentItemOrder();
-        syncSelectedItemsWithState();
-        syncGroupUI(true);
+        commitIncomingItems(state.items);
         renderList({ preserveScroll, force });
     }
 }

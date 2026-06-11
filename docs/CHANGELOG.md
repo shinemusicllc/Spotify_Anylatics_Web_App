@@ -216,3 +216,8 @@
 - Added: concise project memory routing files required by the repo rules.
 - Affected files: `frontend/app.js`, `frontend/index.html`, `frontend/tests/ui_contract.test.mjs`, `docs/PROJECT_BRIEF.md`, `docs/MEMORY_INDEX.md`, `docs/DECISIONS_INDEX.md`, `docs/CHANGELOG.md`
 - Impact/Risk: Medium; this touches frontend state/render flow while keeping API contracts unchanged.
+### 2026-06-11 10:55 - Load large Spotify user lists in two phases
+- Changed: admin user switching now requests a small first page of links immediately, then loads the remaining rows in the background with `offset`.
+- Fixed: users with hundreds of links no longer have to wait for the full payload before the first rows appear.
+- Affected files: `frontend/app.js`, `frontend/index.html`, `frontend/tests/ui_contract.test.mjs`, `docs/CHANGELOG.md`
+- Impact/Risk: Medium; group counts can update once after the background page completes, but API contracts stay unchanged.
