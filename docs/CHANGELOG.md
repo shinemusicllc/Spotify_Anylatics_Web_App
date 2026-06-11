@@ -231,3 +231,7 @@
 - Fixed: Docker builds on the VPS no longer scan `deploy/mail/docker-data`, which can contain root-owned mail config files and block deploy-user builds.
 - Affected files: `.dockerignore`, `docs/CHANGELOG.md`
 - Impact/Risk: Low; this only narrows the Docker build context and does not change runtime code.
+### 2026-06-11 12:10 - Preserve scroll position in virtual Spotify lists
+- Fixed: virtual list rendering now computes the visible range before clearing rows and keeps the full virtual height during rerender, preventing the list from snapping back to the top while scrolling.
+- Affected files: `frontend/app.js`, `frontend/index.html`, `frontend/tests/ui_contract.test.mjs`, `docs/CHANGELOG.md`
+- Impact/Risk: Low; this is scoped to frontend scroll rendering for paged lists.

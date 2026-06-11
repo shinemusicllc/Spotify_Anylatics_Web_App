@@ -4048,17 +4048,21 @@ function renderList(opts = {}) {
         state.filteredItems = loadedItems;
         state.listRenderToken += 1;
         const renderToken = state.listRenderToken;
-        clearRenderedRows(container);
-        if (skeleton) skeleton.style.display = 'none';
-        if (emptyState) emptyState.style.display = total > 0 ? 'none' : '';
-
         if (total === 0) {
+            container.style.minHeight = '';
+            clearRenderedRows(container);
+            if (skeleton) skeleton.style.display = 'none';
+            if (emptyState) emptyState.style.display = '';
             updateKPIs();
             return;
         }
 
         const range = getVirtualRange(container);
         queueVirtualPagesForRange(range.start, range.end);
+        container.style.minHeight = `${Math.max(0, total * CONFIG.VIRTUAL_ROW_HEIGHT)}px`;
+        clearRenderedRows(container);
+        if (skeleton) skeleton.style.display = 'none';
+        if (emptyState) emptyState.style.display = total > 0 ? 'none' : '';
         const frag = document.createDocumentFragment();
         if (range.start > 0) {
             frag.appendChild(createVirtualSpacer(range.start * CONFIG.VIRTUAL_ROW_HEIGHT));
@@ -4080,6 +4084,7 @@ function renderList(opts = {}) {
         return;
     }
 
+    container.style.minHeight = '';
     const items = getVisibleItems();
     state.filteredItems = items;
     const listRenderSignature = getListRenderSignature(items);
