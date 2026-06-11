@@ -17,6 +17,8 @@ const CONFIG = {
     DRAG_SCROLL_EDGE: 72,
     DRAG_SCROLL_MAX_SPEED: 22,
     BACKGROUND_SYNC_INTERVAL: 12000,
+    LIST_INITIAL_RENDER_COUNT: 80,
+    LIST_RENDER_BATCH_SIZE: 80,
 };
 const GROUP_STORAGE_KEY = 'spoticheck_custom_groups_v1';
 const ROW_ORDER_STORAGE_KEY = 'spoticheck_row_order_v1';
@@ -260,6 +262,8 @@ const state = {
     textSortMenuOpenKey: null,
     checkedSortMode: CHECKED_SORT_MODES.NONE,
     checkedSortMenuOpen: false,
+    dataLoadRequestId: 0,
+    listRenderToken: 0,
     lastGroupRenderSignature: '',
     lastListRenderSignature: '',
 };
@@ -1508,7 +1512,8 @@ function getGroupsFromUserRecord(userRecord) {
 
 function getOwnerCustomGroups(ownerUserId) {
     const ownerId = ownerUserId ? String(ownerUserId) : '';
-    if (isAdminAllUsersMode() && ownerId) {
+    const currentUser = getAuthUser();
+    if (currentUser?.role === 'admin' && ownerId) {
         const user = (state.adminUserList || []).find((u) => String(u.id || u._id || '') === ownerId);
         return getGroupsFromUserRecord(user);
     }
@@ -1545,9 +1550,10 @@ async function syncGroupsFromServer(targetUserId) {
     try {
         var token = getAuthToken();
         if (!token) return;
+        const requestedTargetUserId = targetUserId ? String(targetUserId) : null;
         var url = CONFIG.API_BASE;
-        if (targetUserId) {
-            url += '/auth/users/' + targetUserId + '/groups';
+        if (requestedTargetUserId) {
+            url += '/auth/users/' + requestedTargetUserId + '/groups';
         } else {
             url += '/auth/me/groups';
         }
@@ -1559,11 +1565,19 @@ async function syncGroupsFromServer(targetUserId) {
             return;
         }
         var data = await res.json();
+        const currentUser = getAuthUser();
+        if (
+            currentUser?.role === 'admin'
+            && requestedTargetUserId
+            && String(state.adminFilterUserId || '') !== requestedTargetUserId
+        ) {
+            return;
+        }
         var serverGroups = (data.groups || []).map(normalizeStoredGroupName).filter(Boolean);
 
-        if (targetUserId) {
+        if (requestedTargetUserId) {
             // Admin viewing another user's groups
-            setOwnerCustomGroups(String(targetUserId), serverGroups);
+            setOwnerCustomGroups(requestedTargetUserId, serverGroups);
             state.customGroups = serverGroups.slice();
         } else {
             // Own groups â€” server is source of truth
@@ -1577,14 +1591,13 @@ async function syncGroupsFromServer(targetUserId) {
                 // Server has data â€” use server as source of truth
                 state.customGroups = serverGroups;
             }
-            var currentUser = getAuthUser();
             if (currentUser?.id) {
                 setOwnerCustomGroups(String(currentUser.id), state.customGroups || []);
             }
             localStorage.setItem(getUserGroupStorageKey(), JSON.stringify(state.customGroups));
         }
         syncGroupUI(true);
-        console.log('[Groups Sync] Synced', state.customGroups.length, 'groups for', targetUserId || 'self');
+        console.log('[Groups Sync] Synced', state.customGroups.length, 'groups for', requestedTargetUserId || 'self');
     } catch (err) {
         console.warn('[Groups Sync] Error:', err.message);
     }
@@ -3751,6 +3764,87 @@ function escapeHtml(str) {
     return el.innerHTML;
 }
 
+function clearRenderedRows(container = document.getElementById('link-list')) {
+    if (!container) return;
+    container.querySelectorAll('.custom-grid-row').forEach(el => el.remove());
+}
+
+function showListLoadingState() {
+    const container = document.getElementById('link-list');
+    const skeleton = document.getElementById('skeleton-container');
+    const emptyState = document.getElementById('empty-state');
+    state.listRenderToken += 1;
+    state.lastListRenderSignature = '';
+    clearRenderedRows(container);
+    if (emptyState) emptyState.style.display = 'none';
+    if (skeleton) skeleton.style.display = '';
+    updateKPIs();
+}
+
+function getListRenderSignature(items) {
+    return JSON.stringify({
+        activeGroup: normalizeGroupName(state.activeGroup) || ALL_GROUP_ID,
+        searchQuery: state.searchQuery || '',
+        selectedItemKeys: Array.from(state.selectedItemKeys).sort(),
+        draggingRowKeys: state.draggingRowKeys.slice(),
+        dragOverRowKey: state.dragOverRowKey || '',
+        dragOverRowPlacement: state.dragOverRowPlacement || '',
+        metricSortColumn: state.metricSortColumn || '',
+        metricSortMode: state.metricSortMode || '',
+        metricSortDirection: state.metricSortDirection || '',
+        metricSortMenuOpenKey: state.metricSortMenuOpenKey || '',
+        textSortColumn: state.textSortColumn || '',
+        textSortDirection: state.textSortDirection || '',
+        textSortMenuOpenKey: state.textSortMenuOpenKey || '',
+        checkedSortMode: state.checkedSortMode || '',
+        checkedSortMenuOpen: Boolean(state.checkedSortMenuOpen),
+        totalItemCount: state.items.length,
+        visibleItems: items.map((item) => [
+            selectionKey(item),
+            String(item.id || ''),
+            String(item.type || ''),
+            String(item.spotify_id || ''),
+            String(item.user_id || ''),
+            String(item.status || ''),
+            String(item.error_code || ''),
+            String(item.last_checked || ''),
+            String(item.created_at || ''),
+            String(item.group || ''),
+            String(item.followers ?? ''),
+            String(item.monthly_listeners ?? ''),
+            String(item.playcount ?? ''),
+            String(item.total_plays ?? ''),
+            String(item.track_count ?? ''),
+            String(item.saves ?? ''),
+        ].join('|')),
+    });
+}
+
+function renderRowsInBatches(container, items, renderToken, afterFirstBatch) {
+    let index = 0;
+    let firstBatchDone = false;
+    const appendBatch = (batchSize) => {
+        if (renderToken !== state.listRenderToken) return;
+        const frag = document.createDocumentFragment();
+        const end = Math.min(index + batchSize, items.length);
+        for (; index < end; index += 1) {
+            frag.appendChild(renderRow(items[index], index));
+        }
+        container.appendChild(frag);
+        syncRowDragUi(container);
+        refreshCheckedLabels();
+        if (!firstBatchDone) {
+            firstBatchDone = true;
+            if (typeof afterFirstBatch === 'function') afterFirstBatch();
+        }
+        if (index < items.length) {
+            requestAnimationFrame(() => appendBatch(CONFIG.LIST_RENDER_BATCH_SIZE));
+        }
+    };
+
+    appendBatch(CONFIG.LIST_INITIAL_RENDER_COUNT);
+}
+
 // â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
 // RENDER ENGINE
 // â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
@@ -3778,56 +3872,7 @@ function renderList(opts = {}) {
 
     const items = getVisibleItems();
     state.filteredItems = items;
-    const listRenderSignature = JSON.stringify({
-        activeGroup: normalizeGroupName(state.activeGroup) || ALL_GROUP_ID,
-        searchQuery: state.searchQuery || '',
-        selectedItemKeys: Array.from(state.selectedItemKeys).sort(),
-        draggingRowKeys: state.draggingRowKeys.slice(),
-        dragOverRowKey: state.dragOverRowKey || '',
-        dragOverRowPlacement: state.dragOverRowPlacement || '',
-        metricSortColumn: state.metricSortColumn || '',
-        metricSortMode: state.metricSortMode || '',
-        metricSortDirection: state.metricSortDirection || '',
-        metricSortMenuOpenKey: state.metricSortMenuOpenKey || '',
-        textSortColumn: state.textSortColumn || '',
-        textSortDirection: state.textSortDirection || '',
-        textSortMenuOpenKey: state.textSortMenuOpenKey || '',
-        totalItemCount: state.items.length,
-        visibleItems: items.map((item) => {
-            const excel = getExcelColumnValues(item);
-            return [
-                selectionKey(item),
-                String(item.id || ''),
-                String(item.type || ''),
-                String(item.spotify_id || ''),
-                String(item.user_id || ''),
-                String(getDisplayTitle(item) || ''),
-                String(getItemSubtitle(item) || ''),
-                String(item.owner_name || ''),
-                String(item.owner_image || ''),
-                String(item.image || ''),
-                String(item.status || ''),
-                String(item.error_code || ''),
-                String(item.error_message || ''),
-                String(item.last_checked || ''),
-                String(item.created_at || ''),
-                String(item.group || ''),
-                String(excel.playlistSaves ?? ''),
-                String(excel.playlistSavesDelta ?? ''),
-                String(excel.playlistTrackCount ?? ''),
-                String(excel.playlistTrackCountDelta ?? ''),
-                String(excel.albumTrackCount ?? ''),
-                String(excel.albumTrackCountDelta ?? ''),
-                String(excel.artistFollowers ?? ''),
-                String(excel.artistFollowersDelta ?? ''),
-                String(excel.artistListeners ?? ''),
-                String(excel.artistListenersDelta ?? ''),
-                String(excel.trackViews ?? ''),
-                String(excel.trackViewsDelta ?? ''),
-                String(excel.deltaDays ?? ''),
-            ].join('|');
-        }),
-    });
+    const listRenderSignature = getListRenderSignature(items);
     const hasRenderedRows = container.querySelector('.custom-grid-row') || (emptyState && emptyState.style.display !== 'none');
     if (!force && hasRenderedRows && listRenderSignature === state.lastListRenderSignature) {
         if (skeleton) skeleton.style.display = 'none';
@@ -3841,7 +3886,9 @@ function renderList(opts = {}) {
     state.lastListRenderSignature = listRenderSignature;
 
     // Clear previous rows (keep skeleton and empty state)
-    container.querySelectorAll('.custom-grid-row').forEach(el => el.remove());
+    state.listRenderToken += 1;
+    const renderToken = state.listRenderToken;
+    clearRenderedRows(container);
 
     if (skeleton) skeleton.style.display = 'none';
 
@@ -3861,6 +3908,7 @@ function renderList(opts = {}) {
             updateMetricSortControlsUI();
             updateTextSortControlsUI();
             restoreScroll();
+            updateKPIs();
             return;
         }
 
@@ -3873,6 +3921,7 @@ function renderList(opts = {}) {
         updateMetricSortControlsUI();
         updateTextSortControlsUI();
         restoreScroll();
+        updateKPIs();
         return;
     }
 
@@ -3880,17 +3929,12 @@ function renderList(opts = {}) {
     if (emptyDescEl) emptyDescEl.textContent = defaultEmptyDescription;
     if (emptyState) emptyState.style.display = 'none';
 
-    // Render all rows
-    const frag = document.createDocumentFragment();
-    items.forEach((item, index) => frag.appendChild(renderRow(item, index)));
-    container.appendChild(frag);
+    renderRowsInBatches(container, items, renderToken, restoreScroll);
 
     // Update KPIs
     updateKPIs();
-    refreshCheckedLabels();
     updateMetricSortControlsUI();
     updateTextSortControlsUI();
-    restoreScroll();
 }
 function refreshCheckedLabels() {
     const labels = document.querySelectorAll('#link-list .row-checked');
@@ -5660,28 +5704,39 @@ function rebuildAdminUserFilterOptions() {
 
 function handleAdminFilterChange(val) {
     const currentUser = getAuthUser();
-    state.adminFilterUserId = val || (currentUser?.id ? String(currentUser.id) : null);
+    const selectedUserId = val || (currentUser?.id ? String(currentUser.id) : null);
+    state.adminFilterUserId = selectedUserId;
     state.activeGroup = ALL_GROUP_ID;
     state.groupSearchQuery = '';
     clearRowSelection();
+    clearGroupSelection();
+    state.items = [];
+    state.filteredItems = [];
+    state.draggingRowKeys = [];
+    state.dragOverRowKey = null;
+    state.contextMenuAnchorSelectionKey = null;
+    state.itemClipboard = { keys: [], mode: null };
+    state.customGroups = selectedUserId ? getOwnerCustomGroups(selectedUserId) : [];
+    state.groups = [{ id: ALL_GROUP_ID, name: ALL_GROUP_LABEL, count: 0 }];
+    state.lastGroupRenderSignature = '';
+    syncGroupUI(true);
+    showListLoadingState();
 
     var pageTitle = document.getElementById('page-title');
     var breadcrumb = document.getElementById('breadcrumb-group');
-    var selectedUserId = state.adminFilterUserId;
     var selectedUser = state.adminUserList.find(function(u) { return String(u.id || u._id) === selectedUserId; });
     var username = (selectedUser && (selectedUser.display_name || selectedUser.username)) || selectedUserId;
     if (pageTitle) pageTitle.textContent = ALL_GROUP_LABEL + ' (' + username + ')';
     if (breadcrumb) breadcrumb.textContent = ALL_GROUP_LABEL + ' (' + username + ')';
 
-    loadData({ preserveScroll: false });
-    if (selectedUserId && currentUser && String(selectedUserId) === String(currentUser.id || '')) {
-        state.customGroups = loadCustomGroups();
-    }
     syncGroupsFromServer(selectedUserId || null);
+    loadData({ preserveScroll: false, force: true });
 }
 
 async function loadData(opts = {}) {
     const preserveScroll = Boolean(opts?.preserveScroll);
+    const force = Boolean(opts?.force);
+    const requestId = ++state.dataLoadRequestId;
     const skeleton = document.getElementById('skeleton-container');
 
     // Keep health async so list rendering is not blocked by a separate round-trip.
@@ -5701,9 +5756,11 @@ async function loadData(opts = {}) {
         const currentUser = getAuthUser();
         if (currentUser?.role === 'admin') {
             await _fetchAdminUsers({ preferCache: Boolean(state.adminFilterUserId) });
+            if (requestId !== state.dataLoadRequestId) return;
             params.user_id = getAdminTargetUserId();
         }
         const data = await api.getItems(params);
+        if (requestId !== state.dataLoadRequestId) return;
         if (!data) return;
         const incoming = data.items || data || [];
         state.items = applyPersistedItemOrder(mergeItemsKeepOrder(state.items, incoming));
@@ -5711,8 +5768,9 @@ async function loadData(opts = {}) {
         syncSelectedItemsWithState();
         syncGroupUI(true);
         if (skeleton) skeleton.style.display = 'none';
-        renderList({ preserveScroll });
+        renderList({ preserveScroll, force });
     } catch (err) {
+        if (requestId !== state.dataLoadRequestId) return;
         console.error('loadData error:', err);
         if (skeleton) skeleton.style.display = 'none';
         if (getAuthToken()) {
@@ -5723,7 +5781,7 @@ async function loadData(opts = {}) {
         persistCurrentItemOrder();
         syncSelectedItemsWithState();
         syncGroupUI(true);
-        renderList({ preserveScroll });
+        renderList({ preserveScroll, force });
     }
 }
 

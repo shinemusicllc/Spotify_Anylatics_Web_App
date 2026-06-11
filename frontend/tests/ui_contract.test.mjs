@@ -29,7 +29,10 @@ test("admin default scope uses own links instead of all users", () => {
   assert.doesNotMatch(appJs, /label: 'My Links'/);
   assert.doesNotMatch(appJs, /label: 'All Users'/);
   assert.match(appJs, /state\.adminFilterUserId = currentUserId \|\| null/);
-  assert.match(appJs, /state\.adminFilterUserId = val \|\| \(currentUser\?\.id \? String\(currentUser\.id\) : null\)/);
+  assert.match(appJs, /const selectedUserId = val \|\| \(currentUser\?\.id \? String\(currentUser\.id\) : null\)/);
+  assert.match(appJs, /state\.items = \[\]/);
+  assert.match(appJs, /state\.customGroups = selectedUserId \? getOwnerCustomGroups\(selectedUserId\) : \[\]/);
+  assert.match(appJs, /const requestId = \+\+state\.dataLoadRequestId/);
 });
 
 test("add-link modal no longer renders the duplicate checkbox", () => {
@@ -40,7 +43,9 @@ test("add-link modal no longer renders the duplicate checkbox", () => {
 test("rendered rows expose STT column target", () => {
   assert.match(appJs, /data-col-key="stt"/);
   assert.match(indexHtml, /Resize STT column/);
-  assert.match(appJs, /items\.forEach\(\(item, index\) => frag\.appendChild\(renderRow\(item, index\)\)\)/);
+  assert.match(appJs, /function renderRowsInBatches/);
+  assert.match(appJs, /frag\.appendChild\(renderRow\(items\[index\], index\)\)/);
+  assert.match(appJs, /requestAnimationFrame\(\(\) => appendBatch\(CONFIG\.LIST_RENDER_BATCH_SIZE\)\)/);
 });
 
 test("loadData does not pin the dashboard to a frontend item cap", () => {

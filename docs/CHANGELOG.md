@@ -210,3 +210,9 @@
 - Fixed: large user lists no longer spend tens of seconds building item responses, avoiding Cloudflare 524 timeouts on the dashboard.
 - Affected files: `backend/app/api/items.py`, `backend/app/database.py`, `docs/CHANGELOG.md`
 - Impact/Risk: Low; API response shape is unchanged, only query strategy and supporting indexes changed.
+### 2026-06-11 10:05 - Smooth large Spotify list switching
+- Changed: admin user switching now clears the previous scope immediately, ignores stale in-flight responses, and shows the selected user's cached groups before fresh data arrives.
+- Changed: large link lists now render rows in animation-frame batches and use a lighter render signature to reduce main-thread blocking.
+- Added: concise project memory routing files required by the repo rules.
+- Affected files: `frontend/app.js`, `frontend/index.html`, `frontend/tests/ui_contract.test.mjs`, `docs/PROJECT_BRIEF.md`, `docs/MEMORY_INDEX.md`, `docs/DECISIONS_INDEX.md`, `docs/CHANGELOG.md`
+- Impact/Risk: Medium; this touches frontend state/render flow while keeping API contracts unchanged.
