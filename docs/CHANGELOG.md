@@ -235,3 +235,7 @@
 - Fixed: virtual list rendering now computes the visible range before clearing rows and keeps the full virtual height during rerender, preventing the list from snapping back to the top while scrolling.
 - Affected files: `frontend/app.js`, `frontend/index.html`, `frontend/tests/ui_contract.test.mjs`, `docs/CHANGELOG.md`
 - Impact/Risk: Low; this is scoped to frontend scroll rendering for paged lists.
+### 2026-06-11 12:35 - Stop virtual list scroll restoration during user scroll
+- Fixed: virtual page loads and scroll-driven renders no longer restore an old `scrollTop`, preventing queued render frames from pulling the link list back to the top while the user scrolls.
+- Affected files: `frontend/app.js`, `frontend/index.html`, `frontend/tests/ui_contract.test.mjs`, `docs/CHANGELOG.md`
+- Impact/Risk: Low; this only changes virtual list scroll behavior and keeps explicit preserve-scroll callers intact.

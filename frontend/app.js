@@ -5973,7 +5973,7 @@ async function loadVirtualPage(offset, opts = {}) {
         const incoming = data.items || data || [];
         commitPageItems(incoming, normalizedOffset, data.total);
         renderList({
-            preserveScroll: opts.preserveScroll !== false,
+            preserveScroll: Boolean(opts.preserveScroll),
             force: Boolean(opts.force),
         });
     } catch (err) {
@@ -6133,7 +6133,7 @@ function initVirtualListScroll() {
         raf = requestAnimationFrame(() => {
             raf = null;
             if (state.currentView === 'linkchecker' && state.listTotal > 0) {
-                renderList({ preserveScroll: true, force: true });
+                renderList({ preserveScroll: false, force: true });
             }
         });
     };

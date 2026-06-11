@@ -69,6 +69,8 @@ test("large lists use backend summary and virtual page loading", () => {
   assert.match(appJs, /state\.virtualItems = new Array\(state\.listTotal\)/);
   assert.match(appJs, /const range = getVirtualRange\(container\)[\s\S]*?clearRenderedRows\(container\)/);
   assert.match(appJs, /container\.style\.minHeight = `\$\{Math\.max\(0, total \* CONFIG\.VIRTUAL_ROW_HEIGHT\)\}px`/);
+  assert.match(appJs, /preserveScroll: Boolean\(opts\.preserveScroll\)/);
+  assert.match(appJs, /renderList\(\{ preserveScroll: false, force: true \}\)/);
 });
 
 test("paged list sorting is sent to the backend", () => {
