@@ -204,3 +204,9 @@
 - Fixed: live app on `spotify.jazzrelaxation.com` now includes the Spotify link-aware search behavior from the local patch.
 - Affected files: `docs/WORKLOG.md`, `docs/CHANGELOG.md`
 - Impact/Risk: Low; rollout completed cleanly and `https://spotify.jazzrelaxation.com/api/health` returned `ok` after rebuild.
+### 2026-06-11 09:25 - Fix slow Spotify item list response
+- Changed: `/api/items` now loads only the newest raw response per Spotify ID and the latest two snapshots per item instead of hydrating full history through the ORM.
+- Added: database indexes for latest raw-response and recent snapshot lookups.
+- Fixed: large user lists no longer spend tens of seconds building item responses, avoiding Cloudflare 524 timeouts on the dashboard.
+- Affected files: `backend/app/api/items.py`, `backend/app/database.py`, `docs/CHANGELOG.md`
+- Impact/Risk: Low; API response shape is unchanged, only query strategy and supporting indexes changed.

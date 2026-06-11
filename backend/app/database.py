@@ -163,6 +163,8 @@ async def init_db():
         "DROP INDEX IF EXISTS items_user_id_item_type_spotify_id_key",
         "CREATE INDEX IF NOT EXISTS ix_items_spotify_id ON items(spotify_id)",
         "CREATE INDEX IF NOT EXISTS ix_items_user_type_spotify ON items(user_id, item_type, spotify_id)",
+        "CREATE INDEX IF NOT EXISTS ix_raw_responses_spotify_captured ON raw_responses(spotify_id, captured_at DESC)",
+        "CREATE INDEX IF NOT EXISTS ix_metrics_snapshots_item_captured ON metrics_snapshots(item_id, captured_at DESC)",
         "ALTER TABLE crawl_jobs ADD COLUMN IF NOT EXISTS user_id UUID REFERENCES users(id)",
         "CREATE INDEX IF NOT EXISTS ix_crawl_jobs_user_id ON crawl_jobs(user_id)",
         "ALTER TABLE users ADD COLUMN IF NOT EXISTS avatar TEXT",

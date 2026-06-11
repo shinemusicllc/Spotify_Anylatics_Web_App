@@ -306,20 +306,32 @@ def _compute_delta(current: int | None, previous: int | None) -> int | None:
 
 
 async def _load_latest_raw_data(db: AsyncSession, items: list[Item]) -> dict[str, dict]:
-    spotify_ids = [item.spotify_id for item in items if item.spotify_id]
+    spotify_ids = list(dict.fromkeys(item.spotify_id for item in items if item.spotify_id))
     if not spotify_ids:
         return {}
 
-    result = await db.execute(
-        select(RawResponse)
+    ranked_raw = (
+        select(
+            RawResponse.spotify_id.label("spotify_id"),
+            RawResponse.response_data.label("response_data"),
+            func.row_number()
+            .over(
+                partition_by=RawResponse.spotify_id,
+                order_by=RawResponse.captured_at.desc(),
+            )
+            .label("row_num"),
+        )
         .where(RawResponse.spotify_id.in_(spotify_ids))
-        .order_by(RawResponse.captured_at.desc())
+        .subquery()
     )
-    rows = result.scalars().all()
+    result = await db.execute(
+        select(ranked_raw.c.spotify_id, ranked_raw.c.response_data)
+        .where(ranked_raw.c.row_num == 1)
+    )
     raw_map: dict[str, dict] = {}
-    for row in rows:
-        if row.spotify_id not in raw_map and isinstance(row.response_data, dict):
-            raw_map[row.spotify_id] = row.response_data
+    for spotify_id, response_data in result.all():
+        if isinstance(response_data, dict):
+            raw_map[spotify_id] = response_data
     return raw_map
 
 
@@ -328,9 +340,26 @@ async def _load_recent_snapshots(db: AsyncSession, items: list[Item]) -> dict:
     if not item_ids:
         return {}
 
+    ranked_snapshots = (
+        select(
+            MetricsSnapshot,
+            func.row_number()
+            .over(
+                partition_by=MetricsSnapshot.item_id,
+                order_by=MetricsSnapshot.captured_at.desc(),
+            )
+            .label("row_num"),
+        )
+        .where(MetricsSnapshot.item_id.in_(item_ids))
+        .subquery()
+    )
     result = await db.execute(
         select(MetricsSnapshot)
-        .where(MetricsSnapshot.item_id.in_(item_ids))
+        .join(
+            ranked_snapshots,
+            MetricsSnapshot.id == ranked_snapshots.c.id,
+        )
+        .where(ranked_snapshots.c.row_num <= 2)
         .order_by(MetricsSnapshot.item_id, MetricsSnapshot.captured_at.desc())
     )
     rows = result.scalars().all()
