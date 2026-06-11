@@ -20,6 +20,7 @@ const CONFIG = {
     LIST_INITIAL_RENDER_COUNT: 80,
     LIST_RENDER_BATCH_SIZE: 80,
     LIST_PAGE_SIZE: 120,
+    VIRTUAL_PREFETCH_PAGES: 1,
     VIRTUAL_ROW_HEIGHT: 104,
     VIRTUAL_OVERSCAN_ROWS: 8,
 };
@@ -234,6 +235,7 @@ const state = {
     virtualItems: [],
     loadedPageOffsets: new Set(),
     loadingPageOffsets: new Set(),
+    loadingPagePromises: new Map(),
     listScopeKey: '',
     currentListParams: {},
     selectedItemKeys: new Set(),
@@ -3931,15 +3933,28 @@ function getLoadedVirtualItems() {
     return (state.virtualItems || []).filter(Boolean);
 }
 
-function resetVirtualList(total = 0, params = {}) {
-    state.listTotal = Number(total || 0);
-    state.virtualItems = new Array(state.listTotal);
-    state.items = [];
+function resetVirtualList(total = 0, params = {}, opts = {}) {
+    const nextTotal = Number(total || 0);
+    const nextScopeKey = getBackendListScopeKey(params);
+    const canPreserveLoaded = Boolean(
+        opts.preserveLoaded
+        && state.listScopeKey === nextScopeKey
+        && state.listTotal === nextTotal
+        && Array.isArray(state.virtualItems)
+        && state.virtualItems.length === nextTotal
+    );
+    const previousItems = canPreserveLoaded ? state.virtualItems.slice() : [];
+    const previousLoadedOffsets = canPreserveLoaded ? new Set(state.loadedPageOffsets) : new Set();
+
+    state.listTotal = nextTotal;
+    state.virtualItems = canPreserveLoaded ? previousItems : new Array(state.listTotal);
+    state.items = getLoadedVirtualItems();
     state.filteredItems = [];
-    state.loadedPageOffsets = new Set();
+    state.loadedPageOffsets = previousLoadedOffsets;
     state.loadingPageOffsets = new Set();
+    state.loadingPagePromises = new Map();
     state.currentListParams = { ...params };
-    state.listScopeKey = getBackendListScopeKey(params);
+    state.listScopeKey = nextScopeKey;
     state.lastListRenderSignature = '';
     state.listRenderToken += 1;
 }
@@ -4009,8 +4024,12 @@ function getVirtualRange(container) {
 
 function queueVirtualPagesForRange(start, end) {
     if (!state.listScopeKey || !state.currentListParams) return;
-    const firstPage = Math.floor(Math.max(0, start) / CONFIG.LIST_PAGE_SIZE);
-    const lastPage = Math.floor(Math.max(0, end - 1) / CONFIG.LIST_PAGE_SIZE);
+    const maxPage = Math.max(0, Math.ceil(Number(state.listTotal || 0) / CONFIG.LIST_PAGE_SIZE) - 1);
+    const firstPage = Math.max(0, Math.floor(Math.max(0, start) / CONFIG.LIST_PAGE_SIZE) - CONFIG.VIRTUAL_PREFETCH_PAGES);
+    const lastPage = Math.min(
+        maxPage,
+        Math.floor(Math.max(0, end - 1) / CONFIG.LIST_PAGE_SIZE) + CONFIG.VIRTUAL_PREFETCH_PAGES
+    );
     for (let page = firstPage; page <= lastPage; page += 1) {
         const offset = page * CONFIG.LIST_PAGE_SIZE;
         loadVirtualPage(offset);
@@ -5224,6 +5243,19 @@ function markItemAsRefreshing(item, nowIso) {
     };
 }
 
+function updateLoadedItemsById(itemIds, updater) {
+    const idSet = new Set((itemIds || []).map((id) => String(id)).filter(Boolean));
+    if (!idSet.size || typeof updater !== 'function') return;
+    const updateItem = (item) => {
+        if (!item || !idSet.has(String(item.id))) return item;
+        return updater(item);
+    };
+    state.items = state.items.map(updateItem);
+    if (Array.isArray(state.virtualItems)) {
+        state.virtualItems = state.virtualItems.map((item) => item ? updateItem(item) : item);
+    }
+}
+
 async function handleRefreshItem(item) {
     if (!item) return;
     if (item.id && String(item.id).startsWith('temp-')) {
@@ -5322,11 +5354,12 @@ async function clearList() {
 async function refreshAllItems() {
     const selectedVisibleItems = getSelectedVisibleItems();
     const useSelectionScope = selectedVisibleItems.length >= 2;
-    const targetItems = useSelectionScope
-        ? selectedVisibleItems
-        : (state.activeGroup === ALL_GROUP_ID
-            ? state.items
-            : state.items.filter((i) => doesItemMatchGroupEntry(i, getGroupEntryById(state.activeGroup))));
+    let targetItems = useSelectionScope ? selectedVisibleItems : getLoadedVirtualItems();
+
+    if (!useSelectionScope && state.listTotal > targetItems.length && state.apiOnline) {
+        showToast(`Loading ${state.listTotal} links before refresh...`, 'info');
+        targetItems = await loadAllVirtualItemsForCurrentScope();
+    }
 
     if (targetItems.length === 0) {
         showToast('No links to refresh', 'info');
@@ -5346,10 +5379,7 @@ async function refreshAllItems() {
     }
 
     const now = new Date().toISOString();
-    const targetKeys = new Set(refreshableItems.map((item) => itemKey(item)));
-    state.items = state.items.map((item) => (
-        targetKeys.has(itemKey(item)) ? markItemAsRefreshing(item, now) : item
-    ));
+    updateLoadedItemsById(refreshableItems.map((item) => item.id), (item) => markItemAsRefreshing(item, now));
     renderList({ preserveScroll: true });
 
     try {
@@ -5657,8 +5687,10 @@ async function pollJobs() {
         );
         if (job.status === 'completed') {
             hasTerminalUpdate = true;
-            // Force a canonical reload so delta badges (snapshot-based) appear immediately.
-            shouldReload = true;
+            // Non-batch refreshes reload canonically so snapshot-based deltas appear immediately.
+            if (!inBatch) {
+                shouldReload = true;
+            }
             state.pendingJobs.delete(jobId);
             state.pendingJobToItem.delete(jobId);
             const completedAt = job.completed_at || new Date().toISOString();
@@ -5667,20 +5699,22 @@ async function pollJobs() {
             const idx = state.items.findIndex(i => i.id === mappedItemId || i.id === jobId);
             if (idx >= 0 && job.result) {
                 const previousId = state.items[idx]?.id ? String(state.items[idx].id) : null;
-                state.items[idx] = {
+                const nextItem = {
                     ...state.items[idx],
                     ...normalizeJobResult(job.result, state.items[idx]),
                     id: stableItemId || state.items[idx].id,
                     status: 'active',
                     last_checked: completedAt,
                 };
+                state.items[idx] = nextItem;
+                updateLoadedItemsById([previousId || mappedItemId, stableItemId].filter(Boolean), () => nextItem);
                 if (stableItemId && previousId && previousId !== stableItemId) {
                     persistCurrentItemOrder();
                 }
-            } else if (job.result) {
+            } else if (job.result && !inBatch) {
                 // Avoid owner mix-up when multiple users track the same Spotify ID.
                 shouldReload = true;
-            } else {
+            } else if (!inBatch) {
                 shouldReload = true;
             }
             if (inBatch && state.batchRefresh) {
@@ -5693,10 +5727,15 @@ async function pollJobs() {
             state.pendingJobToItem.delete(jobId);
             const idx = state.items.findIndex(i => i.id === mappedItemId || i.id === jobId);
             if (idx >= 0) {
-                state.items[idx].status = 'error';
-                state.items[idx].error_message = job.error;
-                state.items[idx].last_checked = job.completed_at || new Date().toISOString();
-            } else {
+                const nextItem = {
+                    ...state.items[idx],
+                    status: 'error',
+                    error_message: job.error,
+                    last_checked: job.completed_at || new Date().toISOString(),
+                };
+                state.items[idx] = nextItem;
+                updateLoadedItemsById([mappedItemId], () => nextItem);
+            } else if (!inBatch) {
                 shouldReload = true;
             }
             if (inBatch && state.batchRefresh) {
@@ -5717,6 +5756,7 @@ async function pollJobs() {
                 showToast(`Refresh completed: ${ok}/${batch.expected} links`, 'success');
             }
             state.batchRefresh = null;
+            shouldReload = true;
         }
     }
 
@@ -5958,30 +5998,59 @@ function handleAdminFilterChange(val) {
 async function loadVirtualPage(offset, opts = {}) {
     const normalizedOffset = Math.max(0, Math.floor(Number(offset || 0) / CONFIG.LIST_PAGE_SIZE) * CONFIG.LIST_PAGE_SIZE);
     if (!state.listScopeKey) return;
-    if (state.loadedPageOffsets.has(normalizedOffset) || state.loadingPageOffsets.has(normalizedOffset)) return;
+    if (state.loadedPageOffsets.has(normalizedOffset)) return;
+    if (state.loadingPagePromises.has(normalizedOffset)) {
+        return state.loadingPagePromises.get(normalizedOffset);
+    }
     const requestId = opts.requestId || state.dataLoadRequestId;
     const scopeKey = state.listScopeKey;
-    state.loadingPageOffsets.add(normalizedOffset);
-    try {
-        const data = await api.getItems({
-            ...state.currentListParams,
-            limit: CONFIG.LIST_PAGE_SIZE,
-            offset: normalizedOffset,
-        });
-        if (requestId !== state.dataLoadRequestId || scopeKey !== state.listScopeKey) return;
-        if (!data) return;
-        const incoming = data.items || data || [];
-        commitPageItems(incoming, normalizedOffset, data.total);
-        renderList({
-            preserveScroll: Boolean(opts.preserveScroll),
-            force: Boolean(opts.force),
-        });
-    } catch (err) {
-        if (requestId !== state.dataLoadRequestId) return;
-        console.warn('loadVirtualPage error:', err);
-    } finally {
-        state.loadingPageOffsets.delete(normalizedOffset);
+    const pagePromise = (async () => {
+        state.loadingPageOffsets.add(normalizedOffset);
+        try {
+            const data = await api.getItems({
+                ...state.currentListParams,
+                limit: CONFIG.LIST_PAGE_SIZE,
+                offset: normalizedOffset,
+            });
+            if (requestId !== state.dataLoadRequestId || scopeKey !== state.listScopeKey) return;
+            if (!data) return;
+            const incoming = data.items || data || [];
+            commitPageItems(incoming, normalizedOffset, data.total);
+            renderList({
+                preserveScroll: Boolean(opts.preserveScroll),
+                force: Boolean(opts.force),
+            });
+        } catch (err) {
+            if (requestId !== state.dataLoadRequestId) return;
+            console.warn('loadVirtualPage error:', err);
+        } finally {
+            state.loadingPageOffsets.delete(normalizedOffset);
+            state.loadingPagePromises.delete(normalizedOffset);
+        }
+    })();
+    state.loadingPagePromises.set(normalizedOffset, pagePromise);
+    return pagePromise;
+}
+
+async function loadAllVirtualItemsForCurrentScope() {
+    const total = Number(state.listTotal || 0);
+    if (!total) return [];
+    if (getLoadedVirtualItems().length >= total) return getLoadedVirtualItems();
+    const requestId = state.dataLoadRequestId;
+    const scopeKey = state.listScopeKey;
+    const offsets = [];
+    for (let offset = 0; offset < total; offset += CONFIG.LIST_PAGE_SIZE) {
+        offsets.push(offset);
     }
+    await Promise.all(offsets.map((offset) => loadVirtualPage(offset, {
+        requestId,
+        preserveScroll: false,
+        force: false,
+    })));
+    if (requestId !== state.dataLoadRequestId || scopeKey !== state.listScopeKey) {
+        throw new Error('List scope changed while loading all links');
+    }
+    return getLoadedVirtualItems();
 }
 
 async function loadData(opts = {}) {
@@ -6010,6 +6079,8 @@ async function loadData(opts = {}) {
             if (requestId !== state.dataLoadRequestId) return;
         }
         params = getBackendListParams();
+        const previousScopeKey = state.listScopeKey;
+        const previousTotal = state.listTotal;
         state.currentListParams = { ...params };
         state.listScopeKey = getBackendListScopeKey(params);
         const pageParams = {
@@ -6026,7 +6097,9 @@ async function loadData(opts = {}) {
         const incoming = data.items || data || [];
         state.itemSummary = summary || null;
         const total = Number(summary?.total ?? data.total ?? incoming.length);
-        resetVirtualList(total, params);
+        resetVirtualList(total, params, {
+            preserveLoaded: previousScopeKey === getBackendListScopeKey(params) && previousTotal === total,
+        });
         state.itemSummary = summary || null;
         commitPageItems(incoming, 0, total);
         if (skeleton) skeleton.style.display = 'none';
@@ -6059,6 +6132,7 @@ async function runBackgroundSync(opts = {}) {
     if (!force && document.hidden) return;
     if (!force && state.pendingJobs.size > 0) return;
     if (!force && state.currentView && state.currentView !== 'linkchecker') return;
+    if (!force && state.currentView === 'linkchecker' && state.listTotal > CONFIG.LIST_PAGE_SIZE) return;
 
     state.remoteSyncInFlight = true;
     try {

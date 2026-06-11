@@ -66,11 +66,15 @@ test("large lists use backend summary and virtual page loading", () => {
   assert.match(appJs, /queueVirtualPagesForRange\(range\.start, range\.end\)/);
   assert.match(appJs, /api\.getItemsSummary\(params\)/);
   assert.match(appJs, /limit: CONFIG\.LIST_PAGE_SIZE/);
-  assert.match(appJs, /state\.virtualItems = new Array\(state\.listTotal\)/);
+  assert.match(appJs, /state\.virtualItems = canPreserveLoaded \? previousItems : new Array\(state\.listTotal\)/);
   assert.match(appJs, /const range = getVirtualRange\(container\)[\s\S]*?clearRenderedRows\(container\)/);
   assert.match(appJs, /container\.style\.minHeight = `\$\{Math\.max\(0, total \* CONFIG\.VIRTUAL_ROW_HEIGHT\)\}px`/);
   assert.match(appJs, /preserveScroll: Boolean\(opts\.preserveScroll\)/);
   assert.match(appJs, /renderList\(\{ preserveScroll: false, force: true \}\)/);
+  assert.match(appJs, /VIRTUAL_PREFETCH_PAGES: 1/);
+  assert.match(appJs, /state\.loadingPagePromises = new Map\(\)/);
+  assert.match(appJs, /function loadAllVirtualItemsForCurrentScope/);
+  assert.match(appJs, /preserveLoaded: previousScopeKey === getBackendListScopeKey\(params\) && previousTotal === total/);
 });
 
 test("paged list sorting is sent to the backend", () => {
@@ -152,4 +156,12 @@ test("pending job polling uses batch status endpoint", () => {
   assert.match(appJs, /getJobsBatch\(jobIds = \[\]\)/);
   assert.match(appJs, /this\._fetch\('\/jobs\/batch'/);
   assert.match(appJs, /const jobsById = await fetchPendingJobs\(pendingJobIds\)/);
+  assert.match(appJs, /if \(!inBatch\) \{\s*shouldReload = true;\s*\}/);
+  assert.match(appJs, /state\.batchRefresh = null;\s*shouldReload = true;/);
+});
+
+test("refresh all loads the full virtual scope before batching", () => {
+  assert.match(appJs, /showToast\(`Loading \$\{state\.listTotal\} links before refresh\.\.\.`/);
+  assert.match(appJs, /targetItems = await loadAllVirtualItemsForCurrentScope\(\)/);
+  assert.match(appJs, /updateLoadedItemsById\(refreshableItems\.map\(\(item\) => item\.id\)/);
 });

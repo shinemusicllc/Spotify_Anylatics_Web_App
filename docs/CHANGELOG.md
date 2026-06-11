@@ -239,3 +239,9 @@
 - Fixed: virtual page loads and scroll-driven renders no longer restore an old `scrollTop`, preventing queued render frames from pulling the link list back to the top while the user scrolls.
 - Affected files: `frontend/app.js`, `frontend/index.html`, `frontend/tests/ui_contract.test.mjs`, `docs/CHANGELOG.md`
 - Impact/Risk: Low; this only changes virtual list scroll behavior and keeps explicit preserve-scroll callers intact.
+### 2026-06-11 14:25 - Keep virtual pages warm during large-list operations
+- Changed: virtual scrolling now prefetches adjacent pages, preserves loaded page cache on same-scope reloads, and skips background sync resets for large active lists.
+- Fixed: `Refresh All` loads the full current backend scope before starting a batch, so large groups are not limited to the first rendered page.
+- Fixed: batch refresh polling no longer reloads the full list after every completed job; it updates loaded rows and performs one canonical reload when the batch finishes.
+- Affected files: `frontend/app.js`, `frontend/index.html`, `frontend/tests/ui_contract.test.mjs`, `docs/CHANGELOG.md`
+- Impact/Risk: Medium; this changes large-list cache and refresh behavior while keeping API contracts unchanged.
