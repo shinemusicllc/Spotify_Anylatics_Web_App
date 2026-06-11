@@ -16,5 +16,10 @@ backend/.env
 backend/logs
 backend/refresh_all_compare_report.txt
 
+deploy/backups
+deploy/mail/docker-data
+deploy/mail/logs
+deploy/mail/backups
+
 docs
 final3.html

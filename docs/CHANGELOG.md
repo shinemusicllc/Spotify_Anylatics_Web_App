@@ -227,3 +227,7 @@
 - Fixed: switching to users with hundreds of links no longer blocks scrolling while the remaining rows are appended to the DOM.
 - Affected files: `backend/app/api/items.py`, `backend/app/schemas/item.py`, `backend/tests/test_admin_user_updates.py`, `frontend/app.js`, `frontend/index.html`, `frontend/tests/ui_contract.test.mjs`, `docs/CHANGELOG.md`
 - Impact/Risk: Medium; this changes the list loading contract while preserving existing `/api/items` payload keys.
+### 2026-06-11 11:45 - Exclude VPS runtime mail data from Docker build context
+- Fixed: Docker builds on the VPS no longer scan `deploy/mail/docker-data`, which can contain root-owned mail config files and block deploy-user builds.
+- Affected files: `.dockerignore`, `docs/CHANGELOG.md`
+- Impact/Risk: Low; this only narrows the Docker build context and does not change runtime code.
