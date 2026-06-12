@@ -20,6 +20,12 @@ const CONFIG = {
     LIST_INITIAL_RENDER_COUNT: 80,
     LIST_RENDER_BATCH_SIZE: 80,
     LIST_PAGE_SIZE: 120,
+    LIST_SCOPE_CACHE_LIMIT: 18,
+    SMALL_GROUP_PREFETCH_MAX_COUNT: 80,
+    SMALL_GROUP_PREFETCH_LIMIT: 6,
+    SMALL_GROUP_PREFETCH_DELAY: 250,
+    BACKGROUND_PAGE_WARM_DELAY: 120,
+    BACKGROUND_PAGE_WARM_PAUSE: 35,
     VIRTUAL_PREFETCH_PAGES: 1,
     VIRTUAL_ROW_HEIGHT: 104,
     VIRTUAL_OVERSCAN_ROWS: 8,
@@ -236,6 +242,11 @@ const state = {
     loadedPageOffsets: new Set(),
     loadingPageOffsets: new Set(),
     loadingPagePromises: new Map(),
+    listScopeCache: new Map(),
+    groupPrefetchTimer: null,
+    prefetchedGroupScopeKeys: new Set(),
+    listWarmTimer: null,
+    listWarmToken: 0,
     listScopeKey: '',
     currentListParams: {},
     selectedItemKeys: new Set(),
@@ -2840,6 +2851,267 @@ function getBackendListScopeKey(params = getBackendListParams()) {
     });
 }
 
+function clonePlainObject(value) {
+    if (!value || typeof value !== 'object') return value || null;
+    try {
+        return JSON.parse(JSON.stringify(value));
+    } catch {
+        return { ...value };
+    }
+}
+
+function trimListScopeCache() {
+    while (state.listScopeCache.size > CONFIG.LIST_SCOPE_CACHE_LIMIT) {
+        const oldestKey = state.listScopeCache.keys().next().value;
+        state.listScopeCache.delete(oldestKey);
+    }
+}
+
+function saveListScopeCacheEntry(scopeKey, params, entry) {
+    if (!scopeKey || !entry) return;
+    const virtualItems = Array.isArray(entry.virtualItems)
+        ? entry.virtualItems.slice()
+        : (Array.isArray(entry.items) ? entry.items.slice() : []);
+    const total = Number(entry.total ?? virtualItems.length ?? 0);
+    state.listScopeCache.set(scopeKey, {
+        params: { ...(params || {}) },
+        total,
+        virtualItems,
+        itemSummary: clonePlainObject(entry.itemSummary),
+        loadedPageOffsets: new Set(entry.loadedPageOffsets || []),
+        savedAt: Date.now(),
+    });
+    trimListScopeCache();
+}
+
+function saveCurrentListScopeCache() {
+    if (!state.listScopeKey || !state.currentListParams) return;
+    const hasVirtualList = Array.isArray(state.virtualItems) && state.virtualItems.length > 0;
+    const virtualItems = hasVirtualList ? state.virtualItems.slice() : (state.items || []).slice();
+    saveListScopeCacheEntry(state.listScopeKey, state.currentListParams, {
+        total: Number(state.listTotal || virtualItems.length || 0),
+        virtualItems,
+        itemSummary: state.itemSummary,
+        loadedPageOffsets: state.loadedPageOffsets,
+    });
+}
+
+function getCachedLoadedItemsForParams(params = {}) {
+    const targetUserId = params.user_id ? String(params.user_id) : '';
+    const targetGroup = normalizeStoredGroupName(params.group || '');
+    const rows = [];
+    for (const cached of state.listScopeCache.values()) {
+        const cachedParams = cached?.params || {};
+        const cachedUserId = cachedParams.user_id ? String(cachedParams.user_id) : '';
+        const cachedGroup = normalizeStoredGroupName(cachedParams.group || '');
+        if (targetUserId && cachedUserId && targetUserId !== cachedUserId) continue;
+        if (!targetUserId && cachedUserId) continue;
+        if (cachedGroup && cachedGroup !== targetGroup) continue;
+        (cached.virtualItems || []).forEach((item) => {
+            if (!item) return;
+            if (targetUserId && String(item.user_id || '') !== targetUserId) return;
+            if (targetGroup) {
+                const groupEntry = getGroupEntryById(state.activeGroup) || { id: targetGroup, name: targetGroup };
+                if (!doesItemMatchGroupEntry(item, groupEntry)) return;
+            }
+            rows.push(item);
+        });
+    }
+    return rows;
+}
+
+function seedListScopeCacheFromLoadedItems(params = getBackendListParams()) {
+    const scopeKey = getBackendListScopeKey(params);
+    if (state.listScopeCache.has(scopeKey)) return true;
+    if (params.search || params.sort || params.checked_sort) return false;
+
+    const loadedRows = getCachedLoadedItemsForParams(params);
+    if (!loadedRows.length) return false;
+    const seen = new Set();
+    const uniqueRows = loadedRows.filter((item) => {
+        const key = selectionKey(item);
+        if (seen.has(key)) return false;
+        seen.add(key);
+        return true;
+    });
+    const activeEntry = getGroupEntryById(state.activeGroup);
+    const expectedGroupCount = params.group && activeEntry ? Number(activeEntry.count || 0) : 0;
+    if (expectedGroupCount > 0 && uniqueRows.length < expectedGroupCount) {
+        return false;
+    }
+    const summary = {
+        total: uniqueRows.length,
+        all_total: state.itemSummary?.all_total ?? uniqueRows.length,
+        active: uniqueRows.filter((item) => item.status === 'active').length,
+        errors: uniqueRows.filter((item) => item.status === 'error').length,
+        crawling: uniqueRows.filter((item) => item.status === 'crawling' || item.status === 'pending').length,
+    };
+    saveListScopeCacheEntry(scopeKey, params, {
+        total: uniqueRows.length,
+        virtualItems: uniqueRows,
+        itemSummary: summary,
+        loadedPageOffsets: uniqueRows.length ? new Set([0]) : new Set(),
+    });
+    return true;
+}
+
+function hydrateListScopeCache(params = getBackendListParams(), opts = {}) {
+    const scopeKey = getBackendListScopeKey(params);
+    seedListScopeCacheFromLoadedItems(params);
+    const cached = state.listScopeCache.get(scopeKey);
+    if (!cached) return false;
+
+    state.listTotal = Number(cached.total || 0);
+    state.virtualItems = Array.isArray(cached.virtualItems) ? cached.virtualItems.slice() : [];
+    state.items = getLoadedVirtualItems();
+    state.filteredItems = [];
+    state.loadedPageOffsets = new Set(cached.loadedPageOffsets || []);
+    state.loadingPageOffsets = new Set();
+    state.loadingPagePromises = new Map();
+    state.currentListParams = { ...params };
+    state.listScopeKey = scopeKey;
+    state.itemSummary = clonePlainObject(cached.itemSummary);
+    state.lastListRenderSignature = '';
+    syncSelectedItemsWithState();
+    rebuildGroups();
+    updateGroupHeader();
+    syncGroupUI(true);
+    renderList({
+        preserveScroll: Boolean(opts.preserveScroll),
+        force: true,
+    });
+    scheduleWarmCurrentListScope();
+    return true;
+}
+
+function showInstantListOrLoading(params = getBackendListParams(), opts = {}) {
+    if (hydrateListScopeCache(params, opts)) return true;
+    if (opts.keepCurrentOnMiss) {
+        return false;
+    }
+    showListLoadingState();
+    return false;
+}
+
+function getListParamsForGroupEntry(groupEntry) {
+    const params = {};
+    const currentUser = getAuthUser();
+    if (currentUser?.role === 'admin') {
+        const targetUserId = getAdminTargetUserId() || (groupEntry?.ownerUserId ? String(groupEntry.ownerUserId) : null);
+        if (targetUserId) params.user_id = targetUserId;
+    }
+    if (groupEntry && groupEntry.id !== ALL_GROUP_ID) {
+        const groupName = normalizeStoredGroupName(groupEntry.name);
+        if (groupName) params.group = groupName;
+    }
+    const search = String(state.searchQuery || '').trim();
+    if (search) params.search = search;
+    if (state.checkedSortMode && state.checkedSortMode !== CHECKED_SORT_MODES.NONE) {
+        params.checked_sort = state.checkedSortMode;
+    } else if (state.metricSortColumn && METRIC_SORT_CONFIG[state.metricSortColumn]) {
+        params.sort = state.metricSortColumn;
+        params.sort_direction = state.metricSortDirection === 'asc' ? 'asc' : 'desc';
+    } else if (state.textSortColumn && isTextSortColumn(state.textSortColumn)) {
+        params.sort = state.textSortColumn;
+        params.sort_direction = state.textSortDirection === 'desc' ? 'desc' : 'asc';
+    }
+    return params;
+}
+
+function scheduleSmallGroupPrefetch() {
+    if (!getAuthToken()) return;
+    if (state.currentView && state.currentView !== 'linkchecker') return;
+    if (state.groupPrefetchTimer) window.clearTimeout(state.groupPrefetchTimer);
+    state.groupPrefetchTimer = window.setTimeout(() => {
+        state.groupPrefetchTimer = null;
+        prefetchSmallGroupScopes().catch((err) => {
+            console.warn('prefetchSmallGroupScopes error:', err);
+        });
+    }, CONFIG.SMALL_GROUP_PREFETCH_DELAY);
+}
+
+async function prefetchSmallGroupScopes() {
+    const candidates = (state.groups || [])
+        .filter((group) => group && group.id !== ALL_GROUP_ID)
+        .filter((group) => {
+            const count = Number(group.count || 0);
+            return count > 0 && count <= CONFIG.SMALL_GROUP_PREFETCH_MAX_COUNT;
+        })
+        .slice(0, CONFIG.SMALL_GROUP_PREFETCH_LIMIT);
+
+    for (const group of candidates) {
+        const params = getListParamsForGroupEntry(group);
+        const scopeKey = getBackendListScopeKey(params);
+        if (state.listScopeCache.has(scopeKey) || state.prefetchedGroupScopeKeys.has(scopeKey)) continue;
+        state.prefetchedGroupScopeKeys.add(scopeKey);
+        try {
+            const pageParams = {
+                ...params,
+                limit: CONFIG.LIST_PAGE_SIZE,
+                offset: 0,
+            };
+            const [summary, data] = await Promise.all([
+                api.getItemsSummary(params),
+                api.getItems(pageParams),
+            ]);
+            const incoming = data?.items || data || [];
+            const total = Number(summary?.total ?? data?.total ?? incoming.length);
+            const virtualItems = new Array(total);
+            incoming.forEach((item, idx) => {
+                if (idx < virtualItems.length) virtualItems[idx] = item;
+            });
+            saveListScopeCacheEntry(scopeKey, params, {
+                total,
+                virtualItems,
+                itemSummary: summary || null,
+                loadedPageOffsets: incoming.length ? new Set([0]) : new Set(),
+            });
+        } catch (err) {
+            console.warn('prefetch small group error:', err);
+        }
+    }
+}
+
+function sleep(ms) {
+    return new Promise((resolve) => window.setTimeout(resolve, ms));
+}
+
+function scheduleWarmCurrentListScope() {
+    if (!getAuthToken()) return;
+    if (state.currentView && state.currentView !== 'linkchecker') return;
+    if (!state.listScopeKey || Number(state.listTotal || 0) <= CONFIG.LIST_PAGE_SIZE) return;
+    if (state.listWarmTimer) window.clearTimeout(state.listWarmTimer);
+    const token = ++state.listWarmToken;
+    state.listWarmTimer = window.setTimeout(() => {
+        state.listWarmTimer = null;
+        warmCurrentListScopePages(token).catch((err) => {
+            console.warn('warmCurrentListScopePages error:', err);
+        });
+    }, CONFIG.BACKGROUND_PAGE_WARM_DELAY);
+}
+
+async function warmCurrentListScopePages(token) {
+    const requestId = state.dataLoadRequestId;
+    const scopeKey = state.listScopeKey;
+    const total = Number(state.listTotal || 0);
+    if (!scopeKey || total <= CONFIG.LIST_PAGE_SIZE) return;
+    for (let offset = 0; offset < total; offset += CONFIG.LIST_PAGE_SIZE) {
+        if (token !== state.listWarmToken || requestId !== state.dataLoadRequestId || scopeKey !== state.listScopeKey) return;
+        if (!state.loadedPageOffsets.has(offset)) {
+            await loadVirtualPage(offset, {
+                requestId,
+                preserveScroll: true,
+                force: false,
+                silent: true,
+            });
+            await sleep(CONFIG.BACKGROUND_PAGE_WARM_PAUSE);
+        }
+    }
+    if (token === state.listWarmToken && requestId === state.dataLoadRequestId && scopeKey === state.listScopeKey) {
+        renderList({ preserveScroll: true });
+    }
+}
+
 function handleGroupSelection(groupId, event) {
     const normalizedGroupId = normalizeGroupName(groupId) || ALL_GROUP_ID;
     state.selectionScope = 'groups';
@@ -4021,6 +4293,7 @@ function commitPageItems(incoming = [], offset = 0, total = null) {
     state.items = getLoadedVirtualItems();
     syncSelectedItemsWithState();
     syncGroupUI(true);
+    saveCurrentListScopeCache();
 }
 
 function createVirtualSpacer(height) {
@@ -5820,7 +6093,10 @@ const handleSearch = debounce((query) => {
 }, CONFIG.SEARCH_DEBOUNCE);
 
 function reloadListAfterQueryStateChange() {
-    showListLoadingState();
+    showInstantListOrLoading(getBackendListParams(), {
+        keepCurrentOnMiss: true,
+        preserveScroll: false,
+    });
     loadData({ preserveScroll: false, force: true });
 }
 
@@ -6021,9 +6297,9 @@ function handleAdminFilterChange(val) {
     state.itemSummary = null;
     resetVirtualList(0, {});
     state.groups = [{ id: ALL_GROUP_ID, name: ALL_GROUP_LABEL, count: 0 }];
+    rebuildGroups();
     state.lastGroupRenderSignature = '';
     syncGroupUI(true);
-    showListLoadingState();
 
     var pageTitle = document.getElementById('page-title');
     var breadcrumb = document.getElementById('breadcrumb-group');
@@ -6032,6 +6308,7 @@ function handleAdminFilterChange(val) {
     if (pageTitle) pageTitle.textContent = ALL_GROUP_LABEL + ' (' + username + ')';
     if (breadcrumb) breadcrumb.textContent = ALL_GROUP_LABEL + ' (' + username + ')';
 
+    showInstantListOrLoading(getBackendListParams(), { preserveScroll: false });
     syncGroupsFromServer(selectedUserId || null);
     loadData({ preserveScroll: false, force: true });
 }
@@ -6057,10 +6334,12 @@ async function loadVirtualPage(offset, opts = {}) {
             if (!data) return;
             const incoming = data.items || data || [];
             commitPageItems(incoming, normalizedOffset, data.total);
-            renderList({
-                preserveScroll: Boolean(opts.preserveScroll),
-                force: Boolean(opts.force),
-            });
+            if (!opts.silent) {
+                renderList({
+                    preserveScroll: Boolean(opts.preserveScroll),
+                    force: Boolean(opts.force),
+                });
+            }
         } catch (err) {
             if (requestId !== state.dataLoadRequestId) return;
             console.warn('loadVirtualPage error:', err);
@@ -6143,8 +6422,11 @@ async function loadData(opts = {}) {
         });
         state.itemSummary = summary || null;
         commitPageItems(incoming, 0, total);
+        saveCurrentListScopeCache();
         if (skeleton) skeleton.style.display = 'none';
         renderList({ preserveScroll, force });
+        scheduleWarmCurrentListScope();
+        scheduleSmallGroupPrefetch();
     } catch (err) {
         if (requestId !== state.dataLoadRequestId) return;
         console.error('loadData error:', err);
@@ -6320,9 +6602,10 @@ function switchToView(view) {
         setElementDisplay(listWrap, null);
         if (breadcrumbParent) breadcrumbParent.textContent = 'Link Checker';
         updateGroupHeader();
-        if (state.items.length > 0) {
-            renderList({ preserveScroll: true });
-        }
+        showInstantListOrLoading(getBackendListParams(), {
+            keepCurrentOnMiss: true,
+            preserveScroll: true,
+        });
         loadData({ preserveScroll: true });
     } else if (view === 'settings') {
         setElementDisplay(settingsPanel, 'block');
@@ -7187,7 +7470,10 @@ document.addEventListener('DOMContentLoaded', async () => {
             } else {
                 updateGroupHeader();
                 renderGroups();
-                showListLoadingState();
+                showInstantListOrLoading(getBackendListParams(), {
+                    keepCurrentOnMiss: true,
+                    preserveScroll: false,
+                });
                 loadData({ preserveScroll: false, force: true });
             }
         });

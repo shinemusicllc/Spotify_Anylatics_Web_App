@@ -61,6 +61,7 @@ test("loadData does not pin the dashboard to a frontend item cap", () => {
 
 test("large lists use backend summary and virtual page loading", () => {
   assert.match(appJs, /LIST_PAGE_SIZE: 120/);
+  assert.match(appJs, /LIST_SCOPE_CACHE_LIMIT: 18/);
   assert.match(appJs, /VIRTUAL_ROW_HEIGHT: 104/);
   assert.match(appJs, /function renderVirtualPlaceholder/);
   assert.match(appJs, /queueVirtualPagesForRange\(range\.start, range\.end\)/);
@@ -75,6 +76,16 @@ test("large lists use backend summary and virtual page loading", () => {
   assert.match(appJs, /state\.loadingPagePromises = new Map\(\)/);
   assert.match(appJs, /function loadAllVirtualItemsForCurrentScope/);
   assert.match(appJs, /preserveLoaded: previousScopeKey === getBackendListScopeKey\(params\) && previousTotal === total/);
+});
+
+test("link list interactions reuse cached scopes instead of forcing skeleton reloads", () => {
+  assert.match(appJs, /listScopeCache: new Map\(\)/);
+  assert.match(appJs, /function hydrateListScopeCache\(params = getBackendListParams\(\), opts = \{\}\)/);
+  assert.match(appJs, /function showInstantListOrLoading\(params = getBackendListParams\(\), opts = \{\}\)/);
+  assert.match(appJs, /showInstantListOrLoading\(getBackendListParams\(\), \{\s*keepCurrentOnMiss: true,\s*preserveScroll: false,\s*\}\);\s*loadData\(\{ preserveScroll: false, force: true \}\)/);
+  assert.match(appJs, /scheduleWarmCurrentListScope\(\)/);
+  assert.match(appJs, /silent: true/);
+  assert.match(appJs, /function prefetchSmallGroupScopes\(\)/);
 });
 
 test("virtual row drag updates cached rows and persists full order only when available", () => {

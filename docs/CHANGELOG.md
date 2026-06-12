@@ -1,5 +1,12 @@
 # Changelog
 
+### 2026-06-12 11:35 - Smooth link-list loading with scope cache
+- Added: frontend scope cache for paged link lists plus lightweight background warming for remaining pages.
+- Changed: group/search/sort interactions now try cached rows first and keep the current view responsive while fresh data loads.
+- Fixed: repeated skeleton/placeholder flashes when switching between small groups or reusing recently viewed scopes.
+- Affected files: `frontend/app.js`, `frontend/index.html`, `frontend/tests/ui_contract.test.mjs`, `docs/CHANGELOG.md`
+- Impact/Risk: Low to medium; frontend-only behavior change. First-time uncached scopes can still show loading, but cached and prefetched scopes render immediately.
+
 ### 2026-03-20 10:55 - Bootstrap shared-VPS mail stack
 - Added: `deploy/mail/` with `docker-compose.yml`, `.env.example`, `README.md`, `AGENTS.md`, and helper scripts for `mailops`, self-signed bootstrap TLS, and switching to Caddy-issued certificates.
 - Changed: root `AGENTS.md`, `docs/PROJECT_CONTEXT.md`, `docs/DECISIONS.md`, and `docs/WORKLOG.md` now document the new mail stack and the requirement to keep mail DNS records `DNS only`.
