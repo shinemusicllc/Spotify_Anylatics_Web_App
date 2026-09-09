@@ -293,3 +293,9 @@
 - Fixed: no runtime behavior changed; deployment drift is now explicitly documented for future operations.
 - Affected files: `deploy/README.md`, `docs/DECISIONS.md`, `docs/DECISIONS_INDEX.md`, `docs/WORKLOG.md`, `docs/CHANGELOG.md`
 - Impact/Risk: Low; this improves release traceability without including `.env` secrets or database volumes in Git.
+### 2026-09-09 10:25 - Push tested Spotify hotfixes and resynchronize VPS from GitHub
+- Added: ignore rules for VPS-only Caddy backup files and runtime backup directories.
+- Changed: verified the VPS fast-forwarded to GitHub commit `e52f214` and that `spoticheck update` rebuilds the healthy production stack.
+- Fixed: removed deployment drift from the prior direct-copy workflow; the VPS now follows the GitHub release path.
+- Affected files: `.gitignore`, `docs/WORKLOG.md`, `docs/CHANGELOG.md`, and VPS helper file modes.
+- Impact/Risk: Low; runtime secrets/data remain untouched and the public Spotify health endpoint remains `200 OK`.

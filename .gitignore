@@ -30,3 +30,7 @@ node_modules/
 *.pid
 backend/refresh_all_compare_report.txt
 deploy/mail/docker-data/
+deploy/backups/
+deploy/Caddyfile*.bak
+deploy/Caddyfile.backup-*
+deploy/Caddyfile.pre-*

@@ -434,3 +434,11 @@
 - Actions: confirmed local changes contain no environment secrets, documented GitHub `main` as the source of truth, and documented `spoticheck update` as the normal pull/redeploy path and release rollback workflow.
 - Notes: earlier direct VPS copies were emergency synchronization while the source code was being debugged or was not yet pushed from another machine; they are not the desired ongoing workflow.
 - Impact/Risk: Low; future releases become auditable and recoverable through Git history, while VPS runtime secrets and PostgreSQL data remain outside Git.
+
+### Task: Push tested Spotify hotfixes and resynchronize VPS from GitHub
+
+- Status: done.
+- Actions: pushed commits `23fa02c` and `e52f214` to `origin/main`, preserved the VPS-only Caddy backup stash, fast-forwarded `/opt/spoticheck/app` to `e52f214`, and verified `spoticheck update` pulls and rebuilds successfully.
+- Fixed: corrected the deployment drift caused by earlier direct file copies; runtime `.env`, database volumes, and Caddy backup artifacts remain outside version control.
+- Notes: helper execute-bit normalization is being committed so `spoticheck update` remains runnable without invoking scripts through `bash` manually.
+- Impact/Risk: Low; production behavior remains healthy and future rollback can be based on Git commit history.
