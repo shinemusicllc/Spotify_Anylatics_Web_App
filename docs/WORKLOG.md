@@ -390,3 +390,47 @@
   - Confirmed the live stack status via `docker compose ... ps` and verified `https://spotify.jazzrelaxation.com/api/health` returned `status=ok` after the rollout.
 - Notes:
   - `deploy/scripts/update_app.sh` and `deploy/scripts/redeploy.sh` are still missing execute bits on the VPS, so this rollout invoked both scripts through `bash` directly.
+
+### Task: Diagnose playlist duplicate versus URL search mismatch
+
+- Status: diagnosed; no runtime data or code changed.
+- Findings: live DB contains playlist `37i9dQZF1DWV7EzJMK2FUI` once for user `admin`, with name `Jazz in the Background`; the duplicate response is therefore expected for that user.
+- Root cause: backend `/api/items` search only applies `ilike` to `Item.name`, `Item.spotify_id`, `Item.owner_name`, and `Item.group`; a pasted full Spotify URL cannot match those fields. Frontend URL-aware matching exists but runs after the backend response, so the row is filtered out before it reaches the browser.
+- Impact/Risk: Low; the item is not missing, but full-URL search currently produces a false empty result while ID search works.
+
+### Task: Fix URL-aware Spotify search and add-link recognition
+
+- Status: done and deployed.
+- Actions: backend `/api/items` and `/api/items/summary` now match parsed full Spotify URLs/URIs by exact `item_type + spotify_id`; the add-link modal now previews recognized type, ID, and invalid lines before submission.
+- Verification: frontend syntax pass, frontend contract tests `21/21`, backend tests `19/19`; VPS `deploy-app-1` healthy and public `/api/health` returns `status=ok`.
+- Impact/Risk: Low; duplicate ownership behavior and API response contracts are unchanged.
+
+### Task: Add global clipboard line setting and lock All Links creation
+
+- Status: done and deployed.
+- Actions: added persistent global `playlist_clipboard_line_limit` storage in `app_settings`, admin-only settings UI/API, clipboard row slicing, and `All Links` add-button/backend guards requiring an explicit group for new links.
+- Verification: frontend syntax pass, frontend contract tests `23/23`, backend tests `21/21`, `deploy-app-1` healthy, `app_settings` table created, and public `/api/health` returns `status=ok`.
+- Impact/Risk: Medium; new links can no longer be created without a group, while refresh operations and existing items remain unaffected.
+
+### Task: Fix playlist export using incomplete cached track data
+
+- Status: done and deployed.
+- Findings: live playlist `Blues & Whiskey` reports `367` expected tracks but its cached raw response contained only `100` tracks with `deep_crawl_complete=false`; the export hydrator treated any tracks array as complete.
+- Fixed: playlist export now refetches when cached track data is incomplete, so the global clipboard limit can be applied to the full available playlist instead of the first cached page.
+- Verification: backend tests `22/22`, frontend tests `23/23`, JS syntax pass, `deploy-app-1` healthy, and public `/api/health` returns `status=ok`.
+- Impact/Risk: Low; existing data is preserved, and export may take longer when an incomplete cached playlist must be hydrated.
+
+### Task: Fix Pathfinder playlist pagination without `nextOffset`
+
+- Status: done and deployed.
+- Findings: live Pathfinder responses returned `100` items with `totalCount=367` but omitted `nextOffset`, causing the fetch loop to stop after page one.
+- Fixed: playlist pagination now falls back to `current_offset + len(items)` when `nextOffset` is absent.
+- Verification: pagination test passes; live export API returned `367` rows for the `367`-track playlist while the configured frontend clipboard limit remains `200`.
+- Impact/Risk: Low; large playlist exports issue additional page requests and preserve the configured clipboard cap.
+
+### Task: Standardize GitHub-first SpotiCheck deployment
+
+- Status: documented; current VPS remains live on the tested hotfix.
+- Actions: confirmed local changes contain no environment secrets, documented GitHub `main` as the source of truth, and documented `spoticheck update` as the normal pull/redeploy path and release rollback workflow.
+- Notes: earlier direct VPS copies were emergency synchronization while the source code was being debugged or was not yet pushed from another machine; they are not the desired ongoing workflow.
+- Impact/Risk: Low; future releases become auditable and recoverable through Git history, while VPS runtime secrets and PostgreSQL data remain outside Git.

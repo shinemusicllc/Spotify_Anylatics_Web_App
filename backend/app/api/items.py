@@ -11,7 +11,7 @@ from fastapi import APIRouter, Body, Depends, HTTPException, Query
 from fastapi.params import Query as QueryParam
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, Field
-from sqlalchemy import case, delete, func, or_, select
+from sqlalchemy import and_, case, delete, func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.database import get_db
@@ -23,6 +23,7 @@ from app.models.user import User
 from app.schemas.item import ItemGroupSummary, ItemListResponse, ItemMoveRequest, ItemResponse, ItemSummaryResponse
 from app.services.auth import get_current_user
 from app.services import spotify_client
+from app.utils.spotify_urls import parse_spotify_url
 
 router = APIRouter()
 
@@ -76,14 +77,27 @@ def _apply_item_scope(
     if group:
         query = query.where(Item.group == group)
     if search and search.strip():
-        pattern = f"%{search.strip()}%"
-        query = query.where(
-            or_(
-                Item.name.ilike(pattern),
-                Item.spotify_id.ilike(pattern),
-                Item.owner_name.ilike(pattern),
-                Item.group.ilike(pattern),
+        search_text = search.strip()
+        pattern = f"%{search_text}%"
+        parsed_search = parse_spotify_url(search_text)
+        spotify_link_match = (
+            and_(
+                Item.item_type == parsed_search[0],
+                Item.spotify_id == parsed_search[1],
             )
+            if parsed_search
+            else None
+        )
+        search_clauses = [
+            Item.name.ilike(pattern),
+            Item.spotify_id.ilike(pattern),
+            Item.owner_name.ilike(pattern),
+            Item.group.ilike(pattern),
+        ]
+        if spotify_link_match is not None:
+            search_clauses.insert(0, spotify_link_match)
+        query = query.where(
+            or_(*search_clauses)
         )
     return query
 
@@ -938,11 +952,21 @@ async def _hydrate_raw_for_export(
 
     target_items: list[Item] = []
     for item in items:
-        has_tracks = isinstance(raw_map.get(item.spotify_id), dict) and isinstance(
-            raw_map.get(item.spotify_id).get("tracks"),
-            list,
+        raw_data = raw_map.get(item.spotify_id)
+        tracks = raw_data.get("tracks") if isinstance(raw_data, dict) else None
+        expected = raw_data.get("tracks_expected") if isinstance(raw_data, dict) else None
+        if expected is None and isinstance(raw_data, dict):
+            expected = raw_data.get("track_count")
+        try:
+            expected_count = int(expected) if expected is not None else None
+        except (TypeError, ValueError):
+            expected_count = None
+        tracks_complete = isinstance(tracks, list) and (
+            bool(raw_data.get("deep_crawl_complete"))
+            if isinstance(raw_data, dict) and expected_count is None
+            else expected_count is not None and len(tracks) >= expected_count
         )
-        if has_tracks:
+        if tracks_complete:
             continue
         if action == "playlist-type3" and item.item_type == "playlist":
             target_items.append(item)

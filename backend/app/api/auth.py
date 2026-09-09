@@ -12,6 +12,7 @@ from app.models.user import User
 from app.models.item import Item
 from app.models.crawl_job import CrawlJob
 from app.models.metrics_snapshot import MetricsSnapshot
+from app.models.app_setting import AppSetting
 from app.schemas.auth import (
     RegisterRequest,
     LoginRequest,
@@ -37,6 +38,10 @@ _INTERNAL_EMAIL_DOMAIN = "users.spoticheck.local"
 _MAX_ROW_ORDER_ITEMS = 5000
 _COLUMN_WIDTH_MIN = 40
 _COLUMN_WIDTH_MAX = 2000
+_PLAYLIST_CLIPBOARD_LINE_LIMIT_KEY = "playlist_clipboard_line_limit"
+_PLAYLIST_CLIPBOARD_LINE_LIMIT_DEFAULT = 100
+_PLAYLIST_CLIPBOARD_LINE_LIMIT_MIN = 1
+_PLAYLIST_CLIPBOARD_LINE_LIMIT_MAX = 2000
 
 
 def _build_internal_email(username: str) -> str:
@@ -155,6 +160,31 @@ def _load_ui_preferences(user: User) -> dict:
     except (json.JSONDecodeError, TypeError):
         parsed = {}
     return _sanitize_ui_preferences(parsed)
+
+
+def _normalize_playlist_clipboard_line_limit(value) -> int:
+    """Return a safe global clipboard line limit."""
+    if isinstance(value, bool):
+        return _PLAYLIST_CLIPBOARD_LINE_LIMIT_DEFAULT
+    try:
+        numeric = int(value)
+    except (TypeError, ValueError):
+        return _PLAYLIST_CLIPBOARD_LINE_LIMIT_DEFAULT
+    return max(
+        _PLAYLIST_CLIPBOARD_LINE_LIMIT_MIN,
+        min(_PLAYLIST_CLIPBOARD_LINE_LIMIT_MAX, numeric),
+    )
+
+
+async def _load_global_preferences(db: AsyncSession) -> dict:
+    result = await db.execute(
+        select(AppSetting).where(AppSetting.key == _PLAYLIST_CLIPBOARD_LINE_LIMIT_KEY)
+    )
+    setting = result.scalar_one_or_none()
+    value = _PLAYLIST_CLIPBOARD_LINE_LIMIT_DEFAULT
+    if setting is not None:
+        value = _normalize_playlist_clipboard_line_limit(setting.value)
+    return {"playlist_clipboard_line_limit": value}
 
 
 @router.post("/login", response_model=AuthResponse)
@@ -317,9 +347,13 @@ async def delete_avatar(
 @router.get("/me/preferences")
 async def get_my_preferences(
     current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
 ):
     """Get the current user's UI preferences."""
-    return {"preferences": _load_ui_preferences(current_user)}
+    return {
+        "preferences": _load_ui_preferences(current_user),
+        "global_preferences": await _load_global_preferences(db),
+    }
 
 
 @router.put("/me/preferences")
@@ -339,6 +373,52 @@ async def save_my_preferences(
     current_user.ui_preferences = json.dumps(cleaned)
     await db.flush()
     return {"preferences": cleaned}
+
+
+@router.put("/admin/preferences")
+async def save_admin_preferences(
+    req: dict,
+    admin: User = Depends(get_admin_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Save application-wide preferences; only admins may change them."""
+    incoming = req.get("playlist_clipboard_line_limit")
+    if isinstance(incoming, bool) or incoming is None:
+        raise HTTPException(
+            status_code=400,
+            detail="playlist_clipboard_line_limit must be an integer between 1 and 2000",
+        )
+    try:
+        normalized = int(incoming)
+    except (TypeError, ValueError):
+        raise HTTPException(
+            status_code=400,
+            detail="playlist_clipboard_line_limit must be an integer between 1 and 2000",
+        )
+    if normalized < _PLAYLIST_CLIPBOARD_LINE_LIMIT_MIN or normalized > _PLAYLIST_CLIPBOARD_LINE_LIMIT_MAX:
+        raise HTTPException(
+            status_code=400,
+            detail="playlist_clipboard_line_limit must be between 1 and 2000",
+        )
+
+    result = await db.execute(
+        select(AppSetting).where(AppSetting.key == _PLAYLIST_CLIPBOARD_LINE_LIMIT_KEY)
+    )
+    setting = result.scalar_one_or_none()
+    if setting is None:
+        setting = AppSetting(
+            key=_PLAYLIST_CLIPBOARD_LINE_LIMIT_KEY,
+            value=str(normalized),
+        )
+        db.add(setting)
+    else:
+        setting.value = str(normalized)
+    await db.flush()
+    return {
+        "global_preferences": {
+            "playlist_clipboard_line_limit": normalized,
+        }
+    }
 
 
 # ---------------------------------------------------------------------------

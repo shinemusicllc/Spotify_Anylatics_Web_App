@@ -123,7 +123,7 @@
             <div class="flex items-center gap-4">
                 <div class="relative group">
                     <span class="material-icons-round absolute left-3 top-1/2 -translate-y-1/2 text-secondary-text text-xl">search</span>
-                    <input id="search-input" class="search-pill bg-[#242424] border-none rounded-full pl-10 pr-4 py-2 text-sm w-64 focus:ring-1 focus:ring-primary placeholder:text-secondary-text transition-all" placeholder="Search links..." type="text">
+                    <input id="search-input" class="search-pill bg-[#242424] border-none rounded-full pl-10 pr-4 py-2 text-sm w-64 focus:ring-1 focus:ring-primary placeholder:text-secondary-text transition-all" placeholder="Search title, owner, ID, or Spotify URL..." aria-label="Search title, owner, ID, or Spotify URL" type="text">
                 </div>
                 <button id="btn-refresh" onclick="refreshAllItems()" class="btn-ghost flex items-center gap-2 px-4 py-2 rounded-full border border-white/20 hover:border-white transition-colors text-sm font-bold cursor-pointer">
                     <span class="material-icons-round text-lg">refresh</span>
@@ -284,7 +284,7 @@
                     <span class="material-icons-round">playlist_add</span>
                     <h3 class="text-lg font-bold text-white mb-2" data-empty-title>No links yet</h3>
                     <p class="text-sm max-w-xs" data-empty-description>Add your first Spotify link to start monitoring play counts, followers, and more.</p>
-                    <button class="mt-6 btn-accent flex items-center gap-2 px-6 py-2.5 rounded-full text-sm font-bold cursor-pointer" onclick="document.getElementById('btn-add-link').click()">
+                    <button id="btn-empty-add-link" class="mt-6 btn-accent flex items-center gap-2 px-6 py-2.5 rounded-full text-sm font-bold cursor-pointer" onclick="document.getElementById('btn-add-link').click()">
                         <span class="material-icons-round text-lg">add</span>
                         Add Your First Link
                     </button>
@@ -335,6 +335,26 @@
                                 Save Changes
                             </button>
                             <span id="settings-profile-status" class="ml-3 text-sm text-primary font-medium" style="display:none"></span>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Global Export Settings -->
+                <div id="settings-global-export" class="mb-8 p-6 rounded-xl border border-white/10" style="background:#1a1d21;display:none">
+                    <h3 class="text-sm font-bold uppercase tracking-widest text-secondary-text mb-4">Global Export Settings</h3>
+                    <p class="text-sm text-secondary-text mb-4">This admin setting applies to every account when using Clipboard (Playlist).</p>
+                    <div class="space-y-4">
+                        <div>
+                            <label class="block text-[13px] font-semibold text-secondary-text mb-2" for="settings-playlist-clipboard-limit">Playlist clipboard lines</label>
+                            <input id="settings-playlist-clipboard-limit" type="number" class="settings-input" min="1" max="2000" step="1" inputmode="numeric" placeholder="100">
+                            <p class="text-xs text-secondary-text mt-1">The app copies up to this many track lines per clipboard action. Range: 1-2000.</p>
+                        </div>
+                        <div class="pt-2">
+                            <button id="settings-save-global" class="btn-accent inline-flex items-center gap-2 px-6 py-2.5 rounded-full text-sm font-bold cursor-pointer">
+                                <span class="material-icons-round text-base">save</span>
+                                Save Clipboard Setting
+                            </button>
+                            <span id="settings-global-status" class="ml-3 text-sm font-medium" style="display:none"></span>
                         </div>
                     </div>
                 </div>
@@ -429,6 +449,13 @@
                     <label class="block text-sm font-medium text-secondary-text mb-2">Spotify URL or URI (one per line)</label>
                     <textarea id="modal-batch-input" class="modal-input resize-none" rows="6" placeholder="https://open.spotify.com/playlist/...\nhttps://open.spotify.com/track/...\nspotify:album:..."></textarea>
                     <p id="modal-url-hint" class="text-xs text-secondary-text mt-2">Supports: playlist, track, album, and artist links</p>
+                    <div id="modal-link-preview" class="hidden mt-3 border border-white/10 bg-white/[0.03] rounded-lg px-3 py-2" aria-live="polite">
+                        <div class="flex items-center justify-between gap-3 pb-2 border-b border-white/10">
+                            <span class="text-xs font-semibold text-secondary-text">Detected links</span>
+                            <span id="modal-link-preview-count" class="text-xs text-secondary-text"></span>
+                        </div>
+                        <div id="modal-link-preview-list"></div>
+                    </div>
                 </div>
                 <div>
                     <label class="block text-sm font-medium text-secondary-text mb-2">Group (optional)</label>
@@ -624,6 +651,6 @@
             </div>
         </div>
 
-    <script src="app.js?v=20260612-93"></script>
+    <script src="app.js?v=20260909-95"></script>
 </body>
 </html>

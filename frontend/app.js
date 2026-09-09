@@ -118,6 +118,9 @@ const CHECKED_SORT_MODES = Object.freeze({
     OLDEST_FIRST: 'oldest-first',
 });
 const UI_PREF_SAVE_DEBOUNCE_MS = 700;
+const DEFAULT_PLAYLIST_CLIPBOARD_LINE_LIMIT = 100;
+const MIN_PLAYLIST_CLIPBOARD_LINE_LIMIT = 1;
+const MAX_PLAYLIST_CLIPBOARD_LINE_LIMIT = 2000;
 
 function getUserGroupStorageKey() {
     const user = getAuthUser();
@@ -268,6 +271,9 @@ const state = {
     dragScrollSpeed: 0,
     columnBudget: null,
     columnWidths: { ...DEFAULT_COLUMN_WIDTHS },
+    globalPreferences: {
+        playlistClipboardLineLimit: DEFAULT_PLAYLIST_CLIPBOARD_LINE_LIMIT,
+    },
     uiPrefSaveTimer: null,
     remoteSyncTimer: null,
     remoteSyncInFlight: false,
@@ -402,6 +408,12 @@ class SpotiCheckAPI {
         return this._fetch('/auth/me/preferences', {
             method: 'PUT',
             body: JSON.stringify({ preferences }),
+        });
+    }
+    saveAdminPreferences(preferences = {}) {
+        return this._fetch('/auth/admin/preferences', {
+            method: 'PUT',
+            body: JSON.stringify(preferences),
         });
     }
     renameGroup(oldGroup, newGroup, userId = null) {
@@ -647,6 +659,62 @@ function parseSpotifyUrl(input) {
     return null;
 }
 
+const SPOTIFY_TYPE_LABELS = Object.freeze({
+    playlist: 'Playlist',
+    track: 'Track',
+    album: 'Album',
+    artist: 'Artist',
+});
+
+function getSpotifyTypeLabel(type) {
+    return SPOTIFY_TYPE_LABELS[String(type || '').trim().toLowerCase()] || 'Unknown';
+}
+
+function updateModalLinkPreview(rawInput = '') {
+    const preview = document.getElementById('modal-link-preview');
+    const count = document.getElementById('modal-link-preview-count');
+    const list = document.getElementById('modal-link-preview-list');
+    if (!preview || !count || !list) return;
+
+    const lines = String(rawInput || '')
+        .split(/\r?\n/)
+        .map((line) => line.trim())
+        .filter(Boolean);
+    if (!lines.length) {
+        preview.classList.add('hidden');
+        list.innerHTML = '';
+        count.textContent = '';
+        return;
+    }
+
+    const detected = lines.map((url, index) => ({
+        index,
+        url,
+        parsed: parseSpotifyUrl(url),
+    }));
+    const recognizedCount = detected.filter((entry) => entry.parsed).length;
+    count.textContent = `${recognizedCount}/${lines.length} recognized`;
+    list.innerHTML = detected.slice(0, 8).map((entry) => {
+        const { parsed } = entry;
+        const typeLabel = parsed ? getSpotifyTypeLabel(parsed.type) : 'Unrecognized';
+        const statusClass = parsed ? 'text-primary' : 'text-red-300';
+        const identifier = parsed ? parsed.id : entry.url;
+        return `
+            <div class="flex items-center justify-between gap-3 py-2 border-b border-white/5 last:border-0">
+                <div class="min-w-0 flex items-center gap-2">
+                    <span class="text-[11px] text-secondary-text w-10 shrink-0">Line ${entry.index + 1}</span>
+                    <span class="text-sm font-semibold ${statusClass}">${typeLabel}</span>
+                    <code class="text-xs text-secondary-text truncate" title="${escapeHtml(identifier)}">${escapeHtml(identifier)}</code>
+                </div>
+                <span class="text-[11px] ${statusClass} shrink-0">${parsed ? 'Ready' : 'Check link'}</span>
+            </div>
+        `;
+    }).join('') + (detected.length > 8
+        ? `<p class="pt-2 text-[11px] text-secondary-text">+${detected.length - 8} more lines</p>`
+        : '');
+    preview.classList.remove('hidden');
+}
+
 /** Get the open.spotify.com URL from type + id */
 function getSpotifyUrl(type, id) {
     return `https://open.spotify.com/${type}/${id}`;
@@ -838,11 +906,21 @@ function normalizeUiPreferences(raw) {
     return { row_order: rowOrder, column_widths: columnWidths };
 }
 
+function normalizeGlobalPreferences(raw) {
+    const prefs = raw && typeof raw === 'object' ? raw : {};
+    const numeric = Number(prefs.playlist_clipboard_line_limit);
+    const lineLimit = Number.isInteger(numeric)
+        ? Math.min(MAX_PLAYLIST_CLIPBOARD_LINE_LIMIT, Math.max(MIN_PLAYLIST_CLIPBOARD_LINE_LIMIT, numeric))
+        : DEFAULT_PLAYLIST_CLIPBOARD_LINE_LIMIT;
+    return { playlistClipboardLineLimit: lineLimit };
+}
+
 async function hydrateUiPreferencesFromServer() {
     try {
         if (!getAuthToken()) return;
         const data = await api.getMyPreferences();
         const normalized = normalizeUiPreferences(data?.preferences || {});
+        state.globalPreferences = normalizeGlobalPreferences(data?.global_preferences || {});
         if (Array.isArray(normalized.row_order)) {
             savePersistedRowOrder(normalized.row_order, { skipServerSync: true });
         }
@@ -3478,6 +3556,7 @@ function syncGroupUI(syncSelect = false) {
     syncSelectedGroupsWithState();
     renderGroups();
     updateGroupHeader();
+    updateAddLinkAvailability();
     if (syncSelect) populateGroupSelect();
 }
 
@@ -5060,20 +5139,44 @@ function getStructuredExportRows(action, items) {
     return { rows: [], filePrefix: 'spoticheck-export', title: 'export' };
 }
 
+function getPlaylistClipboardLineLimit() {
+    const value = Number(state.globalPreferences?.playlistClipboardLineLimit);
+    return Number.isInteger(value)
+        ? Math.min(MAX_PLAYLIST_CLIPBOARD_LINE_LIMIT, Math.max(MIN_PLAYLIST_CLIPBOARD_LINE_LIMIT, value))
+        : DEFAULT_PLAYLIST_CLIPBOARD_LINE_LIMIT;
+}
+
+function getClipboardRowsForAction(action, rows) {
+    const sourceRows = Array.isArray(rows) ? rows : [];
+    if (action !== 'clipboard-playlist-type3') return sourceRows;
+    return sourceRows.slice(0, getPlaylistClipboardLineLimit());
+}
+
+function getClipboardCountMessage(copiedCount, availableCount, suffix = 'line(s)') {
+    const copied = Number(copiedCount) || 0;
+    const available = Number(availableCount) || copied;
+    return copied < available
+        ? `Copied ${copied} of ${available} ${suffix}`
+        : `Copied ${copied} ${suffix}`;
+}
+
 async function runStructuredExport(action, items, destination) {
     const payload = getStructuredExportRows(action, items);
-    if (!payload.rows.length) {
+    const rows = destination === 'clipboard'
+        ? getClipboardRowsForAction(action, payload.rows)
+        : payload.rows;
+    if (!rows.length) {
         showToast('KhÃ´ng cÃ³ dá»¯ liá»‡u phÃ¹ há»£p cho kiá»ƒu xuáº¥t nÃ y', 'info');
         return;
     }
-    const text = rowsToDelimitedText(payload.rows, '\t');
+    const text = rowsToDelimitedText(rows, '\t');
     if (destination === 'clipboard') {
-        await copyToClipboard(text, `Copied ${payload.rows.length} ${payload.title} lines`);
+        await copyToClipboard(text, getClipboardCountMessage(rows.length, payload.rows.length, `${payload.title} line(s)`));
         return;
     }
     const fileName = buildExportFileName(payload.filePrefix, 'txt');
     downloadTextFile(text, fileName, 'text/plain;charset=utf-8');
-    showToast(`Exported ${payload.rows.length} ${payload.title} lines`, 'success');
+    showToast(`Exported ${rows.length} ${payload.title} lines`, 'success');
 }
 
 function mapContextActionToExportRequest(action) {
@@ -5142,8 +5245,9 @@ async function runServerExport(contextAction, selectedItems) {
                 showToast('No data available for this export mode', 'info');
                 return true;
             }
-            const text = rowsToDelimitedText(rows, '\t');
-            await copyToClipboard(text, `Copied ${rows.length} line(s)`);
+            const copiedRows = getClipboardRowsForAction(contextAction, rows);
+            const text = rowsToDelimitedText(copiedRows, '\t');
+            await copyToClipboard(text, getClipboardCountMessage(copiedRows.length, rows.length));
             return true;
         }
 
@@ -5770,8 +5874,13 @@ function openSpotifyPopup(url) {
 // â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
 
 function openModal() {
+    if (state.activeGroup === ALL_GROUP_ID) {
+        showToast('Select a group before adding links', 'info');
+        return;
+    }
     document.getElementById('add-link-modal').classList.add('open');
     document.getElementById('modal-batch-input').value = '';
+    updateModalLinkPreview('');
     document.getElementById('modal-batch-input').focus();
     document.getElementById('modal-url-hint').textContent = 'Supports: playlist, track, album, and artist links';
     document.getElementById('modal-url-hint').className = 'text-xs text-secondary-text mt-2';
@@ -5796,6 +5905,12 @@ async function submitSingle() {
     const invalid = urls.filter((u) => !parseSpotifyUrl(u));
     if (invalid.length > 0) {
         hint.textContent = `${invalid.length} invalid Spotify URL(s) found`;
+        hint.className = 'text-xs text-red-400 mt-2';
+        return;
+    }
+
+    if (state.activeGroup === ALL_GROUP_ID) {
+        hint.textContent = 'Select a group before adding links';
         hint.className = 'text-xs text-red-400 mt-2';
         return;
     }
@@ -6554,6 +6669,22 @@ function setElementDisplay(el, mode) {
     el.style.display = mode;
 }
 
+function updateAddLinkAvailability() {
+    const canAdd = state.currentView === 'linkchecker' && state.activeGroup !== ALL_GROUP_ID;
+    const buttons = [
+        document.getElementById('btn-add-link'),
+        document.getElementById('btn-empty-add-link'),
+    ].filter(Boolean);
+    buttons.forEach((button) => {
+        button.disabled = !canAdd;
+        button.setAttribute('aria-disabled', String(!canAdd));
+        button.title = canAdd ? 'Add a link to the selected group' : 'Select a group before adding links';
+        button.classList.toggle('opacity-50', !canAdd);
+        button.classList.toggle('cursor-not-allowed', !canAdd);
+        button.classList.toggle('cursor-pointer', canAdd);
+    });
+}
+
 function switchToView(view) {
     var listWrap = document.querySelector('.list-wrap');
     var settingsPanel = document.getElementById('settings-panel');
@@ -6597,6 +6728,7 @@ function switchToView(view) {
 
     // 4) Show the correct panel and load its data
     state.currentView = view;
+    updateAddLinkAvailability();
 
     if (view === 'linkchecker') {
         setElementDisplay(listWrap, null);
@@ -6636,6 +6768,15 @@ function loadSettingsData() {
     const user = getAuthUser();
     if (!user) return;
 
+    const globalExportPanel = document.getElementById('settings-global-export');
+    const globalExportInput = document.getElementById('settings-playlist-clipboard-limit');
+    if (globalExportPanel) {
+        globalExportPanel.style.display = user.role === 'admin' ? '' : 'none';
+    }
+    if (globalExportInput) {
+        globalExportInput.value = String(getPlaylistClipboardLineLimit());
+    }
+
     document.getElementById('settings-username').value = user.username || '';
     document.getElementById('settings-displayname').value = user.display_name || '';
     document.getElementById('settings-role').textContent = user.role === 'admin' ? 'Admin' : 'User';
@@ -6646,6 +6787,42 @@ function loadSettingsData() {
     document.getElementById('settings-current-pw').value = '';
     document.getElementById('settings-new-pw').value = '';
     document.getElementById('settings-confirm-pw').value = '';
+}
+
+async function handleSaveGlobalSettings() {
+    const input = document.getElementById('settings-playlist-clipboard-limit');
+    const statusEl = document.getElementById('settings-global-status');
+    if (!input || !statusEl) return;
+
+    const rawValue = String(input.value || '').trim();
+    const value = Number(rawValue);
+    if (!/^\d+$/.test(rawValue) || !Number.isInteger(value)
+        || value < MIN_PLAYLIST_CLIPBOARD_LINE_LIMIT
+        || value > MAX_PLAYLIST_CLIPBOARD_LINE_LIMIT) {
+        statusEl.textContent = 'Enter an integer from 1 to 2000';
+        statusEl.style.display = '';
+        statusEl.style.color = '#ef4444';
+        return;
+    }
+
+    try {
+        const response = await api.saveAdminPreferences({
+            playlist_clipboard_line_limit: value,
+        });
+        state.globalPreferences = normalizeGlobalPreferences(response?.global_preferences || {
+            playlist_clipboard_line_limit: value,
+        });
+        input.value = String(getPlaylistClipboardLineLimit());
+        statusEl.textContent = 'Saved for all accounts';
+        statusEl.style.display = '';
+        statusEl.style.color = '#1db954';
+        setTimeout(() => { statusEl.style.display = 'none'; }, 3000);
+    } catch (err) {
+        statusEl.textContent = err.message;
+        statusEl.style.display = '';
+        statusEl.style.color = '#ef4444';
+        setTimeout(() => { statusEl.style.display = 'none'; }, 5000);
+    }
 }
 
 function updateSettingsAvatar(user) {
@@ -7362,6 +7539,9 @@ document.addEventListener('DOMContentLoaded', async () => {
     document.getElementById('modal-close').addEventListener('click', closeModal);
     document.getElementById('modal-cancel').addEventListener('click', closeModal);
     document.getElementById('modal-submit').addEventListener('click', submitSingle);
+    document.getElementById('modal-batch-input').addEventListener('input', (e) => {
+        updateModalLinkPreview(e.target.value);
+    });
     document.getElementById('add-link-modal').addEventListener('click', (e) => {
         if (e.target.classList.contains('modal-overlay')) closeModal();
     });
@@ -7464,6 +7644,7 @@ document.addEventListener('DOMContentLoaded', async () => {
             handleGroupSelection(groupId, e);
             state.isCreatingGroup = false;
             clearRowSelection();
+            updateAddLinkAvailability();
             // If currently on Settings or Users tab, navigate back to Link Checker
             if (state.currentView !== 'linkchecker') {
                 switchToView('linkchecker');
@@ -7836,6 +8017,7 @@ document.addEventListener('DOMContentLoaded', async () => {
 
     // Settings event listeners
     document.getElementById('settings-save-profile')?.addEventListener('click', handleSaveProfile);
+    document.getElementById('settings-save-global')?.addEventListener('click', handleSaveGlobalSettings);
     document.getElementById('settings-change-pw')?.addEventListener('click', handleChangePassword);
     document.getElementById('settings-avatar-input')?.addEventListener('change', (e) => {
         if (e.target.files[0]) handleAvatarUpload(e.target.files[0]);

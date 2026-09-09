@@ -115,6 +115,11 @@ async def crawl(
         if req.group is not None:
             item.group = requested_group
     else:
+        if requested_group is None:
+            raise HTTPException(
+                status_code=400,
+                detail="Select a group before adding a new link",
+            )
         existing_item = await _find_existing_owned_item(
             db=db,
             current_user=current_user,
@@ -201,6 +206,11 @@ async def crawl_batch(
             if req.group is not None:
                 item.group = requested_group
         else:
+            if requested_group is None:
+                raise HTTPException(
+                    status_code=400,
+                    detail="Select a group before adding new links",
+                )
             existing_item = await _find_existing_owned_item(
                 db=db,
                 current_user=current_user,

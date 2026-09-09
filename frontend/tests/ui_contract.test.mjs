@@ -165,6 +165,35 @@ test("search matches spotify links and URIs", () => {
   assert.match(appJs, /items = items\.filter\(\(i\) => doesItemMatchSearchQuery\(i, state\.searchQuery\)\)/);
 });
 
+test("add-link modal shows detected Spotify type and ID before submit", () => {
+  assert.match(indexHtml, /id="modal-link-preview"/);
+  assert.match(indexHtml, /id="modal-link-preview-count"/);
+  assert.match(appJs, /const SPOTIFY_TYPE_LABELS = Object\.freeze/);
+  assert.match(appJs, /function updateModalLinkPreview\(rawInput = ''\)/);
+  assert.match(appJs, /getSpotifyTypeLabel\(parsed\.type\)/);
+  assert.match(appJs, /recognizedCount/);
+  assert.match(appJs, /modal-batch-input.*addEventListener\('input'/s);
+});
+
+test("playlist clipboard uses the global admin line limit", () => {
+  assert.match(appJs, /globalPreferences:/);
+  assert.match(appJs, /saveAdminPreferences\(preferences = \{\}\)/);
+  assert.match(appJs, /function getPlaylistClipboardLineLimit\(\)/);
+  assert.match(appJs, /function getClipboardRowsForAction\(action, rows\)/);
+  assert.match(appJs, /action !== 'clipboard-playlist-type3'/);
+  assert.match(appJs, /sourceRows\.slice\(0, getPlaylistClipboardLineLimit\(\)\)/);
+  assert.match(indexHtml, /id="settings-global-export"/);
+  assert.match(indexHtml, /id="settings-playlist-clipboard-limit"/);
+  assert.match(appJs, /settings-save-global/);
+});
+
+test("All Links blocks adding new links", () => {
+  assert.match(appJs, /function updateAddLinkAvailability\(\)/);
+  assert.match(appJs, /state\.activeGroup !== ALL_GROUP_ID/);
+  assert.match(appJs, /Select a group before adding links/);
+  assert.match(indexHtml, /id="btn-empty-add-link"/);
+});
+
 test("checked column exposes filter controls for error cleanup", () => {
   assert.match(appJs, /const CHECKED_SORT_MODES = Object\.freeze/);
   assert.match(appJs, /function ensureCheckedSortControls/);

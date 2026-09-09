@@ -25,5 +25,8 @@ Operational notes:
 - Persistent business data lives in PostgreSQL (`postgres_data` volume).
 - Caddy manages the origin certificate once the public domain resolves to this VPS.
 - After installing the helper wrapper, day-to-day commands can use `spoticheck status|logs|backup|redeploy|update|set-admin`.
+- GitHub `main` is the deployment source of truth. The normal release flow is: test locally, commit and push to GitHub, SSH to the VPS, then run `spoticheck update`.
+- `spoticheck update` fetches `origin/main`, pulls the latest commit, and runs the Compose redeploy. It should be used instead of manually copying source files to the VPS.
+- To restore a known version, inspect `git log` on GitHub, check out or revert the desired commit in a controlled local branch, push the release commit, then run `spoticheck update` on the VPS.
 - `scripts/migrate_from_database_url.sh` expects a real source PostgreSQL URL in `SOURCE_DATABASE_URL`; this is intended for Railway or any other external PostgreSQL source.
 - `spoticheck set-admin [--current <old_admin>] [--username <new_admin>] [--password <new_password>]` rotates the persisted admin login in PostgreSQL. If `--current` is omitted, the script auto-selects the only admin account. If `--password` is omitted, the script prompts securely.

@@ -44,7 +44,7 @@ def test_crawl_skips_duplicate_for_same_user(monkeypatch):
         monkeypatch.setattr(crawl_api, "_find_existing_owned_item", fake_find_existing_owned_item)
 
         response = await crawl_api.crawl(
-            CrawlRequest(url="https://open.spotify.com/track/abc123"),
+            CrawlRequest(url="https://open.spotify.com/track/abc123", group="Test"),
             db=db,
             current_user=current_user,
         )
@@ -88,7 +88,8 @@ def test_crawl_batch_skips_duplicates_and_preserves_created_job_mapping(monkeypa
                 urls=[
                     "https://open.spotify.com/track/dup001",
                     "https://open.spotify.com/track/new002",
-                ]
+                ],
+                group="Test",
             ),
             db=db,
             current_user=current_user,
@@ -100,6 +101,27 @@ def test_crawl_batch_skips_duplicates_and_preserves_created_job_mapping(monkeypa
         assert response.skipped_duplicates == 1
         assert db.commit_calls == 1
         assert len(scheduled) == 1
+
+    asyncio.run(run())
+
+
+def test_crawl_rejects_new_link_without_group():
+    async def run():
+        current_user = SimpleNamespace(id=uuid.uuid4(), role="user")
+        db = FakeDB()
+
+        try:
+            await crawl_api.crawl(
+                CrawlRequest(url="https://open.spotify.com/track/new003"),
+                db=db,
+                current_user=current_user,
+            )
+        except Exception as exc:
+            assert isinstance(exc, crawl_api.HTTPException)
+            assert exc.status_code == 400
+            assert exc.detail == "Select a group before adding a new link"
+        else:
+            raise AssertionError("Expected group selection to be required")
 
     asyncio.run(run())
 

@@ -417,6 +417,8 @@ async def _fetch_playlist_via_pathfinder(playlist_id: str) -> dict[str, Any] | N
             break
 
         next_offset = _safe_int((content.get("pagingInfo") or {}).get("nextOffset"))
+        if next_offset is None and items:
+            next_offset = current_offset + len(items)
         if next_offset is None or next_offset <= current_offset:
             break
 

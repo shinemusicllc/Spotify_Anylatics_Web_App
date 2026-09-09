@@ -112,3 +112,51 @@ def test_row_order_keys_parse_uuid_id_prefixes():
     assert indexes[first] == 0
     assert indexes[second] == 2
     assert len(indexes) == 2
+
+
+def test_item_search_matches_full_spotify_url_by_type_and_id():
+    admin = SimpleNamespace(id=uuid.uuid4(), role="admin")
+
+    query = items_api._apply_item_scope(
+        items_api.select(items_api.Item),
+        admin,
+        search="https://open.spotify.com/playlist/37i9dQZF1DWV7EzJMK2FUI?si=test",
+    )
+    compiled = str(query)
+
+    assert "items.item_type = :item_type_1" in compiled
+    assert "items.spotify_id = :spotify_id_1" in compiled
+
+
+def test_playlist_export_refetches_incomplete_cached_tracks(monkeypatch):
+    async def run():
+        item = SimpleNamespace(item_type="playlist", spotify_id="playlist123")
+        raw_map = {
+            "playlist123": {
+                "tracks": [{"name": "cached"}] * 100,
+                "tracks_expected": 367,
+                "deep_crawl_complete": False,
+            }
+        }
+        calls = []
+
+        async def fake_fetch_playlist(playlist_id):
+            calls.append(playlist_id)
+            return {
+                "tracks": [{"name": "fresh"}] * 367,
+                "tracks_expected": 367,
+                "deep_crawl_complete": True,
+            }
+
+        monkeypatch.setattr(items_api.spotify_client, "fetch_playlist", fake_fetch_playlist)
+        result = await items_api._hydrate_raw_for_export(
+            "playlist-type3",
+            [item],
+            raw_map,
+            True,
+        )
+
+        assert calls == ["playlist123"]
+        assert len(result["playlist123"]["tracks"]) == 367
+
+    asyncio.run(run())

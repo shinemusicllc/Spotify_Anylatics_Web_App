@@ -257,3 +257,39 @@
 - Changed: `/api/items` applies saved row order from `ui_preferences` for unsorted paged lists when the stored order covers the current scope.
 - Affected files: `backend/app/api/items.py`, `backend/tests/test_items_move.py`, `frontend/app.js`, `frontend/index.html`, `frontend/tests/ui_contract.test.mjs`, `docs/CHANGELOG.md`
 - Impact/Risk: Medium; this restores custom row order after virtual paging without changing response payload keys.
+### 2026-09-09 09:05 - Diagnose playlist duplicate versus URL search mismatch
+- Added: no code or data changes; recorded the live diagnosis.
+- Changed: confirmed playlist `37i9dQZF1DWV7EzJMK2FUI` exists for user `admin` and duplicate detection is behaving as designed.
+- Fixed: no runtime fix in this diagnostic task; identified that backend search does not normalize full Spotify URLs before querying stored IDs.
+- Affected files: `docs/WORKLOG.md`, `docs/CHANGELOG.md`
+- Impact/Risk: Low; pasted full URLs can still show an empty search result until backend URL normalization is implemented.
+### 2026-09-09 09:05 - Fix URL-aware Spotify search and add-link recognition
+- Added: add-link modal preview showing `Playlist`, `Track`, `Album`, or `Artist`, parsed Spotify ID, and invalid-line status before submit.
+- Changed: backend item and summary searches now recognize full Spotify URLs and Spotify URIs by parsing `type + spotify_id`.
+- Fixed: searching `https://open.spotify.com/playlist/37i9dQZF1DWV7EzJMK2FUI` now returns the existing admin item instead of showing a false empty result.
+- Affected files: `backend/app/api/items.py`, `backend/tests/test_items_move.py`, `frontend/app.js`, `frontend/index.html`, `frontend/tests/ui_contract.test.mjs`, `docs/WORKLOG.md`, `docs/CHANGELOG.md`
+- Impact/Risk: Low; duplicate detection remains per-user and the live app was rebuilt without changing database contents.
+### 2026-09-09 09:05 - Add global clipboard line setting and lock All Links creation
+- Added: admin-only global setting for playlist clipboard line count, persisted in the new `app_settings` table and applied to all accounts.
+- Changed: `Clipboard (Playlist)` now copies up to the configured number of track lines; settings UI validates values from `1` to `2000`.
+- Fixed: `All Links` is now a monitoring-only scope for new creation; the UI disables add controls there and backend crawl endpoints reject new ungrouped links.
+- Affected files: `backend/app/models/app_setting.py`, `backend/app/models/__init__.py`, `backend/app/api/auth.py`, `backend/app/api/crawl.py`, `frontend/app.js`, `frontend/index.html`, tests, and project docs.
+- Impact/Risk: Medium; users must select an explicit group before adding new links, while existing data and refresh flows are preserved. The VPS rollout completed with `deploy-app-1` healthy.
+### 2026-09-09 09:57 - Fix playlist export using incomplete cached track data
+- Added: regression coverage for refetching a playlist whose cached track page is incomplete.
+- Changed: export hydration now checks `tracks_expected`/`track_count` and `deep_crawl_complete` before reusing cached playlist tracks.
+- Fixed: a playlist with `367` tracks cached as only `100` no longer exports just the first `100`; it is refetched before the configured clipboard limit is applied.
+- Affected files: `backend/app/api/items.py`, `backend/tests/test_items_move.py`, `docs/WORKLOG.md`, `docs/CHANGELOG.md`
+- Impact/Risk: Low; incomplete playlist exports are more accurate and may issue additional Spotify requests.
+### 2026-09-09 10:10 - Fix Pathfinder playlist pagination without `nextOffset`
+- Added: regression coverage for multi-page Pathfinder playlist responses that omit `nextOffset`.
+- Changed: playlist pagination derives the next offset from the current page size when the response has no explicit `nextOffset`.
+- Fixed: live export for the `367`-track playlist now returns `367` rows instead of `100`; the frontend applies the admin-configured `200`-line clipboard cap afterward.
+- Affected files: `backend/app/services/spotify_client.py`, `backend/tests/test_spotify_playlist.py`, `docs/WORKLOG.md`, `docs/CHANGELOG.md`
+- Impact/Risk: Low; playlist fetches now continue across all available pages up to `PLAYLIST_MAX_TRACKS`.
+### 2026-09-09 10:15 - Standardize GitHub-first SpotiCheck deployment
+- Added: deployment documentation covering GitHub `main` as source of truth, `spoticheck update` as the release command, and controlled rollback through Git history.
+- Changed: recorded why earlier hotfixes were copied directly to the VPS and clarified that this is no longer the standard release path.
+- Fixed: no runtime behavior changed; deployment drift is now explicitly documented for future operations.
+- Affected files: `deploy/README.md`, `docs/DECISIONS.md`, `docs/DECISIONS_INDEX.md`, `docs/WORKLOG.md`, `docs/CHANGELOG.md`
+- Impact/Risk: Low; this improves release traceability without including `.env` secrets or database volumes in Git.
