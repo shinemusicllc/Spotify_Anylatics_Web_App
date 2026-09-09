@@ -4,7 +4,7 @@
     reverse_proxy app:8000
 }
 
-video.jazzrelaxation.com {
+video.lushmedia.net {
     encode zstd gzip
 
     reverse_proxy lushvideo-app:8000
@@ -22,4 +22,57 @@ lush.congmail.top {
     encode zstd gzip
 
     reverse_proxy lushtempmail-app:8010
+}
+
+ytb.jazzrelaxation.com {
+    encode zstd gzip
+
+    reverse_proxy host.docker.internal:8000
+}
+
+ytm.jazzrelaxation.com {
+    encode zstd gzip
+
+    reverse_proxy ytm-app:8000
+}
+
+# Meta Ads Copilot application authentication
+http://82.197.71.6 {
+    redir https://ads.lushmedia.net{uri} permanent
+}
+
+ads.lushmedia.net {
+    header {
+        -Server
+        Referrer-Policy same-origin
+        X-Content-Type-Options nosniff
+        X-Frame-Options DENY
+    }
+    encode zstd gzip
+    reverse_proxy host.docker.internal:8021
+}
+
+hermes.ads.lushmedia.net {
+    header {
+        -Server
+        Referrer-Policy same-origin
+        X-Content-Type-Options nosniff
+        X-Frame-Options DENY
+    }
+    encode zstd gzip
+    route {
+        @hermes_websocket header Upgrade websocket
+        reverse_proxy @hermes_websocket host.docker.internal:9119 {
+            # Hermes validates WebSocket Host + Origin against its private bind.
+            header_up Host 172.17.0.1:9119
+            header_up Origin http://172.17.0.1:9119
+            header_up X-Forwarded-Host {host}
+            header_up X-Forwarded-Proto {scheme}
+        }
+        reverse_proxy host.docker.internal:9119 {
+            header_up Host 172.17.0.1:9119
+            header_up X-Forwarded-Host {host}
+            header_up X-Forwarded-Proto {scheme}
+        }
+    }
 }
