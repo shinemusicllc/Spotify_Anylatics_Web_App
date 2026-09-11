@@ -2784,20 +2784,21 @@ function populateGroupSelect() {
     var wrap = document.getElementById('modal-group-select-wrap');
     if (!wrap) return;
 
-    var options = [{value: GROUP_SELECT_ALL, label: ALL_GROUP_LABEL + ' (Default)'}];
+    var options = [];
     for (var i = 0; i < state.groups.length; i++) {
         var g = state.groups[i];
         if (g.id === ALL_GROUP_ID) continue;
         options.push({value: g.id, label: g.displayName || g.name});
     }
 
-    var selectedValue = GROUP_SELECT_ALL;
+    var selectedValue = null;
     if (state.activeGroup && state.activeGroup !== ALL_GROUP_ID) {
         var hasActive = options.some(function(opt) {
             return String(opt.value) === String(state.activeGroup);
         });
         if (hasActive) selectedValue = state.activeGroup;
     }
+    if (!selectedValue && options.length) selectedValue = options[0].value;
 
     // Check if dropdown already exists
     var existing = document.getElementById('modal-group-select-dropdown');
@@ -5982,7 +5983,7 @@ async function submitSingle() {
                 user_name: currentIdentity.name,
                 user_avatar: currentIdentity.avatar,
             };
-            state.items.unshift(newItem);
+            state.items.push(newItem);
             state.pendingJobToItem.set(jobId, newItem.id);
             state.pendingJobs.add(jobId);
             mappedJobs += 1;

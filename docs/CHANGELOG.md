@@ -275,6 +275,12 @@
 - Fixed: `All Links` is now a monitoring-only scope for new creation; the UI disables add controls there and backend crawl endpoints reject new ungrouped links.
 - Affected files: `backend/app/models/app_setting.py`, `backend/app/models/__init__.py`, `backend/app/api/auth.py`, `backend/app/api/crawl.py`, `frontend/app.js`, `frontend/index.html`, tests, and project docs.
 - Impact/Risk: Medium; users must select an explicit group before adding new links, while existing data and refresh flows are preserved. The VPS rollout completed with `deploy-app-1` healthy.
+### 2026-09-11 10:20 - Lock All Links creation and append new links to list end
+- Added: regression coverage for group-only creation and stable append ordering.
+- Changed: add modal no longer offers `All Links`; default backend list order uses `created_at ASC` plus `id ASC`, and optimistic new rows append instead of prepend.
+- Fixed: users cannot create new ungrouped links through the UI or crawl API, and new links no longer jump to the top due to `updated_at`.
+- Affected files: `frontend/app.js`, `frontend/index.html`, `backend/app/api/items.py`, `backend/tests/test_items_move.py`, `frontend/tests/ui_contract.test.mjs`, docs.
+- Impact/Risk: Medium; existing unsorted lists may reorder to oldest-created first, while explicit sort controls and manual row ordering continue to work.
 ### 2026-09-09 09:57 - Fix playlist export using incomplete cached track data
 - Added: regression coverage for refetching a playlist whose cached track page is incomplete.
 - Changed: export hydration now checks `tracks_expected`/`track_count` and `deep_crawl_complete` before reusing cached playlist tracks.

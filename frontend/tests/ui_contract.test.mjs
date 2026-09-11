@@ -192,6 +192,14 @@ test("All Links blocks adding new links", () => {
   assert.match(appJs, /state\.activeGroup !== ALL_GROUP_ID/);
   assert.match(appJs, /Select a group before adding links/);
   assert.match(indexHtml, /id="btn-empty-add-link"/);
+  assert.doesNotMatch(appJs, /value: GROUP_SELECT_ALL, label: ALL_GROUP_LABEL/);
+});
+
+test("new links append to the end of the current list", () => {
+  assert.match(appJs, /state\.items\.push\(newItem\)/);
+  assert.doesNotMatch(appJs, /state\.items\.unshift\(newItem\)/);
+  assert.match(appJs, /function populateGroupSelect\(\)/);
+  assert.match(appJs, /var options = \[\]/);
 });
 
 test("checked column exposes filter controls for error cleanup", () => {

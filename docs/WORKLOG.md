@@ -412,6 +412,13 @@
 - Verification: frontend syntax pass, frontend contract tests `23/23`, backend tests `21/21`, `deploy-app-1` healthy, `app_settings` table created, and public `/api/health` returns `status=ok`.
 - Impact/Risk: Medium; new links can no longer be created without a group, while refresh operations and existing items remain unaffected.
 
+### Task: Lock All Links creation and append new links to list end
+
+- Status: implemented locally; deployment pending.
+- Actions: removed `All Links (Default)` from the add modal group options, kept UI/modal/backend guards against ungrouped creation, changed optimistic insertion to `push`, and changed default backend ordering to `created_at ASC` with UUID tie-breaker.
+- Verification: frontend tests `24/24`, backend tests `24/24`, JS syntax pass, and `git diff --check` pass.
+- Impact/Risk: Medium; default ordering of existing unsorted lists changes to oldest-created first so new links have stable end placement; explicit/manual sorting remains available.
+
 ### Task: Fix playlist export using incomplete cached track data
 
 - Status: done and deployed.

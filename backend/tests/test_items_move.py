@@ -128,6 +128,19 @@ def test_item_search_matches_full_spotify_url_by_type_and_id():
     assert "items.spotify_id = :spotify_id_1" in compiled
 
 
+def test_default_item_sort_places_new_items_at_the_end():
+    user = SimpleNamespace(id=uuid.uuid4(), role="user", ui_preferences=None)
+
+    query = items_api._apply_item_sort(
+        items_api.select(items_api.Item),
+        user,
+    )
+    compiled = str(query)
+
+    assert "items.created_at ASC" in compiled
+    assert "items.id ASC" in compiled
+
+
 def test_playlist_export_refetches_incomplete_cached_tracks(monkeypatch):
     async def run():
         item = SimpleNamespace(item_type="playlist", spotify_id="playlist123")

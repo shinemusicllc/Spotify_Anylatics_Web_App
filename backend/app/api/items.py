@@ -187,9 +187,9 @@ def _apply_item_sort(
     row_order_indexes = _row_order_uuid_indexes(_load_row_order_keys(current_user))
     if total and len(row_order_indexes) >= total:
         custom_order_expr = case(row_order_indexes, value=Item.id, else_=len(row_order_indexes))
-        return query.order_by(custom_order_expr.asc(), Item.updated_at.desc())
+        return query.order_by(custom_order_expr.asc(), Item.created_at.asc().nullslast(), Item.id.asc())
 
-    return query.order_by(Item.updated_at.desc())
+    return query.order_by(Item.created_at.asc().nullslast(), Item.id.asc())
 
 
 def _spotify_url(item_type: str, spotify_id: str) -> str:
