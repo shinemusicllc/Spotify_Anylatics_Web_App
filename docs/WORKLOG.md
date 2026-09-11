@@ -419,6 +419,14 @@
 - Verification: frontend tests `24/24`, backend tests `24/24`, JS syntax pass, and `git diff --check` pass.
 - Impact/Risk: Medium; default ordering of existing unsorted lists changes to oldest-created first so new links have stable end placement; explicit/manual sorting remains available.
 
+### Task: Preserve dragged row order when stored preferences are incomplete
+
+- Status: implemented locally; deployment pending.
+- Findings: the admin `row_order` had `12` keys for a `13`-row scope, so backend custom ordering was skipped and a drag appeared to revert after reload.
+- Fixed: row-order persistence now removes temporary keys, merges missing stable row IDs, and uses the complete loaded list as the base when stored preferences do not cover the current scope.
+- Verification: frontend tests `25/25`, backend tests `24/24`, and JS syntax pass.
+- Impact/Risk: Low; existing row order is preserved where complete, and missing rows are appended deterministically before a new drag is saved.
+
 ### Task: Fix playlist export using incomplete cached track data
 
 - Status: done and deployed.

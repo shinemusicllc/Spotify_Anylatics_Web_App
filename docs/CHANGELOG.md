@@ -281,6 +281,12 @@
 - Fixed: users cannot create new ungrouped links through the UI or crawl API, and new links no longer jump to the top due to `updated_at`.
 - Affected files: `frontend/app.js`, `frontend/index.html`, `backend/app/api/items.py`, `backend/tests/test_items_move.py`, `frontend/tests/ui_contract.test.mjs`, docs.
 - Impact/Risk: Medium; existing unsorted lists may reorder to oldest-created first, while explicit sort controls and manual row ordering continue to work.
+### 2026-09-11 10:45 - Preserve dragged row order when stored preferences are incomplete
+- Added: regression coverage for missing row-order keys during drag persistence.
+- Changed: frontend row-order persistence now merges stable current rows and avoids saving temporary crawl IDs.
+- Fixed: a drag no longer reverts when the stored order covers fewer rows than the active group; the complete loaded list becomes the persistence base.
+- Affected files: `frontend/app.js`, `frontend/index.html`, `frontend/tests/ui_contract.test.mjs`, `docs/WORKLOG.md`, `docs/CHANGELOG.md`
+- Impact/Risk: Low; this affects only persisted display ordering and does not change item data or ownership.
 ### 2026-09-09 09:57 - Fix playlist export using incomplete cached track data
 - Added: regression coverage for refetching a playlist whose cached track page is incomplete.
 - Changed: export hydration now checks `tracks_expected`/`track_count` and `deep_crawl_complete` before reusing cached playlist tracks.

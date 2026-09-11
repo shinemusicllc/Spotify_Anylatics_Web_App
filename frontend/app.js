@@ -1427,16 +1427,50 @@ function applyPersistedItemOrder(items) {
 function persistCurrentItemOrder() {
     const loadedVirtualItems = getLoadedVirtualItems();
     if (state.listTotal > 0 && loadedVirtualItems.length >= state.listTotal) {
-        savePersistedRowOrder(loadedVirtualItems.map((item) => selectionKey(item)));
+        savePersistedRowOrder(getStableRowOrderKeys(loadedVirtualItems));
         return;
     }
-    savePersistedRowOrder(state.items.map((item) => selectionKey(item)));
+    const currentKeys = getStableRowOrderKeys(state.items);
+    const existingOrder = cleanPersistedRowOrder(loadPersistedRowOrder());
+    savePersistedRowOrder(mergeRowOrderKeys(existingOrder, currentKeys));
+}
+
+function getStableRowOrderKeys(items) {
+    return (items || [])
+        .filter((item) => item?.id && !String(item.id).startsWith('temp-'))
+        .map((item) => selectionKey(item))
+        .filter(Boolean);
+}
+
+function cleanPersistedRowOrder(keys) {
+    return Array.from(new Set((keys || []).filter((key) => {
+        const value = String(key || '');
+        return value && !value.includes('temp-');
+    })));
+}
+
+function mergeRowOrderKeys(existingOrder, currentKeys) {
+    const merged = cleanPersistedRowOrder(existingOrder);
+    const seen = new Set(merged);
+    (currentKeys || []).forEach((key) => {
+        if (!key || seen.has(key)) return;
+        seen.add(key);
+        merged.push(key);
+    });
+    return merged;
 }
 
 function persistMovedItemOrder(draggedKeys, targetKey, placement = 'before') {
     const movedKeys = Array.from(new Set((draggedKeys || []).filter(Boolean)));
     const movedSet = new Set(movedKeys);
-    const existingOrder = loadPersistedRowOrder();
+    const loadedItems = getLoadedVirtualItems();
+    const currentKeys = getStableRowOrderKeys(loadedItems.length ? loadedItems : state.items);
+    const storedOrder = cleanPersistedRowOrder(loadPersistedRowOrder());
+    const hasCompleteCurrentList = state.listTotal > 0 && loadedItems.length >= state.listTotal;
+    const storedOrderCoversCurrentList = currentKeys.every((key) => storedOrder.includes(key));
+    const existingOrder = hasCompleteCurrentList && !storedOrderCoversCurrentList
+        ? currentKeys
+        : mergeRowOrderKeys(storedOrder, currentKeys);
     if (
         existingOrder.length
         && targetKey
@@ -1451,7 +1485,7 @@ function persistMovedItemOrder(draggedKeys, targetKey, placement = 'before') {
             return;
         }
     }
-    persistCurrentItemOrder();
+    savePersistedRowOrder(existingOrder);
 }
 
 function syncSelectedItemsWithState() {

@@ -202,6 +202,15 @@ test("new links append to the end of the current list", () => {
   assert.match(appJs, /var options = \[\]/);
 });
 
+test("row drag persists a complete order when stored preferences miss rows", () => {
+  assert.match(appJs, /function getStableRowOrderKeys\(items\)/);
+  assert.match(appJs, /function mergeRowOrderKeys\(existingOrder, currentKeys\)/);
+  assert.match(appJs, /const hasCompleteCurrentList = state\.listTotal > 0/);
+  assert.match(appJs, /storedOrderCoversCurrentList/);
+  assert.match(appJs, /const existingOrder = hasCompleteCurrentList && !storedOrderCoversCurrentList/);
+  assert.match(appJs, /savePersistedRowOrder\(existingOrder\)/);
+});
+
 test("checked column exposes filter controls for error cleanup", () => {
   assert.match(appJs, /const CHECKED_SORT_MODES = Object\.freeze/);
   assert.match(appJs, /function ensureCheckedSortControls/);
